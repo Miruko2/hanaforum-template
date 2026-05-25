@@ -1,10 +1,13 @@
 /** @type {import('next').NextConfig} */
+const isCapacitor = process.env.CAPACITOR_BUILD === 'true'
+
 const nextConfig = {
   // 基础配置
   reactStrictMode: false,
   swcMinify: true,
-  
-  // Vercel 部署：使用服务端渲染，支持 API 路由
+
+  // Capacitor 构建时使用静态导出
+  ...(isCapacitor && { output: 'export', trailingSlash: true }),
   
   // 禁用不兼容的功能
   eslint: {

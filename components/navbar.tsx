@@ -8,6 +8,7 @@ import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { LogOut, User, Settings, Menu, X } from "lucide-react"
 import AppLink from "@/components/app-link"
 import { navigateTo } from "@/lib/app-navigation"
+import { supabase } from "@/lib/supabaseClient"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -25,11 +26,48 @@ export default function Navbar() {
   const [isNavVisible, setIsNavVisible] = useState(true)
   const [lastScrollY, setLastScrollY] = useState(0)
   const [isScrolled, setIsScrolled] = useState(false)
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
   
   // 确保组件在客户端渲染
   useEffect(() => {
     setMounted(true)
   }, [])
+
+  // 获取用户头像
+  useEffect(() => {
+    if (!user?.id) {
+      console.log('Navbar: 用户未登录，清除头像')
+      setAvatarUrl(null)
+      return
+    }
+
+    console.log('Navbar: 开始获取头像，用户ID:', user.id)
+
+    const fetchAvatar = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("profiles")
+          .select("avatar_url")
+          .eq("id", user.id)
+          .single()
+
+        console.log('Navbar: 查询结果:', { data, error })
+
+        if (!error && data?.avatar_url) {
+          console.log('Navbar: 找到头像URL:', data.avatar_url)
+          setAvatarUrl(data.avatar_url)
+        } else {
+          console.log('Navbar: 未找到头像或查询出错')
+          setAvatarUrl(null)
+        }
+      } catch (err) {
+        console.error('Navbar: 获取头像异常:', err)
+        setAvatarUrl(null)
+      }
+    }
+
+    fetchAvatar()
+  }, [user?.id])
 
   // 处理导航方法
   const handleNavigation = (path: string) => {
@@ -158,9 +196,17 @@ export default function Navbar() {
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" className="relative h-8 w-8 rounded-full">
-                    <div className="flex h-full w-full items-center justify-center rounded-full bg-lime-900/30 text-lime-400">
-                      {user.user_metadata?.username?.[0]?.toUpperCase() || user.email?.[0]?.toUpperCase() || "U"}
-                    </div>
+                    {avatarUrl ? (
+                      <img
+                        src={avatarUrl}
+                        alt="用户头像"
+                        className="h-full w-full rounded-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center rounded-full bg-lime-900/30 text-lime-400">
+                        {user.user_metadata?.username?.[0]?.toUpperCase() || user.email?.[0]?.toUpperCase() || "U"}
+                      </div>
+                    )}
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-56">

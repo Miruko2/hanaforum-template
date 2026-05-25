@@ -177,15 +177,24 @@ export default function LiveWallContent() {
         } else {
           const errData = await res.json().catch(() => ({}))
           if (res.status === 403) {
+            const isCloudflareBlock = !errData.error?.includes("白名单")
             toast({
-              title: "无权限",
-              description: errData.error || "你没有与 hanako 对话的权限，请联系管理员获取",
+              title: isCloudflareBlock ? "请求被拦截" : "无权限",
+              description: isCloudflareBlock
+                ? "Cloudflare 安全规则拦截了请求，请检查 Bot Fight Mode 或 WAF 设置"
+                : errData.error || "你没有与 hanako 对话的权限，请联系管理员获取",
               variant: "destructive",
             })
           } else if (res.status === 429 && errData.error) {
             toast({
               title: "hanako 正忙",
               description: errData.error,
+              variant: "destructive",
+            })
+          } else {
+            toast({
+              title: `AI 服务错误 (${res.status})`,
+              description: errData.error || "请稍后重试",
               variant: "destructive",
             })
           }
