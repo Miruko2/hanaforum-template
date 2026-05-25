@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
-import { checkRateLimit, startCall, endCall } from "@/lib/hanako/rate-limit"
+import rateLimiter from "@/lib/hanako/rate-limit"
 import { HANAKO_SYSTEM_PROMPT, buildUserMessage } from "@/lib/hanako/prompt"
 import {
   HANAKO_USER_ID,
@@ -23,6 +23,19 @@ export async function POST(req: NextRequest) {
   let userId = ""
 
   try {
+    // 调试日志：记录 Cloudflare 相关头，用于排查 403 来源
+    const cfRay = req.headers.get("cf-ray")
+    const cfConnectingIp = req.headers.get("cf-connecting-ip")
+    const cfVisitor = req.headers.get("cf-visitor")
+    const userAgent = req.headers.get("user-agent")
+    console.log("[Hanako] 收到请求:", {
+      cfRay,
+      cfConnectingIp,
+      cfVisitor,
+      userAgent,
+      url: req.url,
+    })
+
     const body = await req.json()
     const parsed = body as {
       userId: string
@@ -33,6 +46,7 @@ export async function POST(req: NextRequest) {
     userId = parsed.userId
 
     if (!parsed.userId || !parsed.username || !parsed.content) {
+      console.warn("[Hanako] 缺少必要参数:", { userId: parsed.userId, username: parsed.username, content: parsed.content })
       return NextResponse.json({ error: "缺少必要参数" }, { status: 400 })
     }
 
@@ -49,16 +63,21 @@ export async function POST(req: NextRequest) {
 
     // 如果白名单表存在且用户不在白名单中，拒绝访问
     if (!allowedUsers) {
-      return NextResponse.json({ error: "你没有与 hanako 对话的权限" }, { status: 403 })
+      console.warn("[Hanako] 白名单拒绝:", { userId: parsed.userId })
+      return NextResponse.json(
+        { error: "你没有与 hanako 对话的权限（白名单检查未通过）" },
+        { status: 403 },
+      )
     }
+    console.log("[Hanako] 白名单通过:", { userId: parsed.userId })
 
     // 限流检查
-    const rateCheck = checkRateLimit(parsed.userId)
+    const rateCheck = rateLimiter.checkRateLimit(parsed.userId)
     if (!rateCheck.allowed) {
       return NextResponse.json({ error: rateCheck.reason }, { status: 429 })
     }
 
-    startCall(parsed.userId)
+    rateLimiter.startCall(parsed.userId)
 
     // 调用 DeepSeek
     const apiKey = process.env.DEEPSEEK_API_KEY
@@ -151,6 +170,6 @@ export async function POST(req: NextRequest) {
       { status: 500 },
     )
   } finally {
-    if (userId) endCall(userId)
+    if (userId) rateLimiter.endCall(userId)
   }
 }

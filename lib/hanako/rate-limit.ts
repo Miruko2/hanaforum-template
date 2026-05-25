@@ -1,62 +1,60 @@
 /**
- * 简单的内存限流器（适用于 serverless 单实例场景）
- * 如果部署到多实例环境，需要换成 Redis 方案
+ * 基于并发数的限流器
+ * - 用户级：同一用户最多同时 N 个 AI 请求在飞
+ * - 全局级：所有用户共享最多 M 个同时在飞请求
+ * 请求进来 +1，完成/失败后 -1
  */
 
 import {
-  USER_COOLDOWN_MS,
-  GLOBAL_WINDOW_MS,
-  GLOBAL_MAX_CALLS,
+  USER_MAX_CONCURRENT,
+  GLOBAL_MAX_CONCURRENT,
 } from "./constants"
 
-/** 每用户上次触发时间 */
-const userLastCall = new Map<string, number>()
+/** 每用户当前在飞请求数 */
+const userInFlight = new Map<string, number>()
 
-/** 全局调用时间戳队列 */
-const globalCalls: number[] = []
-
-/** 清理过期的全局调用记录 */
-function pruneGlobalCalls() {
-  const cutoff = Date.now() - GLOBAL_WINDOW_MS
-  while (globalCalls.length > 0 && globalCalls[0] < cutoff) {
-    globalCalls.shift()
-  }
-}
+/** 全局当前在飞请求数 */
+let globalInFlight = 0
 
 /**
  * 检查是否允许本次 AI 调用
- * @returns { allowed: boolean, reason?: string }
  */
 export function checkRateLimit(userId: string): { allowed: boolean; reason?: string } {
-  const now = Date.now()
-
-  // 用户级冷却
-  const lastCall = userLastCall.get(userId)
-  if (lastCall && now - lastCall < USER_COOLDOWN_MS) {
-    const waitSec = Math.ceil((USER_COOLDOWN_MS - (now - lastCall)) / 1000)
-    return { allowed: false, reason: `请等待 ${waitSec} 秒后再 @hanako` }
+  // 用户级并发
+  const userCount = userInFlight.get(userId) || 0
+  if (userCount >= USER_MAX_CONCURRENT) {
+    return { allowed: false, reason: "你有太多请求正在处理，请等上一条回复完成" }
   }
 
-  // 全局级限流
-  pruneGlobalCalls()
-  if (globalCalls.length >= GLOBAL_MAX_CALLS) {
+  // 全局级并发
+  if (globalInFlight >= GLOBAL_MAX_CONCURRENT) {
     return { allowed: false, reason: "hanako 正在忙，请稍后再试" }
   }
 
   return { allowed: true }
 }
 
-/** 记录一次成功调用 */
-export function recordCall(userId: string) {
-  const now = Date.now()
-  userLastCall.set(userId, now)
-  globalCalls.push(now)
-
-  // 防止内存泄漏：清理超过 5 分钟的用户记录
-  if (userLastCall.size > 500) {
-    const cutoff = now - 5 * 60 * 1000
-    for (const [uid, ts] of userLastCall) {
-      if (ts < cutoff) userLastCall.delete(uid)
-    }
-  }
+/**
+ * 开始一次调用（请求进入时调用，计数 +1）
+ */
+export function startCall(userId: string) {
+  userInFlight.set(userId, (userInFlight.get(userId) || 0) + 1)
+  globalInFlight++
 }
+
+/**
+ * 结束一次调用（请求完成/失败时调用，计数 -1）
+ */
+export function endCall(userId: string) {
+  const count = (userInFlight.get(userId) || 0) - 1
+  if (count <= 0) {
+    userInFlight.delete(userId)
+  } else {
+    userInFlight.set(userId, count)
+  }
+  globalInFlight = Math.max(0, globalInFlight - 1)
+}
+
+// 默认导出对象，防止生产构建 tree-shaking 丢失命名导出
+const rateLimiter = { checkRateLimit, startCall, endCall }
+export default rateLimiter
