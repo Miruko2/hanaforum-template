@@ -16,7 +16,7 @@ const catKey = (c: string | null) => c ?? CACHE_KEY_ALL;
 // 强制清理缓存的函数（清理所有分类）
 export function clearPostsCache() {
   postCacheByCategory.clear();
-  console.log('🧹 PostsContext: 缓存已清理');
+  console.debug('🧹 PostsContext: 缓存已清理');
 }
 
 // 注：不在模块加载时强制清理缓存，10s TTL 已由 loadPosts 负责
@@ -53,7 +53,7 @@ export type PostsAction =
 function postsReducer(state: PostsState, action: PostsAction): PostsState {
   switch (action.type) {
     case 'LOAD_POSTS':
-      console.log('📦 Reducer LOAD_POSTS:', {
+      console.debug('📦 Reducer LOAD_POSTS:', {
         newPostsCount: action.payload.length,
         oldPostsCount: state.posts.length
       });
@@ -168,7 +168,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
         
         // 如果有缓存数据，先显示缓存数据，避免空白页面
         if (cached && cached.posts.length > 0) {
-          console.log('🔄 显示缓存数据，避免空白页面');
+          console.debug('🔄 显示缓存数据，避免空白页面');
           dispatch({ type: 'LOAD_POSTS', payload: cached.posts });
           dispatch({ type: 'SET_HAS_MORE', payload: cached.posts.length >= PAGE_SIZE });
           dispatch({ type: 'SET_LOADING', payload: false });
@@ -195,7 +195,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
         postCacheByCategory.set(cacheKey, { posts: fetchedPosts, time: now });
       }
       
-      console.log('✅ PostsContext: 成功加载帖子', {
+      console.debug('✅ PostsContext: 成功加载帖子', {
         count: fetchedPosts.length,
         hasMore: fetchedPosts.length >= PAGE_SIZE,
         category: currentCategory,
@@ -262,7 +262,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
       const currentCategory = state.category;
       const cacheKey = catKey(currentCategory);
       
-      console.log(`📄 加载第${pageToLoad}页帖子，每页${pageSize}条，分类=${currentCategory ?? '全部'}`);
+      console.debug(`📄 加载第${pageToLoad}页帖子，每页${pageSize}条，分类=${currentCategory ?? '全部'}`);
       const morePosts = await getPostsWithPinned(pageToLoad, pageSize, currentCategory);
       if (morePosts.length === 0) {
         dispatch({ type: 'SET_HAS_MORE', payload: false });
@@ -367,11 +367,11 @@ export function PostsProvider({ children }: { children: ReactNode }) {
       }
       
       lastAuthChangeTime = now;
-      console.log('🔄 PostsContext: 处理认证状态变化');
+      console.debug('🔄 PostsContext: 处理认证状态变化');
       
       // 如果当前有帖子数据，不要立即清空，而是在后台刷新
       if (state.posts.length > 0) {
-        console.log('📝 保持当前帖子显示，后台刷新数据');
+        console.debug('📝 保持当前帖子显示，后台刷新数据');
         // 清除所有分类缓存但保持UI显示
         postCacheByCategory.clear();
         loadingFailed = false;
@@ -391,7 +391,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
     // 检查localStorage变化
     const authRefreshTimestamp = localStorage.getItem('auth_refresh_timestamp');
     if (authRefreshTimestamp && Date.now() - Number(authRefreshTimestamp) < 10000) {
-      console.log('🔄 PostsContext: 检测到认证时间戳刚更新，重载帖子');
+      console.debug('🔄 PostsContext: 检测到认证时间戳刚更新，重载帖子');
       handleAuthChange();
     }
     
@@ -421,7 +421,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
           
           // 使用集合检查帖子是否已存在(更高效)
           if (!existingPostIds.has(newPost.id)) {
-            console.log('收到新帖子:', newPost.id);
+            console.debug('收到新帖子:', newPost.id);
             // 更新本地跟踪集合
             existingPostIds.add(newPost.id);
             addPost(newPost);
@@ -433,7 +433,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
           table: 'posts'
         }, (payload) => {
           const deletedId = payload.old.id as string;
-          console.log('帖子被删除:', deletedId);
+          console.debug('帖子被删除:', deletedId);
           deletePost(deletedId);
         })
         .on('postgres_changes', {
@@ -442,7 +442,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
           table: 'posts'
         }, (payload) => {
           const updatedPost = payload.new as Post;
-          console.log('帖子被更新:', updatedPost.id);
+          console.debug('帖子被更新:', updatedPost.id);
           updatePost(updatedPost.id, updatedPost);
         })
         .subscribe();

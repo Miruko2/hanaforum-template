@@ -37,7 +37,7 @@ export default function LoginForm() {
 
     try {
       setIsLoading(true)
-      console.log('🔐 LoginForm: 开始登录流程...')
+      console.debug('🔐 LoginForm: 开始登录流程...')
       
       const { error } = await signIn(email, password)
 
@@ -45,7 +45,7 @@ export default function LoginForm() {
         console.error('❌ LoginForm: 登录失败:', error.message)
         setError(error.message || "登录失败，请检查您的凭据")
       } else {
-        console.log('✅ LoginForm: 登录成功')
+        console.debug('✅ LoginForm: 登录成功')
         
         // 登录成功后，等待一下让会话状态同步
         await new Promise(resolve => setTimeout(resolve, 500))
@@ -56,7 +56,7 @@ export default function LoginForm() {
         if (sessionError) {
           console.error('❌ LoginForm: 会话检查失败:', sessionError.message)
         } else if (sessionData?.session) {
-          console.log('✅ LoginForm: 会话验证成功:', sessionData.session.user.id)
+          console.debug('✅ LoginForm: 会话验证成功:', sessionData.session.user.id)
           
           // 成功消息
           toast({
@@ -66,7 +66,7 @@ export default function LoginForm() {
           
           // 简化登录后的处理：直接刷新页面到首页
           // 这样可以确保所有状态都是干净的，避免任何缓存或状态问题
-          console.log('🔄 登录成功: 刷新页面到首页');
+          console.debug('🔄 登录成功: 刷新页面到首页');
           window.location.href = '/';
         } else {
           console.warn('⚠️ LoginForm: 登录成功但会话为空')

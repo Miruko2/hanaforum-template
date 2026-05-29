@@ -154,7 +154,7 @@ export function clearAllCaches() {
     }
   }
   
-  console.log('所有缓存已清理')
+  console.debug('所有缓存已清理')
 }
 
 // 智能缓存清理 - 只清理过期或特定类型的缓存
@@ -167,11 +167,11 @@ export function smartClearCache(pattern?: string) {
     // 先清理过期的缓存
     globalCache.clearExpired()
     
-    console.log(`清理了匹配 "${pattern}" 的缓存`)
+    console.debug(`清理了匹配 "${pattern}" 的缓存`)
   } else {
     // 只清理过期缓存
     globalCache.clearExpired()
-    console.log('清理了过期缓存')
+    console.debug('清理了过期缓存')
   }
 }
 

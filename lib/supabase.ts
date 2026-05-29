@@ -315,7 +315,7 @@ export async function createPost({
 // 获取帖子 - 优化批量处理用户数据和点赞/评论计数
 export async function getPosts() {
   try {
-    console.log("从服务器获取最新帖子列表");
+    console.debug("从服务器获取最新帖子列表");
     
     // 获取帖子基本信息
     const { data: posts, error: postsError } = await supabase
@@ -332,11 +332,11 @@ export async function getPosts() {
     }
 
     if (!posts || posts.length === 0) {
-      console.log("没有找到帖子");
+      console.debug("没有找到帖子");
       return [];
     }
     
-    console.log(`成功获取${posts.length}个帖子`);
+    console.debug(`成功获取${posts.length}个帖子`);
     
     // 收集所有帖子ID和用户ID用于批量查询
     const postIds = posts.map(post => post.id);
@@ -643,11 +643,11 @@ export async function createNotification({
   message: string;
 }) {
   try {
-    console.log('尝试创建通知:', { userId, type, postId, commentId, actorId, message });
+    console.debug('尝试创建通知:', { userId, type, postId, commentId, actorId, message });
     
     // 避免给自己发送通知
     if (userId === actorId) {
-      console.log('跳过创建通知: 自己给自己的操作不需要通知');
+      console.debug('跳过创建通知: 自己给自己的操作不需要通知');
       return null;
     }
 
@@ -687,7 +687,7 @@ export async function createNotification({
       throw error;
     }
     
-    console.log('通知创建成功:', data);
+    console.debug('通知创建成功:', data);
     return data;
   } catch (error) {
     console.error('创建通知失败:', error);
@@ -860,7 +860,7 @@ export async function markAllNotificationsAsRead(userId: string) {
 
 // 使用 Supabase Realtime 实现实时通知
 export function subscribeToNotifications(userId: string, callback: (notifications: any[]) => void) {
-  console.log(`为用户 ${userId} 启动实时通知订阅...`);
+  console.debug(`为用户 ${userId} 启动实时通知订阅...`);
   
   // 防抖更新函数，避免频繁重新获取
   let updateTimeout: NodeJS.Timeout | null = null;
@@ -868,7 +868,7 @@ export function subscribeToNotifications(userId: string, callback: (notification
   const fetchAndUpdateNotifications = async () => {
     try {
       const { notifications } = await getUserNotifications(userId);
-      console.log(`已获取到 ${notifications.length} 条通知`);
+      console.debug(`已获取到 ${notifications.length} 条通知`);
       callback(notifications);
     } catch (err) {
       console.error('获取通知失败:', err);
@@ -903,7 +903,7 @@ export function subscribeToNotifications(userId: string, callback: (notification
       debouncedUpdate
     )
     .subscribe((status) => {
-      console.log(`通知订阅状态: ${status}`);
+      console.debug(`通知订阅状态: ${status}`);
       
       // 如果订阅失败，回退到初始加载
       if (status !== 'SUBSCRIBED') {
@@ -914,7 +914,7 @@ export function subscribeToNotifications(userId: string, callback: (notification
   
   // 返回取消订阅的函数
   return () => {
-    console.log('取消通知实时订阅');
+    console.debug('取消通知实时订阅');
     if (updateTimeout) {
       clearTimeout(updateTimeout);
     }
@@ -1014,7 +1014,7 @@ export async function likePost(postId: string, userId: string) {
         message: `${displayUsername} 赞了你的帖子 "${post.title}"`,
       });
     } else {
-      console.log('跳过通知创建:', post ? '用户给自己点赞' : '未找到帖子');
+      console.debug('跳过通知创建:', post ? '用户给自己点赞' : '未找到帖子');
     }
     
     return data?.[0];

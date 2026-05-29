@@ -1,79 +1,32 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo } from "react"
+import { useSearchParams } from "next/navigation"
 import { AnimatePresence } from "framer-motion"
 import PostGrid from "@/components/post-grid"
 import CinemaMode from "@/components/cinema-mode"
-import BackgroundEffects from "@/components/background-effects"
 import FloatingActionButton from "@/components/floating-action-button"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { usePosts } from "@/contexts/posts-context"
+import { useCinemaMode } from "@/contexts/cinema-mode-context"
 import { isValidCategory, CATEGORY_LABELS } from "@/lib/categories"
 import { Loader2 } from "lucide-react"
 import { motion } from "framer-motion"
 
-/** 从当前 URL 的 ?category=xxx 读合法分类值，不合法就返回 null */
-function readCategoryFromURL(): string | null {
-  if (typeof window === "undefined") return null
-  const params = new URLSearchParams(window.location.search)
-  const raw = params.get("category")
-  return isValidCategory(raw) ? raw : null
-}
-
 export default function HomePage() {
-  const { loading, user } = useSimpleAuth()
+  const { loading } = useSimpleAuth()
   const { setCategory, state } = usePosts()
+  const searchParams = useSearchParams()
+  // 影院模式状态由 CinemaModeProvider 统一管理（localStorage / URL ?cinema=1 也在那里）
+  const { cinemaMode } = useCinemaMode()
 
-  // 使用本地 state 跟踪 URL 上的分类（首次渲染从 URL 读）
-  const [activeCategory, setActiveCategory] = useState<string | null>(null)
+  // 从 URL 读 ?category=xxx，useSearchParams 在 URL 变化时自动重渲
+  const activeCategory = useMemo(() => {
+    const raw = searchParams?.get("category") || null
+    return isValidCategory(raw) ? raw : null
+  }, [searchParams])
 
-  // 影院模式开关
-  const [cinemaMode, setCinemaMode] = useState(false)
-
-  // 监听导航栏派发的 cinema-mode-toggle 事件
-  useEffect(() => {
-    const onToggle = (e: Event) => {
-      const detail = (e as CustomEvent<{ on: boolean }>).detail
-      setCinemaMode(!!detail?.on)
-    }
-    window.addEventListener("cinema-mode-toggle", onToggle)
-    return () => window.removeEventListener("cinema-mode-toggle", onToggle)
-  }, [])
-
-  // 同步影院模式状态给导航栏（用于按钮高亮）
-  useEffect(() => {
-    window.dispatchEvent(
-      new CustomEvent("cinema-mode-changed", { detail: { on: cinemaMode } }),
-    )
-  }, [cinemaMode])
-
-  // 读 URL ?cinema=1 参数，自动开启影院模式（从其他页面跳转过来时触发）
-  useEffect(() => {
-    if (typeof window === "undefined") return
-    const params = new URLSearchParams(window.location.search)
-    if (params.get("cinema") === "1") {
-      setCinemaMode(true)
-      // 清掉 URL 里的 cinema 参数，避免刷新后重复触发
-      const url = new URL(window.location.href)
-      url.searchParams.delete("cinema")
-      window.history.replaceState({}, "", url.toString())
-    }
-  }, [])
-
-  // 客户端挂载后读一次 URL，并监听浏览器前进/后退（popstate）
-  useEffect(() => {
-    setActiveCategory(readCategoryFromURL())
-    const onPop = () => setActiveCategory(readCategoryFromURL())
-    window.addEventListener("popstate", onPop)
-    // 自定义事件，让导航栏切换分类时通知到首页（见 navigation.tsx）
-    window.addEventListener("category-changed", onPop)
-    return () => {
-      window.removeEventListener("popstate", onPop)
-      window.removeEventListener("category-changed", onPop)
-    }
-  }, [])
-
-  // 同步到 Context
+  // 同步分类到 PostsContext
   useEffect(() => {
     if (activeCategory !== state.category) {
       setCategory(activeCategory)

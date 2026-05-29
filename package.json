@@ -18,7 +18,11 @@
     "android:dev": "npm run build:capacitor && npx cap run android",
     "android:build": "npm run build:capacitor && npx cap run android --prod",
     "android:open": "npx cap open android",
-    "setup:capacitor": "node scripts/setup-capacitor.js"
+    "setup:capacitor": "node scripts/setup-capacitor.js",
+    "music:refresh": "node scripts/refresh-playlist.mjs",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage"
   },
   "dependencies": {
     "@capacitor/android": "^5.5.0",
@@ -51,6 +55,8 @@
     "@radix-ui/react-toggle": "^1.1.9",
     "@radix-ui/react-toggle-group": "^1.1.10",
     "@radix-ui/react-tooltip": "^1.2.7",
+    "@react-three/drei": "^9.122.0",
+    "@react-three/fiber": "^8.18.0",
     "@supabase/ssr": "^0.6.1",
     "@supabase/supabase-js": "^2.49.7",
     "@tanstack/react-virtual": "^3.13.9",
@@ -61,6 +67,7 @@
     "cmdk": "^1.1.1",
     "date-fns": "^4.1.0",
     "framer-motion": "^12.15.0",
+    "lenis": "^1.0.0",
     "liquid-glass-react": "^1.1.1",
     "lucide-react": "^0.294.0",
     "next": "14.0.4",
@@ -73,19 +80,31 @@
     "react-virtualized-auto-sizer": "^1.0.26",
     "react-window": "^1.8.11",
     "tailwind-merge": "^2.6.0",
-    "tailwindcss-animate": "^1.0.7"
+    "tailwindcss-animate": "^1.0.7",
+    "three": "^0.160.1"
   },
   "devDependencies": {
+    "@next/bundle-analyzer": "^16.2.6",
+    "@testing-library/jest-dom": "^6.4.0",
+    "@testing-library/react": "^14.2.0",
+    "@testing-library/user-event": "^14.5.0",
+    "@types/jest": "^29.5.12",
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",
+    "@types/three": "^0.184.1",
     "autoprefixer": "^10.0.1",
     "critters": "^0.0.23",
+    "cross-env": "^10.1.0",
     "eslint": "^8",
     "eslint-config-next": "14.0.4",
+    "fast-check": "^3.19.0",
     "image-webpack-loader": "^8.1.0",
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0",
     "postcss": "^8",
     "tailwindcss": "^3.3.0",
+    "ts-jest": "^29.1.2",
     "typescript": "^5"
   }
 }

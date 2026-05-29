@@ -49,7 +49,7 @@ function getDomainInfo(url: string) {
 
 // 打印连接信息用于诊断
 const connectionInfo = getDomainInfo(supabaseUrl);
-console.log("🔧 Supabase客户端初始化:", connectionInfo);
+console.debug("🔧 Supabase客户端初始化:", connectionInfo);
 
 // 创建Supabase客户端 - 增强实时功能配置
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
@@ -84,7 +84,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 // 连接状态检查函数
 export async function testConnection() {
   try {
-    console.log("🔄 测试Supabase连接...");
+    console.debug("🔄 测试Supabase连接...");
     const startTime = Date.now()
     const { data, error } = await supabase.from("posts").select("id").limit(1)
     const endTime = Date.now()
@@ -95,7 +95,7 @@ export async function testConnection() {
     }
 
     const latency = endTime - startTime;
-    console.log(`✅ Supabase连接成功! 延迟: ${latency}ms, 返回数据:`, data);
+    console.debug(`✅ Supabase连接成功! 延迟: ${latency}ms, 返回数据:`, data);
     return { success: true, latency, data }
   } catch (err) {
     console.error("🔥 Supabase连接测试异常:", err);

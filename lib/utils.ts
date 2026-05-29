@@ -146,7 +146,7 @@ export function unlockPageScroll(scrollY: number): void {
       behavior: 'auto' // 使用auto代替instant，确保立即滚动
     })
     
-    console.log('恢复滚动位置:', finalPosition)
+    console.debug('恢复滚动位置:', finalPosition)
   }, 10) // 稍微增加延迟，确保DOM完全更新
 }
 

@@ -413,7 +413,7 @@ const ProgressiveImage = memo(({
       
       // 记录缓存命中性能
       const loadTime = performance.now() - loadStartTime.current;
-      console.log(`图片缓存命中: ${src.substring(0, 30)}... 加载时间: ${loadTime.toFixed(2)}ms`);
+      console.debug(`图片缓存命中: ${src.substring(0, 30)}... 加载时间: ${loadTime.toFixed(2)}ms`);
       
       return
     }
@@ -444,7 +444,7 @@ const ProgressiveImage = memo(({
       
       // 记录加载性能
       const loadTime = performance.now() - loadStartTime.current;
-      console.log(`图片加载完成: ${src.substring(0, 30)}... 加载时间: ${loadTime.toFixed(2)}ms`);
+      console.debug(`图片加载完成: ${src.substring(0, 30)}... 加载时间: ${loadTime.toFixed(2)}ms`);
 
       // 调用外部回调
       if (!hasCalledOnLoad.current) {

@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState, useLayoutEffect } from "react"
+import { useRouter } from "next/navigation"
 import { createPortal } from "react-dom"
 import { AnimatePresence, motion } from "framer-motion"
 import { ChevronDown, X } from "lucide-react"
@@ -17,6 +18,7 @@ interface CategoryMenuProps {
  * 分类下拉菜单。点击按钮弹出毛玻璃面板，列表项点击后更新 URL 并派发 category-changed 事件。
  */
 export default function CategoryMenu({ activeCategory, compact = false }: CategoryMenuProps) {
+  const router = useRouter()
   const [open, setOpen] = useState(false)
   const [mounted, setMounted] = useState(false)
   // 触发按钮的视口位置，用于 portal 定位
@@ -77,16 +79,9 @@ export default function CategoryMenu({ activeCategory, compact = false }: Catego
     } else {
       url.searchParams.delete("category")
     }
-    // 保留在首页；如果当前不在首页，也跳回首页
-    const targetPath = "/"
-    const targetUrl = `${targetPath}${url.search}${url.hash}`
-
-    if (window.location.pathname === targetPath) {
-      window.history.pushState({}, "", targetUrl)
-      window.dispatchEvent(new CustomEvent("category-changed"))
-    } else {
-      window.location.href = targetUrl
-    }
+    // 保留在首页；如果当前不在首页，router.push 也能跨路由
+    const targetUrl = `/${url.search}${url.hash}`
+    router.push(targetUrl)
     setOpen(false)
   }
 

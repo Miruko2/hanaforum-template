@@ -45,18 +45,18 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     lastFetchTimeRef.current = now
     
     if (!isVisibleRef.current) {
-      console.log('页面不可见，跳过获取通知')
+      console.debug('页面不可见，跳过获取通知')
       return false
     }
     
     setIsLoading(true)
     try {
-      console.log('正在获取通知...')
+      console.debug('正在获取通知...')
       const { notifications } = await getUserNotifications(user.id, options)
       
       // 确保返回的通知是有效的数组
       if (Array.isArray(notifications)) {
-        console.log(`获取到 ${notifications.length} 条通知`)
+        console.debug(`获取到 ${notifications.length} 条通知`)
         setNotifications(notifications as Notification[])
       } else {
         console.error('返回的通知不是数组:', notifications)
@@ -84,7 +84,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 
   // 手动刷新通知
   const refreshNotifications = async (): Promise<void> => {
-    console.log('手动刷新通知')
+    console.debug('手动刷新通知')
     await fetchNotificationsInternal()
   }
 
@@ -136,7 +136,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const handleVisibilityChange = () => {
       const isVisible = document.visibilityState === 'visible'
-      console.log('页面可见性变化:', isVisible ? '可见' : '不可见')
+      console.debug('页面可见性变化:', isVisible ? '可见' : '不可见')
       isVisibleRef.current = isVisible
       
       if (isVisible) {
@@ -168,11 +168,11 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       return
     }
 
-    console.log('设置通知实时订阅...')
+    console.debug('设置通知实时订阅...')
     
     // 处理收到的通知更新
     const handleNotificationsUpdate = (updatedNotifications: Notification[]) => {
-      console.log(`收到通知更新: ${updatedNotifications.length} 条通知`)
+      console.debug(`收到通知更新: ${updatedNotifications.length} 条通知`)
       setNotifications(updatedNotifications)
       
       // 计算未读数量

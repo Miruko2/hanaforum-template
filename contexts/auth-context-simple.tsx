@@ -44,7 +44,7 @@ export const SimpleAuthProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
     const initializeAuth = async () => {
       try {
-        console.log('🔄 SimpleAuth: 初始化认证...')
+        console.debug('🔄 SimpleAuth: 初始化认证...')
         
         const { data: { session }, error } = await supabase.auth.getSession()
         
@@ -54,10 +54,10 @@ export const SimpleAuthProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         
         if (mounted) {
           if (session?.user) {
-            console.log('✅ SimpleAuth: 找到有效会话:', session.user.email)
+            console.debug('✅ SimpleAuth: 找到有效会话:', session.user.email)
             setUser(session.user)
           } else {
-            console.log('ℹ️ SimpleAuth: 无有效会话')
+            console.debug('ℹ️ SimpleAuth: 无有效会话')
             setUser(null)
           }
           setLoading(false)
@@ -92,11 +92,11 @@ export const SimpleAuthProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   // 监听认证状态变化
   useEffect(() => {
-    console.log('🔄 SimpleAuth: 设置认证状态监听器')
+    console.debug('🔄 SimpleAuth: 设置认证状态监听器')
     
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        console.log('🔄 SimpleAuth: 认证状态变化:', event, session?.user?.email)
+        console.debug('🔄 SimpleAuth: 认证状态变化:', event, session?.user?.email)
         
         if (session?.user) {
           setUser(session.user)
@@ -116,7 +116,7 @@ export const SimpleAuthProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const signIn = async (email: string, password: string) => {
     try {
-      console.log('🔐 SimpleAuth: 尝试登录:', email)
+      console.debug('🔐 SimpleAuth: 尝试登录:', email)
       
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
@@ -134,7 +134,7 @@ export const SimpleAuthProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }
 
       if (data.session?.user) {
-        console.log('✅ SimpleAuth: 登录成功:', data.user.email)
+        console.debug('✅ SimpleAuth: 登录成功:', data.user.email)
         // 状态会通过onAuthStateChange自动更新
         toast({
           title: "登录成功",
@@ -156,7 +156,7 @@ export const SimpleAuthProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const signUp = async (email: string, password: string, username: string) => {
     try {
-      console.log('🔐 SimpleAuth: 尝试注册:', email, '用户名:', username)
+      console.debug('🔐 SimpleAuth: 尝试注册:', email, '用户名:', username)
       
       const { data, error } = await supabase.auth.signUp({
         email,
@@ -183,11 +183,11 @@ export const SimpleAuthProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         return { error: null, data }
       }
       
-      console.log('✅ SimpleAuth: 注册成功，用户ID:', data.user.id);
+      console.debug('✅ SimpleAuth: 注册成功，用户ID:', data.user.id);
       
       // 创建用户资料 - 首先创建user_profiles表记录，这是显示用户名的主要来源
       try {
-        console.log('📊 SimpleAuth: 创建user_profiles记录...');
+        console.debug('📊 SimpleAuth: 创建user_profiles记录...');
         const { data: userProfileData, error: userProfileError } = await supabase
           .from("user_profiles")
           .insert([
@@ -203,7 +203,7 @@ export const SimpleAuthProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           console.error('❌ SimpleAuth: 创建user_profiles记录失败:', userProfileError.message);
           // 继续执行，不中断流程
         } else {
-          console.log('✅ SimpleAuth: 成功创建user_profiles记录:', userProfileData);
+          console.debug('✅ SimpleAuth: 成功创建user_profiles记录:', userProfileData);
         }
       } catch (e) {
         console.error('❌ SimpleAuth: 创建user_profiles异常:', e);
@@ -212,7 +212,7 @@ export const SimpleAuthProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       // 然后创建profiles记录（为兼容现有代码）
       try {
-        console.log('📊 SimpleAuth: 创建profiles记录...');
+        console.debug('📊 SimpleAuth: 创建profiles记录...');
         const { data: profileData, error: profileError } = await supabase
           .from("profiles")
           .insert([
@@ -229,7 +229,7 @@ export const SimpleAuthProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           console.error('❌ SimpleAuth: 创建profiles记录失败:', profileError.message);
           // 继续执行，不中断流程
         } else {
-          console.log('✅ SimpleAuth: 成功创建profiles记录:', profileData);
+          console.debug('✅ SimpleAuth: 成功创建profiles记录:', profileData);
         }
       } catch (e) {
         console.error('❌ SimpleAuth: 创建profiles异常:', e);
@@ -246,13 +246,13 @@ export const SimpleAuthProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         if (updateError) {
           console.warn('⚠️ SimpleAuth: 更新用户元数据失败:', updateError.message);
         } else {
-          console.log('✅ SimpleAuth: 用户元数据更新成功');
+          console.debug('✅ SimpleAuth: 用户元数据更新成功');
         }
       } catch (e) {
         console.error('❌ SimpleAuth: 更新用户元数据异常:', e);
       }
 
-      console.log('✅ SimpleAuth: 注册完成，用户:', data.user.email, '用户名:', username);
+      console.debug('✅ SimpleAuth: 注册完成，用户:', data.user.email, '用户名:', username);
       toast({
         title: "注册成功",
         description: "您的账户已成功创建",
@@ -271,7 +271,7 @@ export const SimpleAuthProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const signOut = async () => {
     try {
-      console.log('🔒 SimpleAuth: 执行退出登录')
+      console.debug('🔒 SimpleAuth: 执行退出登录')
       
       // 立即更新状态
       setUser(null)
@@ -282,7 +282,7 @@ export const SimpleAuthProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       if (error) {
         console.error('❌ SimpleAuth: 登出失败:', error.message)
       } else {
-        console.log('✅ SimpleAuth: 登出成功')
+        console.debug('✅ SimpleAuth: 登出成功')
       }
       
       // 清除本地存储的认证数据 - 更全面的清理

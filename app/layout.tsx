@@ -6,47 +6,33 @@ import { Providers } from "@/components/providers"
 const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "论坛",
-  description: "一个简单的论坛应用",
+  title: "萤火虫之国",
+  description: "分享想法 · 探索音乐",
+  keywords: ["萤火虫之国", "论坛", "音乐"],
 }
+
+const BG_IMAGE = "/mos-background.webp"
 
 export default function RootLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
-  // 确保背景图片URL正确，并添加一个不透明度叠加
-  const bgStyle = {
-    backgroundImage: "url('/mos-design-xGc2QsidjHA-unsplash.jpg')",
-    backgroundSize: "cover",
-    backgroundPosition: "center center",
-    backgroundRepeat: "no-repeat",
-    backgroundAttachment: "fixed",
-    position: "relative" as const,
-  };
-
-  // 添加半透明层，确保内容可读性
-  const overlayStyle = {
-    content: '""',
-    position: "absolute" as const,
-    top: 0,
-    left: 0,
-    width: "100%",
-    height: "100%",
-    backgroundColor: "rgba(0, 0, 0, 0.2)", // 轻微暗化背景
-    zIndex: -1,
-    pointerEvents: "none" as const,
-  };
-
   return (
     <html lang="zh-CN" suppressHydrationWarning>
       <head>
-        {/* 预加载关键资源，加速首屏渲染 */}
-        <link rel="preload" href="/mos-design-xGc2QsidjHA-unsplash.jpg" as="image" />
+        {/* 高优先级预加载背景图，让浏览器一开始就把它加入下载队列 */}
+        <link rel="preload" href={BG_IMAGE} as="image" fetchPriority="high" />
       </head>
       <body
-        className={`${inter.className} bg-transparent`}
-        style={bgStyle}
+        className={`${inter.className} relative bg-transparent`}
+        style={{
+          backgroundImage: `url('${BG_IMAGE}')`,
+          backgroundSize: "cover",
+          backgroundPosition: "center center",
+          backgroundRepeat: "no-repeat",
+          backgroundAttachment: "fixed",
+        }}
       >
         <Providers>{children}</Providers>
       </body>

@@ -197,7 +197,7 @@ export default function CreatePostModal({
 
     try {
       setIsSubmitting(true)
-      console.log("当前用户:", user.id)
+      console.debug("当前用户:", user.id)
 
       // 处理图片上传
       // 新建模式：undefined 表示没图；
@@ -205,9 +205,9 @@ export default function CreatePostModal({
       let image_url: string | null | undefined = undefined
       if (imageFile) {
         try {
-          console.log("开始上传图片...")
+          console.debug("开始上传图片...")
           image_url = await uploadImage(imageFile)
-          console.log("上传的图片URL:", image_url)
+          console.debug("上传的图片URL:", image_url)
         } catch (uploadErr: any) {
           console.error("图片上传过程中出错:", uploadErr)
           toast({
@@ -234,7 +234,7 @@ export default function CreatePostModal({
           image_ratio: imageRatio,
         })
 
-        console.log("帖子更新成功:", updated)
+        console.debug("帖子更新成功:", updated)
 
         toast({
           title: "更新成功",
@@ -260,7 +260,7 @@ export default function CreatePostModal({
         return
       }
 
-      console.log("准备创建帖子，用户ID:", user.id)
+      console.debug("准备创建帖子，用户ID:", user.id)
 
       // 创建帖子 - 同时设置content和description字段
       const result = await createPost({
@@ -275,7 +275,7 @@ export default function CreatePostModal({
         comments: 0,
       })
 
-      console.log("帖子创建成功:", result)
+      console.debug("帖子创建成功:", result)
 
       toast({
         title: "发布成功",

@@ -1,7 +1,7 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { usePathname, useRouter } from "next/navigation"
+import { useEffect, useMemo, useState } from "react"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar"
@@ -19,22 +19,27 @@ import {
 } from "@/components/ui/dropdown-menu"
 import NotificationBell from "@/components/notification-bell"
 import CategoryMenu from "@/components/category-menu"
+import { useCinemaMode } from "@/contexts/cinema-mode-context"
 import { isValidCategory } from "@/lib/categories"
-import { Clapperboard, Zap } from "lucide-react"
+import { Clapperboard, Zap, Music } from "lucide-react"
 
 export default function Navigation() {
   const pathname = usePathname()
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { user, signOut, isAdmin } = useSimpleAuth()
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [mounted, setMounted] = useState(false)
   const [isNavVisible, setIsNavVisible] = useState(true)
   const [lastScrollY, setLastScrollY] = useState(0)
   const [isScrolled, setIsScrolled] = useState(false)
-  // 当前激活的分类（仅用于 CategoryMenu 的高亮态）
-  const [activeCategory, setActiveCategory] = useState<string | null>(null)
-  // 影院模式开关（跨组件通过自定义事件同步）
-  const [cinemaMode, setCinemaMode] = useState(false)
+  // 当前激活的分类（仅用于 CategoryMenu 的高亮态）— useSearchParams 自动跟随 URL
+  const activeCategory = useMemo(() => {
+    const raw = searchParams?.get("category") || null
+    return isValidCategory(raw) ? raw : null
+  }, [searchParams])
+  // 影院模式由 CinemaModeProvider 统一管理（替代之前的 CustomEvent 总线）
+  const { cinemaMode, toggleCinemaMode: ctxToggleCinemaMode } = useCinemaMode()
   // 用户头像
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
   
@@ -79,45 +84,16 @@ export default function Navigation() {
     fetchAvatar()
   }, [user?.id])
 
-  // 同步 URL 上的 category 参数到本地 state
-  useEffect(() => {
-    if (!mounted) return
-    const read = () => {
-      const params = new URLSearchParams(window.location.search)
-      const raw = params.get("category")
-      setActiveCategory(isValidCategory(raw) ? raw : null)
-    }
-    read()
-    window.addEventListener("popstate", read)
-    window.addEventListener("category-changed", read)
-    return () => {
-      window.removeEventListener("popstate", read)
-      window.removeEventListener("category-changed", read)
-    }
-  }, [mounted, pathname])
+  // activeCategory 已通过 useSearchParams 自动跟随 URL，无需手动同步
 
-  // 监听影院模式变化（首页里 state 变化会派发事件）
-  useEffect(() => {
-    if (!mounted) return
-    const onChange = (e: Event) => {
-      const detail = (e as CustomEvent<{ on: boolean }>).detail
-      setCinemaMode(!!detail?.on)
-    }
-    window.addEventListener("cinema-mode-changed", onChange)
-    return () => window.removeEventListener("cinema-mode-changed", onChange)
-  }, [mounted])
-
-  // 切换影院模式。
-  // 如果当前不在首页，则先跳转到首页并带上 ?cinema=1 参数，
-  // 首页读到这个参数后会自动开启影院模式（见 app/page.tsx）。
+  // 切换影院模式。如果当前不在首页，则先跳转到首页并带上 ?cinema=1，
+  // CinemaModeProvider 会消费这个参数并开启影院模式。
   const toggleCinemaMode = () => {
     if (pathname !== "/") {
       router.push("/?cinema=1")
       return
     }
-    const next = !cinemaMode
-    setCinemaMode(next)
-    window.dispatchEvent(new CustomEvent("cinema-mode-toggle", { detail: { on: next } }))
+    ctxToggleCinemaMode()
   }
 
   // 处理登出
@@ -274,6 +250,20 @@ export default function Navigation() {
                 <Clapperboard className="h-4 w-4" />
               </button>
 
+              {/* 音乐 */}
+              <Link
+                href="/music"
+                title="音乐"
+                className={cn(
+                  "flex items-center justify-center h-9 w-9 rounded-xl transition-all duration-200",
+                  pathname === "/music"
+                    ? "bg-pink-400/20 text-pink-300 shadow-lg"
+                    : "text-gray-300 hover:text-pink-300 hover:bg-white/10",
+                )}
+              >
+                <Music className="h-4 w-4" />
+              </Link>
+
               {isAdmin && (
                 <Link
                   href="/admin"
@@ -401,6 +391,21 @@ export default function Navigation() {
                 <div className="px-1">
                   <CategoryMenu activeCategory={activeCategory} compact />
                 </div>
+
+                {/* 音乐（移动端） */}
+                <Link
+                  href="/music"
+                  className={cn(
+                    "flex items-center px-4 py-3 text-sm font-medium rounded-xl transition-all duration-200",
+                    pathname === "/music"
+                      ? "bg-pink-400/20 text-pink-300 shadow-lg"
+                      : "text-gray-300 hover:text-pink-300 hover:bg-white/10",
+                  )}
+                  onClick={() => setIsMobileMenuOpen(false)}
+                >
+                  <Music className="mr-2 h-4 w-4" />
+                  音乐
+                </Link>
 
                 {isAdmin && (
                   <Link

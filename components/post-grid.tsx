@@ -29,14 +29,14 @@ export default function PostGrid() {
   useEffect(() => {
     // 监听自定义认证状态变化事件
     const handleAuthChange = () => {
-      console.log('🔄 PostGrid: 检测到认证状态变化事件');
+      console.debug('🔄 PostGrid: 检测到认证状态变化事件');
       retryLoading();
     };
     
     // 监听本地存储变化
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === 'auth_refresh_timestamp') {
-        console.log('🔄 PostGrid: 检测到认证刷新时间戳变化');
+        console.debug('🔄 PostGrid: 检测到认证刷新时间戳变化');
         retryLoading();
       }
     };
@@ -55,7 +55,7 @@ export default function PostGrid() {
     const currentUserId = user?.id || null;
     
     if (currentUserId !== lastUserIdRef.current) {
-      console.log('👤 PostGrid: 用户ID变化，重新获取帖子数据');
+      console.debug('👤 PostGrid: 用户ID变化，重新获取帖子数据');
       lastUserIdRef.current = currentUserId;
       retryLoading();
     }
@@ -114,7 +114,7 @@ export default function PostGrid() {
   // 调试日志（仅开发模式输出一次，避免刷屏）
   useEffect(() => {
     if (process.env.NODE_ENV === 'development' && error) {
-      console.log('🔍 PostGrid 加载异常:', { postsCount: posts.length, error });
+      console.debug('🔍 PostGrid 加载异常:', { postsCount: posts.length, error });
     }
   }, [error, posts.length]);
 

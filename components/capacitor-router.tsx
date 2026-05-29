@@ -17,7 +17,7 @@ export const CapacitorRouter = () => {
 
   useEffect(() => {
     if (isCapacitorEnvironment()) {
-      console.log('当前页面:', pathname);
+      console.debug('当前页面:', pathname);
     }
   }, [pathname]);
 
@@ -73,7 +73,7 @@ export const AuthLink = ({
     
     // 直接导航到目标页面
     if (isCapacitorEnvironment()) {
-      console.log('进行Capacitor导航:', href);
+      console.debug('进行Capacitor导航:', href);
       
       // 移动端直接使用location.href
       if (href === '/' || href === '') {
@@ -104,9 +104,9 @@ export const AuthLink = ({
 
 // 需要将原来的函数暴露出来，避免引用错误
 export const setNavigationDisabled = (disabled: boolean) => {
-  console.log('导航控制已简化，此功能不再生效');
+  console.debug('导航控制已简化，此功能不再生效');
 };
 
 export const disableNavigationTemporary = (milliseconds: number = 5000) => {
-  console.log('导航控制已简化，此功能不再生效');
+  console.debug('导航控制已简化，此功能不再生效');
 }; 

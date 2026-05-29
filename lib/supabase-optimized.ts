@@ -752,7 +752,7 @@ export const getPostsWithPinned = withCache(
       return [];
     }
   },
-  (args) => `posts-with-pinned-page-${args[0]}-limit-${args[1]}-cat-${args[2] ?? "all"}`,
+  "posts-with-pinned", // withCache 会自动追加 args 的 JSON 作为完整 cache key
   30 // 缓存30秒
 );
 

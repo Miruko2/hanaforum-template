@@ -1,25 +1,33 @@
+import bundleAnalyzer from '@next/bundle-analyzer'
+
+const withBundleAnalyzer = bundleAnalyzer({
+  enabled: process.env.ANALYZE === 'true',
+})
+
 /** @type {import('next').NextConfig} */
 const isCapacitor = process.env.CAPACITOR_BUILD === 'true'
 
 const nextConfig = {
   // 基础配置
-  reactStrictMode: false,
+  reactStrictMode: true,
   swcMinify: true,
 
   // Capacitor 构建时使用静态导出
   ...(isCapacitor && { output: 'export', trailingSlash: true }),
   
-  // 禁用不兼容的功能
+  // ESLint 配置引用了未安装的 prettier/tailwindcss plugin，先保持非阻塞；
+  // TypeScript 错误已清零，开启严格构建。
   eslint: {
     ignoreDuringBuilds: true,
   },
   typescript: {
-    ignoreBuildErrors: true,
+    ignoreBuildErrors: false,
   },
   
-  // 图像配置 - 静态导出必需但添加本地优化支持
+  // 图像配置 - dev 模式跳过优化（避免单实例服务端转码拖慢页面），
+  // Capacitor 静态导出关闭，仅生产 Web 构建启用 next image 优化。
   images: {
-    unoptimized: true,
+    unoptimized: isCapacitor || process.env.NODE_ENV !== "production",
     // 以下配置在build时不起作用，但可以在开发模式下帮助优化
     deviceSizes: [640, 750, 828, 1080, 1200, 1920, 2048],
     imageSizes: [16, 32, 48, 64, 96, 128, 256, 384],
@@ -117,4 +125,4 @@ const nextConfig = {
   },
 }
 
-export default nextConfig 
+export default withBundleAnalyzer(nextConfig) 

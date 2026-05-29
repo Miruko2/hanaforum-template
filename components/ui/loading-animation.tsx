@@ -1,6 +1,6 @@
 "use client"
 
-import { motion } from "framer-motion"
+import { motion, type Variants } from "framer-motion"
 
 interface LoadingAnimationProps {
   size?: "sm" | "md" | "lg" | "xl"
@@ -52,7 +52,7 @@ export function LoadingAnimation({
   }[size]
 
   // 动画变体
-  const dotVariants = {
+  const dotVariants: Variants = {
     initial: { y: 0 },
     animate: (i: number) => ({
       y: [0, -10, 0],
@@ -192,7 +192,7 @@ export function FloatingCardsLoading({
   const colorClass = color.startsWith("text-") ? color.replace("text-", "bg-") : color
 
   // 卡片动画变体
-  const cardVariants = {
+  const cardVariants: Variants = {
     initial: (i: number) => ({
       opacity: 0.3,
       y: 0,

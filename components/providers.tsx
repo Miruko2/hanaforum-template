@@ -4,6 +4,7 @@ import { useState, useEffect, type ReactNode } from "react"
 import { ThemeProvider } from "@/components/theme-provider"
 import { SimpleAuthProvider } from "@/contexts/auth-context-simple"
 import { PostsProvider } from "@/contexts/posts-context"
+import { CinemaModeProvider } from "@/contexts/cinema-mode-context"
 import PageTransition from "@/components/page-transition"
 import Script from "next/script"
 import dynamic from "next/dynamic"
@@ -18,13 +19,20 @@ const Toaster = dynamic(
   { ssr: false }
 )
 
-// 延迟加载包装器
-function LazyMount({ children, delay = 150 }: { children: ReactNode; delay?: number }) {
+// 延迟加载包装器：等浏览器空闲后再挂载，让首屏内容优先抢占主线程。
+// requestIdleCallback 在不支持的浏览器（Safari < 18.4）上回退到 setTimeout。
+function LazyMount({ children, timeout = 500 }: { children: ReactNode; timeout?: number }) {
   const [mounted, setMounted] = useState(false)
   useEffect(() => {
-    const t = setTimeout(() => setMounted(true), delay)
+    if (typeof window === "undefined") return
+    const ric = (window as Window).requestIdleCallback
+    if (typeof ric === "function") {
+      const id = ric(() => setMounted(true), { timeout })
+      return () => (window as Window).cancelIdleCallback?.(id)
+    }
+    const t = setTimeout(() => setMounted(true), 200)
     return () => clearTimeout(t)
-  }, [delay])
+  }, [timeout])
   if (!mounted) return null
   return <>{children}</>
 }
@@ -60,20 +68,23 @@ export function Providers({ children }: { children: ReactNode }) {
 
           {/* NotificationProvider 必须包裹所有使用 useNotifications 的组件（Navigation、页面等） */}
           <NotificationProvider>
+            {/* CinemaModeProvider 让首页和导航栏共享同一份影院模式状态 */}
+            <CinemaModeProvider>
             {/* 首屏内容：立即渲染 */}
             <PageTransition>
               {children}
             </PageTransition>
 
-            {/* 延迟加载：导航栏 */}
-            <LazyMount delay={100}>
+            {/* 延迟加载：导航栏（idle 时挂载，最长 1s 兜底） */}
+            <LazyMount timeout={1000}>
               <Navigation />
             </LazyMount>
 
-            {/* Toaster 延迟加载 */}
-            <LazyMount delay={200}>
+            {/* Toaster 不紧急，最长 2s 兜底 */}
+            <LazyMount timeout={2000}>
               <Toaster />
             </LazyMount>
+            </CinemaModeProvider>
           </NotificationProvider>
         </PostsProvider>
       </SimpleAuthProvider>

@@ -1,7 +1,7 @@
 "use client"
 
 import { useRef, ReactNode, useEffect, useState } from "react"
-import { motion, useAnimation, useInView } from "framer-motion"
+import { motion, useAnimation, useInView, type Variants } from "framer-motion"
 
 interface AnimateOnScrollProps {
   children: ReactNode
@@ -28,7 +28,7 @@ export default function AnimateOnScroll({
   const [hasAnimated, setHasAnimated] = useState(false)
 
   // Define animation variants
-  const variants = {
+  const variants: Variants = {
     hidden: {
       opacity: 0,
       y: animation === "slide-up" ? 50 : 0,

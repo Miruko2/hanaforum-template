@@ -47,7 +47,7 @@ export default function VirtualizedPostList({
   useEffect(() => {
     mountedRef.current = true
     
-    console.log("🏗️ VirtualizedPostList挂载:", {
+    console.debug("🏗️ VirtualizedPostList挂载:", {
       postsCount: posts?.length || 0,
       isMobile,
       firstPostId: posts?.[0]?.id || "无帖子",
@@ -123,7 +123,7 @@ export default function VirtualizedPostList({
       return Promise.resolve();
     }
     
-    console.log("📥 触发加载更多帖子...");
+    console.debug("📥 触发加载更多帖子...");
     return loadMorePosts().catch(error => {
       console.error('❌ 加载更多帖子时出错:', error);
     });
@@ -135,7 +135,7 @@ export default function VirtualizedPostList({
     if (!inView) return;
     if (!hasMore || loading || loadingMoreRef.current) return;
     
-    console.log("👁️ 加载更多触发器可见 - 开始加载更多帖子");
+    console.debug("👁️ 加载更多触发器可见 - 开始加载更多帖子");
     
     loadingMoreRef.current = true;
     let isCancelled = false;
@@ -275,7 +275,7 @@ export default function VirtualizedPostList({
   };
   
   // 诊断输出
-  console.log("🔄 虚拟列表PostList渲染:", {
+  console.debug("🔄 虚拟列表PostList渲染:", {
     postsCount: posts?.length || 0,
     columnCount,
     visibleRange: `${visibleStartIndex}-${visibleStopIndex}`,
@@ -285,7 +285,7 @@ export default function VirtualizedPostList({
   
   // 如果加载中且没有帖子，显示加载状态
   if (loading && (!Array.isArray(posts) || posts.length === 0)) {
-    console.log("⏳ 显示初始加载状态");
+    console.debug("⏳ 显示初始加载状态");
     return (
       <div className="flex justify-center items-center h-32 w-full">
         <LoadingAnimation size="md" color="text-lime-500" />
@@ -311,7 +311,7 @@ export default function VirtualizedPostList({
   
   // 如果没有帖子，显示空状态
   if (!Array.isArray(posts) || posts.length === 0) {
-    console.log("🈳 显示空状态 - 没有帖子");
+    console.debug("🈳 显示空状态 - 没有帖子");
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center w-full">
         <div className="text-4xl mb-4">🌱</div>

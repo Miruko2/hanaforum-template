@@ -34,3 +34,6 @@ supabase_apikey.txt
 # 本地构建/临时产物
 /out/
 tsconfig.tsbuildinfo
+
+# 测试输出日志
+jest-out.log
