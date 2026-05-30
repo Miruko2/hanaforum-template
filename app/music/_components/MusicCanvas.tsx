@@ -13,6 +13,8 @@ import type { ExpandRect } from "./ExpandedCard"
 import { CoverBackdrop } from "./CoverBackdrop"
 import { VideoBackdrop } from "./VideoBackdrop"
 import { Grain } from "./Grain"
+import { useReducedMotion } from "../_lib/useReducedMotion"
+import { useIsMobile } from "../_lib/useIsMobile"
 // Toggle between cover-image backdrop (per track) and a single looping video.
 const USE_VIDEO_BACKDROP = true
 
@@ -33,6 +35,14 @@ type Props = {
 }
 
 export function MusicCanvas({ onExpand }: Props) {
+  const reducedMotion = useReducedMotion()
+  // Distinct from the layout-driven `isMobile` (viewSize.w < 768) below —
+  // this is a *device-tier* signal that drives perf degradation: when true
+  // we drop the video backdrop, grain, parallax, and lighten the card blur.
+  const mobileTier = useIsMobile()
+  // `lite` collapses both reasons we'd want a stripped-down render into a
+  // single boolean for the rAF loop / props below.
+  const lite = reducedMotion || mobileTier
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const parallaxRef = useRef<HTMLDivElement | null>(null)
   const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map())
@@ -180,6 +190,22 @@ export function MusicCanvas({ onExpand }: Props) {
     const focusY = viewSize.h / 2
     const radius = Math.min(viewSize.w, viewSize.h) * FISHEYE_RADIUS_FACTOR
 
+    // --- Per-frame work caches (perf) ---
+    // The dominant cost is re-writing each card's transform/opacity/filter every
+    // frame — especially `filter: blur()`, which forces a GPU re-render. We:
+    //   1. skip recomputing the visible set + transforms when the pan hasn't
+    //      moved (at rest the loop becomes a near no-op),
+    //   2. dirty-check every style write (only touch the DOM when the value
+    //      actually changes), and
+    //   3. quantize blur to 0.5px steps so its string stays stable across many
+    //      frames during slow motion — letting the compositor cache the blurred
+    //      layer instead of re-rendering it. All visually lossless.
+    let prevPanX = NaN
+    let prevPanY = NaN
+    let prevParallax = ""
+    let cachedList: Instance[] = []
+    const prevStyle = new Map<string, { t: string; o: string; f: string }>()
+
     const loop = () => {
       if (!mounted) return
 
@@ -198,48 +224,93 @@ export function MusicCanvas({ onExpand }: Props) {
       panRef.current.x += (panTargetRef.current.x - panRef.current.x) * PAN_LERP
       panRef.current.y += (panTargetRef.current.y - panRef.current.y) * PAN_LERP
 
-      // Parallax: subtle counter-shift against pointer position.
-      if (parallaxRef.current) {
+      // Parallax: subtle counter-shift against pointer position (dirty-checked).
+      // Skipped on lite tier (reduced-motion OR mobile) — on phones there's no
+      // mouse so the pointer position is just the last-tap location, and the
+      // shift would barely move anyway.
+      if (parallaxRef.current && !lite) {
         const nx = (pointerRef.current.x / viewSize.w) * 2 - 1
         const ny = (pointerRef.current.y / viewSize.h) * 2 - 1
-        parallaxRef.current.style.transform = `translate3d(${-nx * PARALLAX_AMOUNT}px, ${
+        const ptf = `translate3d(${(-nx * PARALLAX_AMOUNT).toFixed(2)}px, ${(
           -ny * PARALLAX_AMOUNT
-        }px, 0)`
+        ).toFixed(2)}px, 0)`
+        if (ptf !== prevParallax) {
+          parallaxRef.current.style.transform = ptf
+          prevParallax = ptf
+        }
       }
 
-      // Compute visible instance set; only setState when keys change.
-      const list = computeInstances(
-        pack,
-        panRef.current.x,
-        panRef.current.y,
-        viewSize.w,
-        viewSize.h,
-      )
-      const sig = list.map((i) => i.key).join("|")
-      if (sig !== instanceKeysRef.current) {
-        instanceKeysRef.current = sig
-        queueMicrotask(() => {
-          if (mounted) setInstances(list)
-        })
+      const panX = panRef.current.x
+      const panY = panRef.current.y
+      const panMoved =
+        Math.abs(panX - prevPanX) > 0.01 || Math.abs(panY - prevPanY) > 0.01
+
+      // Recompute the visible set only when the pan actually moved. At rest this
+      // avoids the per-frame array + signature-string allocation entirely.
+      // Lite tier uses a much tighter pre-render margin (80 vs 280): on phones
+      // the slower scroll velocity hides the cards-popping-in artifact that
+      // the wider margin was protecting against, and the smaller visible set
+      // is one of the biggest perf wins available.
+      if (panMoved || cachedList.length === 0) {
+        cachedList = computeInstances(
+          pack, panX, panY, viewSize.w, viewSize.h, lite ? 80 : 280,
+        )
+        const sig = cachedList.map((i) => i.key).join("|")
+        if (sig !== instanceKeysRef.current) {
+          instanceKeysRef.current = sig
+          // Prune style cache for cards that scrolled out of view.
+          const live = new Set(cachedList.map((i) => i.key))
+          for (const k of prevStyle.keys()) if (!live.has(k)) prevStyle.delete(k)
+          queueMicrotask(() => {
+            if (mounted) setInstances(cachedList)
+          })
+        }
       }
 
-      // Per-frame fisheye transforms via direct DOM writes.
-      for (const inst of list) {
+      // Per-frame fisheye transforms via direct, dirty-checked DOM writes.
+      for (const inst of cachedList) {
         const node = cardRefs.current.get(inst.key)
         if (!node) continue
-        const sx = inst.worldX + panRef.current.x
-        const sy = inst.worldY + panRef.current.y
+        const sx = inst.worldX + panX
+        const sy = inst.worldY + panY
         const cx = sx + inst.card.width / 2
         const cy = sy + inst.card.height / 2
         const f = fisheye(cx, cy, focusX, focusY, radius)
-        // Order matters: translate (in screen coords) THEN rotate (around card center) THEN scale.
-        node.style.transform =
-          `translate3d(${sx}px, ${sy}px, ${f.z}px) ` +
+        // Order matters: translate (screen coords) THEN rotate (around center) THEN scale.
+        const transform =
+          `translate3d(${sx.toFixed(2)}px, ${sy.toFixed(2)}px, ${f.z.toFixed(1)}px) ` +
           `rotateX(${f.rotX.toFixed(2)}deg) rotateY(${f.rotY.toFixed(2)}deg) ` +
           `scale(${f.scale.toFixed(3)})`
-        node.style.opacity = String(f.opacity)
-        node.style.filter = f.blur > 0.15 ? `blur(${f.blur.toFixed(2)}px)` : ""
+        const opacity = f.opacity.toFixed(3)
+        // Quantize blur to 0.5px steps → stable string across frames → the
+        // compositor can reuse the cached blurred layer instead of re-rendering.
+        const filter =
+          f.blur > 0.15 ? `blur(${(Math.round(f.blur * 2) / 2).toFixed(1)}px)` : ""
+
+        const prev = prevStyle.get(inst.key)
+        if (!prev) {
+          node.style.transform = transform
+          node.style.opacity = opacity
+          node.style.filter = filter
+          prevStyle.set(inst.key, { t: transform, o: opacity, f: filter })
+        } else {
+          if (prev.t !== transform) {
+            node.style.transform = transform
+            prev.t = transform
+          }
+          if (prev.o !== opacity) {
+            node.style.opacity = opacity
+            prev.o = opacity
+          }
+          if (prev.f !== filter) {
+            node.style.filter = filter
+            prev.f = filter
+          }
+        }
       }
+
+      prevPanX = panX
+      prevPanY = panY
 
       rafId = requestAnimationFrame(loop)
     }
@@ -248,7 +319,7 @@ export function MusicCanvas({ onExpand }: Props) {
       mounted = false
       cancelAnimationFrame(rafId)
     }
-  }, [viewSize.w, viewSize.h, pack])
+  }, [viewSize.w, viewSize.h, pack, lite])
 
   return (
     <div
@@ -283,11 +354,14 @@ export function MusicCanvas({ onExpand }: Props) {
         />
       </div>
 
-      {/* Background — either looping mp4 or per-track cover backdrop */}
-      {USE_VIDEO_BACKDROP ? <VideoBackdrop /> : <CoverBackdrop />}
+      {/* Background — looping mp4 by default. Falls back to the static per-track
+          cover backdrop on lite tier: phones can't decode the 1080p video at
+          60fps, and users with prefers-reduced-motion explicitly want stillness. */}
+      {USE_VIDEO_BACKDROP && !lite ? <VideoBackdrop /> : <CoverBackdrop lite={lite} />}
 
-      {/* δ — Film-grain shimmer over the backdrop */}
-      <Grain />
+      {/* δ — Film-grain shimmer over the backdrop. Skipped on lite tier:
+          imperceptible on small screens and a real cost on weak GPUs. */}
+      {!lite && <Grain />}
 
       {/* Vignette overlay that subtly darkens the periphery */}
       <div
@@ -317,6 +391,7 @@ export function MusicCanvas({ onExpand }: Props) {
             width={inst.card.width}
             height={inst.card.height}
             onExpand={onExpand}
+            lite={lite}
           />
         ))}
       </div>

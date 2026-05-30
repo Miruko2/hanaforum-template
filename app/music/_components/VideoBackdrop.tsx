@@ -19,13 +19,17 @@ export function VideoBackdrop() {
   useEffect(() => {
     let mounted = true
     let raf = 0
+    let prevOpacity = "" // dirty-check: skip the write when unchanged (e.g. paused)
     const loop = () => {
       if (!mounted) return
       const intensity = getAudioIntensity() // 0..1, paused returns 1
       // Opacity range tuned for video: a bit higher floor than the cover
       // backdrop, since the video is the only "art" on screen.
-      const pulse = 0.6 + intensity * 0.4
-      if (videoRef.current) videoRef.current.style.opacity = String(pulse)
+      const pulse = (0.6 + intensity * 0.4).toFixed(3)
+      if (videoRef.current && pulse !== prevOpacity) {
+        videoRef.current.style.opacity = pulse
+        prevOpacity = pulse
+      }
       raf = requestAnimationFrame(loop)
     }
     raf = requestAnimationFrame(loop)
@@ -37,10 +41,23 @@ export function VideoBackdrop() {
 
   // Kick the video into playing on mount. Browsers grant autoplay for muted
   // <video> tags but sometimes the very first play() needs a nudge after
-  // hydration. We don't ever pause it after this — the loop is constant.
+  // hydration.
   useEffect(() => {
     const v = videoRef.current
     if (v) v.play().catch(() => {})
+  }, [])
+
+  // Pause decoding while the tab is hidden — a 2.5K video keeps the GPU busy
+  // even when nobody's looking. Resume when the tab is visible again.
+  useEffect(() => {
+    const onVis = () => {
+      const v = videoRef.current
+      if (!v) return
+      if (document.hidden) v.pause()
+      else v.play().catch(() => {})
+    }
+    document.addEventListener("visibilitychange", onVis)
+    return () => document.removeEventListener("visibilitychange", onVis)
   }, [])
 
   return (
@@ -55,7 +72,7 @@ export function VideoBackdrop() {
         loop
         muted
         playsInline
-        preload="auto"
+        preload="metadata"
         className="absolute inset-0 h-full w-full object-cover"
         style={{
           willChange: "opacity",

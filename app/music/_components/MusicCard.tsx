@@ -12,6 +12,13 @@ type Props = {
   width: number
   height: number
   onExpand: (track: Track, rect: ExpandRect) => void
+  /**
+   * Lite tier: the parent has determined this device should run a stripped-
+   * down render (phone, or user opted into reduced-motion). Currently only
+   * affects the bottom-bar `backdrop-filter: blur()` radius, which is one of
+   * the priciest things in this component on weak GPUs.
+   */
+  lite?: boolean
 }
 
 /**
@@ -25,7 +32,7 @@ type Props = {
  * hits meant for the (z<0) cards behind it in the preserve-3d space.
  */
 function MusicCardBase(
-  { track, width, height, onExpand }: Props,
+  { track, width, height, onExpand, lite = false }: Props,
   ref: React.ForwardedRef<HTMLDivElement>,
 ) {
   const { currentTrack, isPlaying: globalPlaying, togglePlay, prev, next, isFavorite, toggleFavorite } = usePlayback()
@@ -86,8 +93,17 @@ function MusicCardBase(
         <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/90 to-transparent" />
       </div>
 
-      {/* Bottom info + controls */}
-      <div className="absolute inset-x-0 bottom-0 p-3 backdrop-blur-md bg-black/65">
+      {/* Bottom info + controls.
+          backdrop-blur is one of the heaviest filters: each card forces the
+          GPU to re-rasterize whatever is behind it, and with 10+ cards visible
+          on a phone the cost multiplies. On lite tier we drop it entirely and
+          compensate with a denser solid fill (65% → 80%) so the text stays
+          readable without any sampling work. */}
+      <div
+        className={`absolute inset-x-0 bottom-0 p-3 ${
+          lite ? "bg-black/80" : "bg-black/65 backdrop-blur-md"
+        }`}
+      >
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
             <div className="text-[13px] font-semibold text-white truncate">

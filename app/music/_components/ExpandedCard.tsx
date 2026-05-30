@@ -8,6 +8,7 @@ import { Pause, Play, SkipBack, SkipForward, Heart, X } from "lucide-react"
 import { TRACKS, type Track } from "../_data/tracks"
 import { usePlayback } from "../_context/PlaybackContext"
 import { useDominantHue } from "../_lib/useDominantHue"
+import { useReducedMotion } from "../_lib/useReducedMotion"
 
 /** Screen-space rect of the card that was clicked — used as flight start. */
 export type ExpandRect = { left: number; top: number; width: number; height: number }
@@ -68,6 +69,7 @@ function ExpandedInner({
   const [shown, setShown] = useState<Track>(target.track)
   const isCurrent = currentTrack?.id === shown.id
   const playing = isCurrent && isPlaying
+  const reducedMotion = useReducedMotion()
   const fav = isFavorite(shown.id)
 
   // ---- Responsive sizing ----
@@ -97,7 +99,9 @@ function ExpandedInner({
   useEffect(() => {
     let raf = 0
     const loop = () => {
-      const wanted = playing ? TARGET_SPEED_DEG_PER_FRAME : 0
+      // Reduced-motion users: never spin the vinyl (still shows the cover,
+      // just static).
+      const wanted = playing && !reducedMotion ? TARGET_SPEED_DEG_PER_FRAME : 0
       const k = playing ? 0.06 : 0.018 // start fairly quickly, glide to stop
       speedRef.current += (wanted - speedRef.current) * k
       if (Math.abs(speedRef.current) > 0.0005 || playing) {
@@ -110,7 +114,7 @@ function ExpandedInner({
     }
     raf = requestAnimationFrame(loop)
     return () => cancelAnimationFrame(raf)
-  }, [playing])
+  }, [playing, reducedMotion])
 
   // ---- Progress / scrub on the ring ----
   const dur = isCurrent ? duration || 0 : 0

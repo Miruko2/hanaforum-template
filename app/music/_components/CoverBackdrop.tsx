@@ -15,7 +15,18 @@ import type { Track } from "../_data/tracks"
  * Img opacity (~0.55..1) is rAF-driven for the pulse.
  * Final visible alpha = layerOpacity × imgPulseOpacity × hardcoded 0.85.
  */
-export function CoverBackdrop() {
+type Props = {
+  /**
+   * Lite tier: skip the expensive `filter: blur(20px)` and the Ken Burns
+   * pan/scale animation. On weak GPUs the constant transform invalidates the
+   * blur cache every frame, forcing the compositor to re-rasterize a fullscreen
+   * blurred bitmap continuously — the single biggest cost on the page.
+   * The crossfade between tracks and the audio-reactive opacity pulse are kept.
+   */
+  lite?: boolean
+}
+
+export function CoverBackdrop({ lite = false }: Props = {}) {
   const { currentTrack, getAudioIntensity } = usePlayback()
 
   const [layerA, setLayerA] = useState<Track | null>(null)
@@ -80,8 +91,8 @@ export function CoverBackdrop() {
       className="pointer-events-none absolute inset-0 overflow-hidden"
       aria-hidden
     >
-      <Layer track={layerA} visible={active === "a"} imgRef={imgRefA} kbClass="cover-kb-a" />
-      <Layer track={layerB} visible={active === "b"} imgRef={imgRefB} kbClass="cover-kb-b" />
+      <Layer track={layerA} visible={active === "a"} imgRef={imgRefA} kbClass={lite ? "" : "cover-kb-a"} lite={lite} />
+      <Layer track={layerB} visible={active === "b"} imgRef={imgRefB} kbClass={lite ? "" : "cover-kb-b"} lite={lite} />
       {/* Bottom fade to keep player chrome + hint legible despite the now
           much more dominant cover background. */}
       <div
@@ -118,11 +129,13 @@ function Layer({
   visible,
   imgRef,
   kbClass,
+  lite,
 }: {
   track: Track | null
   visible: boolean
   imgRef: React.MutableRefObject<HTMLImageElement | null>
   kbClass: string
+  lite: boolean
 }) {
   return (
     <div
@@ -137,8 +150,12 @@ function Layer({
           alt=""
           className={`absolute inset-0 h-full w-full object-cover ${kbClass}`}
           style={{
-            filter: "blur(20px) saturate(1.15)",
-            willChange: "opacity, transform",
+            // Lite tier: drop the 20px blur entirely. We compensate visually with
+            // a heavier dim overlay below + a slight scale so the unblurred cover
+            // doesn't read as the foreground.
+            filter: lite ? "saturate(1.15) brightness(0.55)" : "blur(20px) saturate(1.15)",
+            willChange: lite ? "opacity" : "opacity, transform",
+            transform: lite ? "scale(1.1)" : undefined,
             opacity: 1, // updated per-frame by the rAF loop above
           }}
           draggable={false}
