@@ -1,12 +1,11 @@
-/* 终端机等宽字体（弹幕墙、影院模式跑马灯使用）。
-   必须放在文件最顶端：@tailwind 展开后会变成几千行 CSS，
-   若 @import 在它之后，编译产物中 @import 会出现在真实规则之后，
-   按 CSS 规范浏览器会忽略，字体不会加载。 */
-@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* 注：跑马灯/影院模式等处的 font-family 仍保留 "Share Tech Mono" 作为首选，
+   但不通过 @import 加载（next/font 注入的 @font-face 会排在 @import 之前，
+   按 CSS 规范 @import 会被浏览器忽略）。浏览器找不到该字体时会自动落到
+   下一个候选（ui-monospace / SF Mono / Consolas / monospace），视觉一致。 */
 
 /* 系统字体堆栈 */
 @layer base {
