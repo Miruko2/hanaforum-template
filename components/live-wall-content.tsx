@@ -123,7 +123,8 @@ export default function LiveWallContent() {
       if (e.key !== "Escape") return
       const target = e.target as HTMLElement | null
       const tag = target?.tagName
-      if (tag === "INPUT" || tag === "TEXTAREA" || target?.isContentEditable) {
+      // 把 target 非 null 放到判断最前，TS 才能在分支里 narrow 出 target 非 null
+      if (target && (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable)) {
         target.blur()
         return
       }
