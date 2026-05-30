@@ -153,7 +153,7 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
             {/* Progress bar */}
             <div
               ref={barRef}
-              className="mt-2 h-2 cursor-pointer rounded-full bg-white/10 relative"
+              className="mt-2 h-2 cursor-pointer rounded-full bg-white/10 relative touch-none"
               onClick={(e) => e.stopPropagation()}
               onPointerDown={onBarDown}
               onPointerMove={onBarMove}

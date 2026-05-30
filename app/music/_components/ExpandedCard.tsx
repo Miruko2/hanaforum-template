@@ -225,7 +225,7 @@ function ExpandedInner({
             width={SVG_SIZE}
             height={SVG_SIZE}
             viewBox={`0 0 ${SVG_SIZE} ${SVG_SIZE}`}
-            className={`absolute ${isCurrent && dur ? "cursor-pointer" : "cursor-default"}`}
+            className={`absolute touch-none ${isCurrent && dur ? "cursor-pointer" : "cursor-default"}`}
             style={{ top: SVG_OFFSET, left: SVG_OFFSET }}
             onPointerDown={onRingDown}
             onPointerMove={onRingMove}
