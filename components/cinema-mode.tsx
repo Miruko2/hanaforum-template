@@ -70,6 +70,11 @@ export default function CinemaMode({ posts }: CinemaModeProps) {
 
         {/* 中间舞台：海报墙 */}
         <div className="cinema-stage relative flex-1 overflow-hidden">
+          {/* 角落装饰：cinema-tilted 倾斜后左上/右下两个三角缺口处的"投影光柱"装饰。
+              DOM 上故意排在 cinema-tilted 之前，海报会自然盖住装饰，
+              只有缺口处装饰才会露出 —— 把几何缺陷转化为风格设计。*/}
+          <div className="cinema-corner-decoration absolute inset-0" aria-hidden />
+
           <div className="cinema-tilted absolute inset-0">
             <div className="cinema-cols h-full w-full flex gap-2 md:gap-2.5">
               {columns.map((col, colIdx) => {
