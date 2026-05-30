@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -24,7 +24,9 @@ export default function Navbar() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [mounted, setMounted] = useState(false)
   const [isNavVisible, setIsNavVisible] = useState(true)
-  const [lastScrollY, setLastScrollY] = useState(0)
+  // lastScrollY 只在滚动 handler 内做比较，不参与渲染，用 ref 避免 set 触发
+  // useEffect 重新绑/解绑 scroll 监听器（之前每帧重绑一次）
+  const lastScrollYRef = useRef(0)
   const [isScrolled, setIsScrolled] = useState(false)
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
   
@@ -36,12 +38,9 @@ export default function Navbar() {
   // 获取用户头像
   useEffect(() => {
     if (!user?.id) {
-      console.log('Navbar: 用户未登录，清除头像')
       setAvatarUrl(null)
       return
     }
-
-    console.log('Navbar: 开始获取头像，用户ID:', user.id)
 
     const fetchAvatar = async () => {
       try {
@@ -51,17 +50,16 @@ export default function Navbar() {
           .eq("id", user.id)
           .single()
 
-        console.log('Navbar: 查询结果:', { data, error })
-
         if (!error && data?.avatar_url) {
-          console.log('Navbar: 找到头像URL:', data.avatar_url)
           setAvatarUrl(data.avatar_url)
         } else {
-          console.log('Navbar: 未找到头像或查询出错')
           setAvatarUrl(null)
         }
       } catch (err) {
-        console.error('Navbar: 获取头像异常:', err)
+        // 只在开发环境打印异常，避免生产控制台噪音
+        if (process.env.NODE_ENV === 'development') {
+          console.error('Navbar: 获取头像异常:', err)
+        }
         setAvatarUrl(null)
       }
     }
@@ -88,10 +86,11 @@ export default function Navbar() {
 
     const handleScroll = () => {
       const currentScrollY = window.scrollY
-      
+      const lastScrollY = lastScrollYRef.current
+
       // 更新滚动状态（用于视觉效果）
       setIsScrolled(currentScrollY > 50)
-      
+
       // 在页面顶部时始终显示导航栏
       if (currentScrollY < 10) {
         setIsNavVisible(true)
@@ -105,8 +104,8 @@ export default function Navbar() {
       else if (currentScrollY < lastScrollY) {
         setIsNavVisible(true)
       }
-      
-      setLastScrollY(currentScrollY)
+
+      lastScrollYRef.current = currentScrollY
     }
 
     // 添加节流优化，避免过度触发
@@ -123,7 +122,7 @@ export default function Navbar() {
 
     window.addEventListener('scroll', throttledHandleScroll, { passive: true })
     return () => window.removeEventListener('scroll', throttledHandleScroll)
-  }, [mounted, lastScrollY])
+  }, [mounted])
 
   if (!mounted) {
     // 返回一个占位符，避免水合不匹配

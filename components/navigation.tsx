@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -31,7 +31,9 @@ export default function Navigation() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [mounted, setMounted] = useState(false)
   const [isNavVisible, setIsNavVisible] = useState(true)
-  const [lastScrollY, setLastScrollY] = useState(0)
+  // lastScrollY 只在滚动 handler 内做比较，不参与渲染，用 ref 避免 set 触发
+  // useEffect 重新绑/解绑 scroll 监听器（之前每帧重绑一次）
+  const lastScrollYRef = useRef(0)
   const [isScrolled, setIsScrolled] = useState(false)
   // 当前激活的分类（仅用于 CategoryMenu 的高亮态）— useSearchParams 自动跟随 URL
   const activeCategory = useMemo(() => {
@@ -51,12 +53,9 @@ export default function Navigation() {
   // 获取用户头像
   useEffect(() => {
     if (!user?.id) {
-      console.log('Navigation: 用户未登录，清除头像')
       setAvatarUrl(null)
       return
     }
-
-    console.log('Navigation: 开始获取头像，用户ID:', user.id)
 
     const fetchAvatar = async () => {
       try {
@@ -66,17 +65,16 @@ export default function Navigation() {
           .eq("id", user.id)
           .single()
 
-        console.log('Navigation: 头像查询结果:', { data, error })
-
         if (!error && data?.avatar_url) {
-          console.log('Navigation: 设置头像URL:', data.avatar_url)
           setAvatarUrl(data.avatar_url)
         } else {
-          console.log('Navigation: 未找到头像，使用首字母')
           setAvatarUrl(null)
         }
       } catch (err) {
-        console.error('Navigation: 获取头像异常:', err)
+        // 只在开发环境打印异常，避免生产控制台噪音
+        if (process.env.NODE_ENV === 'development') {
+          console.error('Navigation: 获取头像异常:', err)
+        }
         setAvatarUrl(null)
       }
     }
@@ -142,10 +140,11 @@ export default function Navigation() {
 
     const handleScroll = () => {
       const currentScrollY = window.scrollY
-      
+      const lastScrollY = lastScrollYRef.current
+
       // 更新滚动状态（用于视觉效果）
       setIsScrolled(currentScrollY > 50)
-      
+
       // 在页面顶部时始终显示导航栏
       if (currentScrollY < 10) {
         setIsNavVisible(true)
@@ -159,8 +158,8 @@ export default function Navigation() {
       else if (currentScrollY < lastScrollY) {
         setIsNavVisible(true)
       }
-      
-      setLastScrollY(currentScrollY)
+
+      lastScrollYRef.current = currentScrollY
     }
 
     // 添加节流优化，避免过度触发
@@ -177,7 +176,7 @@ export default function Navigation() {
 
     window.addEventListener('scroll', throttledHandleScroll, { passive: true })
     return () => window.removeEventListener('scroll', throttledHandleScroll)
-  }, [mounted, lastScrollY])
+  }, [mounted])
 
   if (!mounted) {
     // 返回一个占位符，避免水合不匹配
@@ -391,6 +390,40 @@ export default function Navigation() {
                 <div className="px-1">
                   <CategoryMenu activeCategory={activeCategory} compact />
                 </div>
+
+                {/* 弹幕墙（移动端） */}
+                <Link
+                  href="/live"
+                  className={cn(
+                    "flex items-center px-4 py-3 text-sm font-medium rounded-xl transition-all duration-200",
+                    pathname === "/live"
+                      ? "bg-pink-400/20 text-pink-300 shadow-lg"
+                      : "text-gray-300 hover:text-pink-300 hover:bg-white/10",
+                  )}
+                  onClick={() => setIsMobileMenuOpen(false)}
+                >
+                  <Zap className="mr-2 h-4 w-4" />
+                  弹幕墙
+                </Link>
+
+                {/* 影院模式（移动端） — 复用桌面端的 toggleCinemaMode：
+                    不在首页则跳 /?cinema=1，在首页则切换 context */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    toggleCinemaMode()
+                    setIsMobileMenuOpen(false)
+                  }}
+                  className={cn(
+                    "flex items-center px-4 py-3 text-sm font-medium rounded-xl transition-all duration-200 text-left",
+                    cinemaMode
+                      ? "bg-pink-400/20 text-pink-400 shadow-lg"
+                      : "text-gray-300 hover:text-pink-400 hover:bg-white/10",
+                  )}
+                >
+                  <Clapperboard className="mr-2 h-4 w-4" />
+                  {cinemaMode ? "退出影院模式" : "影院模式"}
+                </button>
 
                 {/* 音乐（移动端） */}
                 <Link
