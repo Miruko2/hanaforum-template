@@ -16,6 +16,12 @@ interface NeonMarqueeProps {
   color?: "pink" | "lime"
   /** 覆盖条带高度。不传时使用各 variant 的默认值 */
   height?: number
+  /**
+   * 霓虹闪烁的动画延迟（秒）。
+   * 多个 NeonMarquee 同屏时（如影院模式上下两条），把其中一条设为负值（-2 ~ -3）让闪烁错峰，
+   * 避免两条同步闪烁形成视觉同频干扰。
+   */
+  flickerDelay?: number
   className?: string
 }
 
@@ -30,15 +36,24 @@ export default function NeonMarquee({
   variant = "bold",
   color = "pink",
   height,
+  flickerDelay = 0,
   className = "",
 }: NeonMarqueeProps) {
   // 重复成一条长字串，配合 CSS translateX -50% 做无缝循环
   const full = Array(4).fill(phrase).join("  ·  ")
 
+  // 通过 CSS custom property 注入闪烁延迟，避免对默认调用方造成任何影响
+  const rootStyle: React.CSSProperties = {
+    ...(height ? { height: `${height}px` } : null),
+    ...(flickerDelay !== 0
+      ? ({ ["--neon-flicker-delay" as any]: `${flickerDelay}s` } as React.CSSProperties)
+      : null),
+  }
+
   return (
     <div
       className={`neon-marquee neon-marquee-${variant} neon-marquee-${color} ${className}`}
-      style={height ? { height: `${height}px` } : undefined}
+      style={Object.keys(rootStyle).length > 0 ? rootStyle : undefined}
     >
       {/* LED 灯珠纹理底层 */}
       <div className="neon-marquee-leds" aria-hidden />

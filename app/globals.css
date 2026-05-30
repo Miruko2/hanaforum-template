@@ -1915,14 +1915,43 @@ body.modal-open {
   animation-play-state: paused;
 }
 
-/* 卡片 hover 时微微发光 */
+/* ============================================
+ * 聚光灯 hover（Apple TV / Netflix 风格的焦点效果）
+ * 鼠标悬停某张卡片时：
+ *   - 被聚焦的卡：略放大、上抬、强烈粉色光晕、提到顶层
+ *   - 其他所有卡：整体降亮 + 微微降饱和，把视觉焦点完全推到悬停的那张
+ * 用 :has() 选择器实现，无需 JS
+ * ============================================ */
 .cinema-card {
-  transition: transform 0.3s ease, box-shadow 0.3s ease;
+  transition:
+    transform 0.35s cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 0.35s ease,
+    filter 0.35s ease;
+  /* 默认状态显式给一个 filter，让 transition 在两个状态间平滑过渡 */
+  filter: brightness(1) saturate(1);
 }
+
 .cinema-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 0 24px rgba(244, 114, 182, 0.3);
-  z-index: 2;
+  transform: translateY(-4px) scale(1.04);
+  box-shadow:
+    0 0 40px rgba(244, 114, 182, 0.55),
+    0 12px 40px rgba(0, 0, 0, 0.5);
+  z-index: 5;
+  filter: brightness(1.08) saturate(1.1);
+}
+
+/* 同一舞台内存在被悬停的卡时，其他卡降亮 —— 这是聚光灯的关键 */
+.cinema-stage:has(.cinema-card:hover) .cinema-card:not(:hover) {
+  filter: brightness(0.45) saturate(0.75);
+}
+
+/* 减弱动效偏好：保留聚光灯亮度变化（信息层级），但去掉位移和缩放 */
+@media (prefers-reduced-motion: reduce) {
+  .cinema-card,
+  .cinema-card:hover {
+    transition: filter 0.2s ease, box-shadow 0.2s ease;
+    transform: none;
+  }
 }
 
 /* 移动端：列更少、倾斜角度减小 + scale 减小 */
@@ -2009,8 +2038,9 @@ body.modal-open {
     0 0 14px rgba(255, 100, 170, 0.85),
     0 0 28px rgba(236, 72, 153, 0.7),
     0 0 48px rgba(190, 24, 93, 0.5);
-  /* 微微的霓虹闪烁 */
+  /* 微微的霓虹闪烁。delay 通过 CSS variable 注入，多条同屏时可错峰 */
   animation: neonFlicker 4.5s ease-in-out infinite;
+  animation-delay: var(--neon-flicker-delay, 0s);
 }
 
 @keyframes neonFlicker {
@@ -2427,9 +2457,30 @@ body.modal-open {
 
 .live-wall-count {
   justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 11px;
   letter-spacing: 0.15em;
-  color: rgba(245, 166, 209, 0.5);
+  color: rgba(245, 166, 209, 0.7);
+}
+
+.live-wall-online-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #0f8;
+  box-shadow: 0 0 6px #0f8, 0 0 12px rgba(0, 255, 136, 0.6);
+  animation: liveWallOnlinePulse 2s ease-in-out infinite;
+}
+
+.live-wall-online-text {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes liveWallOnlinePulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.55; transform: scale(0.85); }
 }
 
 /* ===== 消息区 ===== */
@@ -2629,8 +2680,8 @@ body.modal-open {
   cursor: not-allowed;
 }
 
-/* 移动端微调 */
-@media (max-width: 640px) {
+/* 移动端微调（与下方左右布局切换的断点保持一致，避免 640~768 中间态） */
+@media (max-width: 768px) {
   .live-wall-header { padding: 10px 14px; grid-template-columns: auto 1fr auto; gap: 10px; }
   .live-wall-title-sub { display: none; }
   .live-wall-feed { padding: 12px 14px 8px; font-size: 13px; }

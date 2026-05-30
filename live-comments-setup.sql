@@ -27,12 +27,20 @@ CREATE POLICY "live_comments_read_all"
   ON public.live_comments
   FOR SELECT USING (true);
 
--- 5. 写权限：只有登录用户能发，且 user_id 必须是自己
+-- 5. 写权限：只有登录用户能发自己的弹幕，且过去 3 秒最多 2 条（反刷屏）
+--    hanako 走 service-role 绕过 RLS，不受此限
 DROP POLICY IF EXISTS "live_comments_insert_own" ON public.live_comments;
 CREATE POLICY "live_comments_insert_own"
   ON public.live_comments
   FOR INSERT
-  WITH CHECK (auth.uid() = user_id);
+  WITH CHECK (
+    auth.uid() = user_id
+    AND (
+      SELECT count(*) FROM public.live_comments
+      WHERE user_id = auth.uid()
+        AND created_at > now() - interval '3 seconds'
+    ) < 2
+  );
 
 -- 6. 删权限：只允许管理员（参考现有 admin_users 表）
 DROP POLICY IF EXISTS "live_comments_delete_admin" ON public.live_comments;

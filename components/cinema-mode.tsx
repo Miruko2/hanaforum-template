@@ -105,8 +105,8 @@ export default function CinemaMode({ posts }: CinemaModeProps) {
           <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/80 to-transparent z-10" />
         </div>
 
-        {/* 底部霓虹跑马灯（向右滚） */}
-        <NeonMarquee direction="right" duration={48} />
+        {/* 底部霓虹跑马灯（向右滚）—— flickerDelay 让上下两条闪烁错峰，避免同频干扰眼睛 */}
+        <NeonMarquee direction="right" duration={48} flickerDelay={-2.3} />
       </div>
 
       {/* 帖子详情模态框 */}
@@ -132,22 +132,42 @@ export default function CinemaMode({ posts }: CinemaModeProps) {
 
 /** 影院模式下单张卡片：图占满 + 底部渐变蒙层叠标题/用户名 */
 function CinemaCard({ post, onClick }: { post: Post; onClick: () => void }) {
+  // 图片加载失败时切换到 fallback：渐变占位 + 大字标题
+  // 影院模式默认会过滤掉空 image_url，所以正常路径只处理 CDN/网络失败的兜底
+  const [imgError, setImgError] = useState(false)
+  const showFallback = !post.image_url || imgError
+
   return (
     <button
       onClick={onClick}
       className="cinema-card group relative w-full aspect-[3/4] rounded-lg overflow-hidden block text-left border border-white/10"
     >
-      {post.image_url ? (
+      {!showFallback ? (
         <Image
-          src={post.image_url}
+          src={post.image_url!}
           alt={post.title}
           fill
           sizes="(max-width: 768px) 40vw, 15vw"
           quality={55}
           className="object-cover transition-transform duration-700 group-hover:scale-105"
+          onError={() => setImgError(true)}
         />
       ) : (
-        <div className="absolute inset-0 bg-gradient-to-br from-pink-900/40 to-purple-900/40" />
+        // 加载失败 fallback：粉紫渐变 + 标题大字，保留"海报感"而非空白
+        <div className="absolute inset-0 flex items-center justify-center p-3 bg-gradient-to-br from-pink-900/70 via-purple-900/60 to-rose-900/70">
+          {/* 装饰性扫描线，呼应影院模式的复古感 */}
+          <div
+            className="absolute inset-0 opacity-30 pointer-events-none"
+            style={{
+              backgroundImage:
+                "repeating-linear-gradient(0deg, rgba(255,255,255,0.06) 0px, rgba(255,255,255,0.06) 1px, transparent 1px, transparent 3px)",
+            }}
+            aria-hidden
+          />
+          <span className="relative z-10 text-white/85 text-sm md:text-base font-medium text-center line-clamp-3 break-all leading-tight drop-shadow-[0_2px_8px_rgba(0,0,0,0.6)]">
+            {post.title || "无标题"}
+          </span>
+        </div>
       )}
 
       {/* 底部渐变蒙层 + 文字（紧凑版） */}

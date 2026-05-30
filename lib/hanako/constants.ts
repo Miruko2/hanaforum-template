@@ -49,15 +49,7 @@ export const USER_MAX_CONCURRENT = 1
 /** 全局同时在飞的最大 AI 请求数 */
 export const GLOBAL_MAX_CONCURRENT = 2
 
-/** AI 回复最大 token */
-export const MAX_REPLY_TOKENS = 200
+/** AI 回复最大 token（JSON 包装本身约占 20 token，留够 reply 空间） */
+export const MAX_REPLY_TOKENS = 300
 
-/**
- * 允许与 hanako 对话的用户 ID 白名单
- * 空数组 = 不限制（所有人都能聊）
- * 填入 user_id 后只有这些用户的 @hanako 会触发 AI
- */
-export const ALLOWED_USER_IDS: string[] = [
-  "4345c6d0-05eb-4bc3-ba50-1cfa1dee2c41", // miruko2
-  "e4f655b1-d2f7-43fa-ad17-8627296c148c", // 闲猫
-]
+// 白名单从数据库表 hanako_allowed_users 读取（见 app/api/ai-reply/route.ts）

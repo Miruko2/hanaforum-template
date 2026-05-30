@@ -23,65 +23,88 @@ export async function POST(req: NextRequest) {
   let userId = ""
 
   try {
-    // 调试日志：记录 Cloudflare 相关头，用于排查 403 来源
-    const cfRay = req.headers.get("cf-ray")
-    const cfConnectingIp = req.headers.get("cf-connecting-ip")
-    const cfVisitor = req.headers.get("cf-visitor")
-    const userAgent = req.headers.get("user-agent")
-    console.log("[Hanako] 收到请求:", {
-      cfRay,
-      cfConnectingIp,
-      cfVisitor,
-      userAgent,
-      url: req.url,
-    })
+    // 1. 身份校验：必须带 Bearer token，用 Supabase 验签后才信任 user_id
+    //    这是这条路由的唯一可信 user 来源，body 里的 userId/username 一律忽略
+    const authHeader = req.headers.get("authorization") || ""
+    const token = authHeader.startsWith("Bearer ")
+      ? authHeader.slice("Bearer ".length).trim()
+      : ""
 
-    const body = await req.json()
-    const parsed = body as {
-      userId: string
-      username: string
-      content: string
+    if (!token) {
+      return NextResponse.json(
+        { error: "缺少认证信息（未登录）", code: "missing_auth" },
+        { status: 401 },
+      )
+    }
+
+    const { data: authData, error: authError } = await supabaseAdmin.auth.getUser(token)
+    if (authError || !authData?.user) {
+      return NextResponse.json(
+        { error: "认证失败或登录已过期", code: "invalid_auth" },
+        { status: 401 },
+      )
+    }
+    const authUser = authData.user
+    userId = authUser.id
+
+    // 2. 解析 body —— 只信任 content 和 recentMessages，userId/username 从 token 派生
+    const body = (await req.json()) as {
+      content?: string
       recentMessages?: { username: string; content: string }[]
     }
-    userId = parsed.userId
 
-    if (!parsed.userId || !parsed.username || !parsed.content) {
-      console.warn("[Hanako] 缺少必要参数:", { userId: parsed.userId, username: parsed.username, content: parsed.content })
-      return NextResponse.json({ error: "缺少必要参数" }, { status: 400 })
+    if (!body.content || typeof body.content !== "string") {
+      return NextResponse.json({ error: "缺少必要参数 content" }, { status: 400 })
     }
 
-    // 白名单检查（从数据库读取）
+    // 与前端 MAX_LENGTH / DB CHECK 对齐，防止超长内容打到上游
+    if (body.content.length > 50) {
+      return NextResponse.json({ error: "内容超过长度限制" }, { status: 400 })
+    }
+
+    // 派生用户名（用于 prompt 中称呼，不影响身份校验）
+    const username: string =
+      (authUser.user_metadata?.username as string | undefined) ||
+      (authUser.email ? authUser.email.split("@")[0] : null) ||
+      "匿名"
+
+    // 3. 白名单检查（基于可信的 token 解析出的 user_id）
     const { data: allowedUsers, error: allowedError } = await supabaseAdmin
       .from("hanako_allowed_users")
       .select("user_id")
-      .eq("user_id", parsed.userId)
+      .eq("user_id", userId)
       .maybeSingle()
 
     if (allowedError) {
       console.error("[Hanako] 白名单查询错误:", allowedError)
     }
 
-    // 如果白名单表存在且用户不在白名单中，拒绝访问
     if (!allowedUsers) {
-      console.warn("[Hanako] 白名单拒绝:", { userId: parsed.userId })
       return NextResponse.json(
-        { error: "你没有与 hanako 对话的权限（白名单检查未通过）" },
+        {
+          error: "你没有与 hanako 对话的权限（白名单检查未通过）",
+          code: "not_whitelisted",
+        },
         { status: 403 },
       )
     }
-    console.log("[Hanako] 白名单通过:", { userId: parsed.userId })
 
-    // 限流检查
-    const rateCheck = rateLimiter.checkRateLimit(parsed.userId)
+    // 4. 限流检查
+    const rateCheck = rateLimiter.checkRateLimit(userId)
     if (!rateCheck.allowed) {
-      return NextResponse.json({ error: rateCheck.reason }, { status: 429 })
+      return NextResponse.json(
+        { error: rateCheck.reason, code: "rate_limited" },
+        { status: 429 },
+      )
     }
 
-    rateLimiter.startCall(parsed.userId)
+    rateLimiter.startCall(userId)
 
     // 调用 DeepSeek
     const apiKey = process.env.DEEPSEEK_API_KEY
     const baseUrl = process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com/v1"
+    // 模型名走环境变量，默认 deepseek-v4-flash；可在 env 中覆盖为 deepseek-chat / deepseek-reasoner 等
+    const model = process.env.DEEPSEEK_MODEL || "deepseek-v4-flash"
 
     if (!apiKey) {
       console.error("[Hanako] DEEPSEEK_API_KEY 未配置")
@@ -89,9 +112,9 @@ export async function POST(req: NextRequest) {
     }
 
     const userMessage = buildUserMessage(
-      parsed.username,
-      parsed.content,
-      parsed.recentMessages || [],
+      username,
+      body.content,
+      body.recentMessages || [],
     )
 
     const aiResponse = await fetch(`${baseUrl}/chat/completions`, {
@@ -101,7 +124,7 @@ export async function POST(req: NextRequest) {
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: "deepseek-v4-flash",
+        model,
         messages: [
           { role: "system", content: HANAKO_SYSTEM_PROMPT },
           { role: "user", content: userMessage },
@@ -119,32 +142,47 @@ export async function POST(req: NextRequest) {
 
     const aiData = await aiResponse.json()
     const rawReply = aiData.choices?.[0]?.message?.content?.trim() || ""
+    const finishReason = aiData.choices?.[0]?.finish_reason
 
     // 解析 JSON 回复
     let emotion: HanakoEmotion = "neutral"
     let reply = ""
 
+    // 去掉可能的 markdown 代码块包装：```json ... ``` 或 ``` ... ```
+    const cleaned = rawReply
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/\s*```\s*$/i, "")
+      .trim()
+
     try {
-      const parsed = JSON.parse(rawReply)
+      const parsed = JSON.parse(cleaned)
       emotion = EMOTIONS.includes(parsed.emotion) ? parsed.emotion : "neutral"
-      reply = parsed.reply || ""
+      reply = typeof parsed.reply === "string" ? parsed.reply : ""
     } catch {
-      const jsonMatch = rawReply.match(/\{[\s\S]*?"emotion"[\s\S]*?"reply"[\s\S]*?\}/)
+      // 尝试从混入文本中抽完整 JSON
+      const jsonMatch = cleaned.match(/\{[\s\S]*?"emotion"[\s\S]*?"reply"[\s\S]*?\}/)
       if (jsonMatch) {
         try {
           const parsed = JSON.parse(jsonMatch[0])
           emotion = EMOTIONS.includes(parsed.emotion) ? parsed.emotion : "neutral"
-          reply = parsed.reply || ""
+          reply = typeof parsed.reply === "string" ? parsed.reply : ""
         } catch {
-          reply = rawReply.slice(0, 100)
+          // 半截 JSON：解析失败但带有 "reply" 关键字，说明被截断了，丢弃
         }
-      } else {
-        reply = rawReply.slice(0, 100)
+      } else if (!cleaned.includes('"emotion"') && !cleaned.includes('"reply"')) {
+        // 完全不是 JSON 格式的纯文本回复，截断兜底
+        reply = cleaned.slice(0, 100)
       }
+      // 其他情况（含 "reply" 但解不出来）= 半截 JSON，reply 保持为 ""
     }
 
     if (!reply) {
-      return NextResponse.json({ error: "AI 未生成有效回复" }, { status: 500 })
+      console.warn("[Hanako] 解析回复失败:", { finishReason, rawReplyHead: rawReply.slice(0, 80) })
+      const errorMsg =
+        finishReason === "length"
+          ? "AI 回复被截断，请重试"
+          : "AI 未生成有效回复"
+      return NextResponse.json({ error: errorMsg }, { status: 500 })
     }
 
     // 将 AI 回复写入 live_comments

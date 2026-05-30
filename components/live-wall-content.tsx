@@ -82,6 +82,7 @@ export default function LiveWallContent() {
   const [input, setInput] = useState("")
   const [sending, setSending] = useState(false)
   const [inputFocused, setInputFocused] = useState(false)
+  const [onlineCount, setOnlineCount] = useState(0)
   const listRef = useRef<HTMLDivElement>(null)
 
   // Hanako AI 状态
@@ -102,17 +103,31 @@ export default function LiveWallContent() {
     return () => cancelAnimationFrame(rafId)
   }, [])
 
-  // 退场
+  // 退场：保存 timer ref 以便组件卸载/重复调用时清理
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const handleBack = useCallback(() => {
     if (closing) return
     setClosing(true)
-    setTimeout(() => router.push("/"), TRANSITION_MS)
+    closeTimerRef.current = setTimeout(() => router.push("/"), TRANSITION_MS)
   }, [closing, router])
 
-  // ESC 键
+  useEffect(() => {
+    return () => {
+      if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
+    }
+  }, [])
+
+  // ESC 键：在输入框内输入时不触发返回，先 blur 让用户取消输入
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") handleBack()
+      if (e.key !== "Escape") return
+      const target = e.target as HTMLElement | null
+      const tag = target?.tagName
+      if (tag === "INPUT" || tag === "TEXTAREA" || target?.isContentEditable) {
+        target.blur()
+        return
+      }
+      handleBack()
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
@@ -150,21 +165,49 @@ export default function LiveWallContent() {
       setHanakoThinking(true)
 
       try {
-        const recent = commentsRef.current
-          .slice(-50)
-          .map((c) => ({ username: c.username, content: c.content }))
+        // 取当前 session 的 access_token，让服务端可验签出可信 user_id
+        const { data: sessionData } = await supabase.auth.getSession()
+        const accessToken = sessionData?.session?.access_token
+        if (!accessToken) {
+          toast({
+            title: "登录已过期",
+            description: "请重新登录后再 @hanako",
+            variant: "destructive",
+          })
+          return
+        }
 
-        const username =
-          currentUser.user_metadata?.username ||
-          (currentUser.email ? currentUser.email.split("@")[0] : "匿名")
+        // 上下文裁剪：只保留两类消息，丢掉无关闲聊
+        //   1) 所有"包含 @hanako"的触发消息（窗口内 ≤100 条，量可控）
+        //   2) hanako 自己最近 20 条回复（限量，防 token 漂移到很久之前）
+        // 仍按时间正序传给后端，旧 → 新
+        const HANAKO_REPLY_LIMIT = 20
+        const filtered: DisplayComment[] = []
+        let hanakoKept = 0
+        for (let i = commentsRef.current.length - 1; i >= 0; i--) {
+          const c = commentsRef.current[i]
+          const isHanako = c.username === HANAKO_USERNAME
+          const isTrigger = !isHanako && TRIGGER_REGEX.test(c.content)
+          if (isHanako) {
+            if (hanakoKept >= HANAKO_REPLY_LIMIT) continue
+            hanakoKept++
+            filtered.push(c)
+          } else if (isTrigger) {
+            filtered.push(c)
+          }
+        }
+        const recent = filtered
+          .reverse()
+          .map((c) => ({ username: c.username, content: c.content }))
 
         const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || ""
         const res = await fetch(`${apiBase}/api/ai-reply`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
           body: JSON.stringify({
-            userId: currentUser.id,
-            username,
             content: triggerComment.content,
             recentMessages: recent,
           }),
@@ -176,19 +219,32 @@ export default function LiveWallContent() {
           setHanakoReply(data.reply || "")
         } else {
           const errData = await res.json().catch(() => ({}))
-          if (res.status === 403) {
-            const isCloudflareBlock = !errData.error?.includes("白名单")
+          // 优先按 code 路由文案（后端已统一返回 code 字段）
+          const code = errData.code as string | undefined
+          if (res.status === 401) {
             toast({
-              title: isCloudflareBlock ? "请求被拦截" : "无权限",
-              description: isCloudflareBlock
-                ? "Cloudflare 安全规则拦截了请求，请检查 Bot Fight Mode 或 WAF 设置"
-                : errData.error || "你没有与 hanako 对话的权限，请联系管理员获取",
+              title: "登录已过期",
+              description: errData.error || "请重新登录后再 @hanako",
               variant: "destructive",
             })
-          } else if (res.status === 429 && errData.error) {
+          } else if (res.status === 403) {
+            if (code === "not_whitelisted") {
+              toast({
+                title: "无权限",
+                description: errData.error || "你没有与 hanako 对话的权限",
+                variant: "destructive",
+              })
+            } else {
+              toast({
+                title: "请求被拦截",
+                description: "可能被 Cloudflare 安全规则拦截，请检查 Bot Fight Mode 或 WAF 设置",
+                variant: "destructive",
+              })
+            }
+          } else if (res.status === 429) {
             toast({
               title: "hanako 正忙",
-              description: errData.error,
+              description: errData.error || "请稍后再试",
               variant: "destructive",
             })
           } else {
@@ -201,6 +257,11 @@ export default function LiveWallContent() {
         }
       } catch (err) {
         console.error("[LiveWall] AI 回复请求失败:", err)
+        toast({
+          title: "AI 连接失败",
+          description: "网络异常或服务不可达，请稍后重试",
+          variant: "destructive",
+        })
       } finally {
         setHanakoThinking(false)
         aiPendingRef.current = false
@@ -232,6 +293,8 @@ export default function LiveWallContent() {
   }, [toDisplay])
 
   // 实时订阅
+  // 注意：AI 触发只在 handleSend（发送者本地）做，避免每个在线客户端都
+  // 收到 realtime INSERT 后各自打一遍 /api/ai-reply，造成 N 倍调用。
   useEffect(() => {
     const channel = supabase
       .channel("live_comments_page")
@@ -247,16 +310,6 @@ export default function LiveWallContent() {
               ? next.slice(next.length - MAX_DISPLAY)
               : next
           })
-
-          // 检查是否需要触发 AI（只对别人的消息触发，自己的在 handleSend 里已触发）
-          const currentUser = userRef.current
-          if (
-            c.username !== HANAKO_USERNAME &&
-            TRIGGER_REGEX.test(c.content) &&
-            (!currentUser || c.user_id !== currentUser.id)
-          ) {
-            triggerAIReply(c)
-          }
         },
       )
       .on(
@@ -272,7 +325,36 @@ export default function LiveWallContent() {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [toDisplay, triggerAIReply])
+  }, [toDisplay])
+
+  // 在线人数（Supabase Presence）
+  // 每个 tab 一个独立 presence key——同用户开两个 tab 算两个在线（符合 connection 语义）
+  // 未登录访客也计入，弹幕墙本来就是公开看的
+  useEffect(() => {
+    const presenceKey =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `anon-${Math.random().toString(36).slice(2)}-${Date.now()}`
+
+    const channel = supabase.channel("live_wall_presence", {
+      config: { presence: { key: presenceKey } },
+    })
+
+    channel
+      .on("presence", { event: "sync" }, () => {
+        const state = channel.presenceState()
+        setOnlineCount(Object.keys(state).length)
+      })
+      .subscribe(async (status) => {
+        if (status === "SUBSCRIBED") {
+          await channel.track({ online_at: new Date().toISOString() })
+        }
+      })
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [])
 
   // 打字机推进
   useEffect(() => {
@@ -292,12 +374,15 @@ export default function LiveWallContent() {
     return () => clearInterval(timer)
   }, [comments])
 
-  // 自动滚底部
+  // 自动滚底部：依赖最后一条消息的 typedChars，让打字过程也跟随滚动
+  const lastTypedKey = comments.length
+    ? `${comments[comments.length - 1].id}:${comments[comments.length - 1].typedChars}`
+    : ""
   useEffect(() => {
     if (listRef.current) {
       listRef.current.scrollTop = listRef.current.scrollHeight
     }
-  }, [comments.length])
+  }, [lastTypedKey])
 
   // 发送
   const handleSend = useCallback(async () => {
@@ -331,15 +416,28 @@ export default function LiveWallContent() {
       }
     } catch (err: any) {
       console.error("[LiveWall] 发送失败:", err)
-      toast({
-        title: "发送失败",
-        description: err?.message || "请稍后重试",
-        variant: "destructive",
-      })
+      // PostgreSQL 42501 = RLS 拒绝；这里是被速率限制策略挡了（3 秒最多 2 条）
+      const isRateLimited =
+        err?.code === "42501" ||
+        (typeof err?.message === "string" &&
+          err.message.toLowerCase().includes("row-level security"))
+      if (isRateLimited) {
+        toast({
+          title: "发太快了",
+          description: "弹幕速率受限，请慢一点（3 秒内最多 2 条）",
+          variant: "destructive",
+        })
+      } else {
+        toast({
+          title: "发送失败",
+          description: err?.message || "请稍后重试",
+          variant: "destructive",
+        })
+      }
     } finally {
       setSending(false)
     }
-  }, [input, sending, user, toast])
+  }, [input, sending, user, toast, triggerAIReply])
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -377,8 +475,11 @@ export default function LiveWallContent() {
           <span className="live-wall-title-sub">FIREFLY NATION</span>
         </div>
 
-        <div className="live-wall-count">
-          {comments.length.toString().padStart(2, "0")} / {MAX_DISPLAY}
+        <div className="live-wall-count" aria-label={`当前在线 ${onlineCount} 人`}>
+          <span className="live-wall-online-dot" aria-hidden />
+          <span className="live-wall-online-text">
+            {onlineCount > 0 ? `${onlineCount} 在线` : "连接中..."}
+          </span>
         </div>
       </header>
 
