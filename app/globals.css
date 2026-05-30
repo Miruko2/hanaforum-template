@@ -1892,10 +1892,12 @@ body.modal-open {
   pointer-events: none;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  /* 让 6 行均匀铺满整个 stage 高度，覆盖左上/右下缺口区 */
+  justify-content: space-between;
   /* 关键：让子 row 不被拉伸到父宽，保留 max-content 宽度 */
   align-items: flex-start;
-  gap: 3vh;
+  /* 给上下留点呼吸感，避免顶/底行被羽化遮罩完全压住 */
+  padding: 1vh 0;
 }
 
 .cinema-bg-row {
@@ -1908,32 +1910,32 @@ body.modal-open {
     "Helvetica Neue", "Microsoft YaHei", "PingFang SC", sans-serif;
   font-weight: 900;
   font-style: italic;
-  font-size: clamp(56px, 12vh, 140px);
+  /* 6 行铺满，字号略缩，约 9vh */
+  font-size: clamp(44px, 9vh, 100px);
   line-height: 1;
   letter-spacing: 0.04em;
-  /* 镂空 + 微弱填色 fallback：
-   *   - 若浏览器支持 -webkit-text-stroke：transparent 填色 + 描边 = 镂空效果
-   *   - 若 stroke 渲染失败：仍有微弱填色保证可见
-   */
-  color: rgba(255, 180, 220, 0.06);
-  -webkit-text-stroke: 2px rgba(255, 180, 220, 0.32);
+  /* 镂空 + 填色 fallback */
+  color: rgba(255, 180, 220, 0.18);
+  -webkit-text-stroke: 2px rgba(255, 180, 220, 0.55);
   will-change: transform;
   animation-timing-function: linear;
   animation-iteration-count: infinite;
 }
 
-/* 上行向左滚 */
-.cinema-bg-row.row-top {
+/* 滚动方向：duration 由内联 style 控制以便每行错开 */
+.cinema-bg-row.scroll-left {
   animation-name: cinemaBgScrollLeft;
-  animation-duration: 80s;
+}
+.cinema-bg-row.scroll-right {
+  animation-name: cinemaBgScrollRight;
 }
 
-/* 下行向右滚，速度略不同避免周期性同步 */
-.cinema-bg-row.row-bottom {
-  animation-name: cinemaBgScrollRight;
-  animation-duration: 95s;
-  /* 错峰起始偏移：负 margin 让 row 起始位置左移，与上行节奏错开 */
-  margin-left: -8%;
+/* 偶数行起始位置偏移，与奇数行节奏错峰 */
+.cinema-bg-row:nth-child(even) {
+  margin-left: -10%;
+}
+.cinema-bg-row:nth-child(3n) {
+  margin-left: -5%;
 }
 
 .cinema-bg-row > span {
@@ -1959,13 +1961,10 @@ body.modal-open {
   }
 }
 
-/* 移动端：字号降档、行间距压缩 */
+/* 移动端：字号降档（影院模式本身桌面专享，这里仅作降级保护） */
 @media (max-width: 640px) {
-  .cinema-bg-text {
-    gap: 2vh;
-  }
   .cinema-bg-row {
-    font-size: clamp(40px, 9vh, 80px);
+    font-size: clamp(32px, 7vh, 64px);
     -webkit-text-stroke-width: 1px;
   }
 }
