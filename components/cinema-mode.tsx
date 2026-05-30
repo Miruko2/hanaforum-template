@@ -14,6 +14,16 @@ interface CinemaModeProps {
 }
 
 /**
+ * 滚动背景大字内容。
+ * 重复多次保证 translateX(-50%) 时第二份字串恰好对齐起点（无缝循环），
+ * 同时确保内容总宽超过任何常见视口宽度（>200vw），避免出现尾巴空白。
+ */
+const BG_PHRASE_TOP = "FIREFLY CINEMA · NEON STAGE · "
+const BG_PHRASE_BOTTOM = "ホタル劇場 · MIDNIGHT REEL · "
+const BG_TEXT_TOP = BG_PHRASE_TOP.repeat(8)
+const BG_TEXT_BOTTOM = BG_PHRASE_BOTTOM.repeat(8)
+
+/**
  * 首页"影院模式"：5 列斜向的海报墙，奇数列向下滚/偶数列向上滚。
  * 鼠标悬停在某列上时整列停滚。点击卡片打开详情模态框。
  */
@@ -70,10 +80,20 @@ export default function CinemaMode({ posts }: CinemaModeProps) {
 
         {/* 中间舞台：海报墙 */}
         <div className="cinema-stage relative flex-1 overflow-hidden">
-          {/* 角落装饰：cinema-tilted 倾斜后左上/右下两个三角缺口处的"投影光柱"装饰。
-              DOM 上故意排在 cinema-tilted 之前，海报会自然盖住装饰，
-              只有缺口处装饰才会露出 —— 把几何缺陷转化为风格设计。*/}
-          <div className="cinema-corner-decoration absolute inset-0" aria-hidden />
+          {/* 镂空滚动大字背景：两行斜体粗字反向滚动，充当舞台氛围底色。
+              DOM 上排在 cinema-tilted 之前 → 海报自然盖住背景，
+              只有海报间空隙和倾斜后的角落缺口才会露出滚动大字 ——
+              把"角落缺口"自动盖到，同时把空白处填上节奏感。*/}
+          <div className="cinema-bg-text" aria-hidden>
+            <div className="cinema-bg-row row-top">
+              <span>{BG_TEXT_TOP}</span>
+              <span>{BG_TEXT_TOP}</span>
+            </div>
+            <div className="cinema-bg-row row-bottom">
+              <span>{BG_TEXT_BOTTOM}</span>
+              <span>{BG_TEXT_BOTTOM}</span>
+            </div>
+          </div>
 
           <div className="cinema-tilted absolute inset-0">
             <div className="cinema-cols h-full w-full flex gap-2 md:gap-2.5">

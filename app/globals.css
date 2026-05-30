@@ -1879,74 +1879,87 @@ body.modal-open {
 }
 
 /* ============================================
- * 影院模式：左上/右下三角缺口装饰
- * 倾斜 -10° 后的旋转矩形几何上无法覆盖父容器四角，
- * 与其拉大 scale 让海报变形，不如把这两个三角"主动占领"，
- * 做成投影机聚光灯的角落装饰，呼应影院主题。
- *
- * 装饰层 DOM 上在 cinema-tilted 之前，所以海报自然盖住装饰，
- * 只有缺口处装饰可见 —— 不需要复杂的 z-index 管理。
+ * 影院模式：镂空滚动大字背景
+ * 两行斜体粗字反向滚动，作为整个舞台的氛围底色。
+ * DOM 排在 cinema-tilted 之前 → 海报自然盖住背景，
+ * 只有海报列间空隙和倾斜后的角落缺口会露出大字 ——
+ * 把"几何缺陷"转化为"风格设计"。
  * ============================================ */
-.cinema-corner-decoration {
-  pointer-events: none;
-}
-
-.cinema-corner-decoration::before,
-.cinema-corner-decoration::after {
-  content: "";
+.cinema-bg-text {
   position: absolute;
-  width: 22%;
-  height: 38%;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3vh;
 }
 
-.cinema-corner-decoration::before {
-  top: 0;
-  left: 0;
-  /* 左上：对角细条纹（投影光柱） + 粉色光晕从左上扩散 */
-  background:
-    repeating-linear-gradient(
-      125deg,
-      rgba(255, 200, 230, 0.09) 0px,
-      rgba(255, 200, 230, 0.09) 1.5px,
-      transparent 1.5px,
-      transparent 14px
-    ),
-    radial-gradient(
-      ellipse at top left,
-      rgba(244, 114, 182, 0.55) 0%,
-      rgba(190, 24, 93, 0.28) 35%,
-      transparent 75%
-    );
-  clip-path: polygon(0 0, 100% 0, 0 100%);
+.cinema-bg-row {
+  display: flex;
+  flex-shrink: 0;
+  white-space: nowrap;
+  /* 用系统粗 sans-serif，italic 模拟展示字 */
+  font-family: ui-sans-serif, system-ui, -apple-system, "SF Pro Display",
+    "Helvetica Neue", "Microsoft YaHei", sans-serif;
+  font-weight: 900;
+  font-style: italic;
+  font-size: clamp(60px, 14vh, 180px);
+  line-height: 0.9;
+  letter-spacing: 0.04em;
+  /* 镂空：transparent 填充 + stroke 描边 */
+  color: transparent;
+  -webkit-text-stroke: 1.5px rgba(255, 180, 220, 0.18);
+  will-change: transform;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
 }
 
-.cinema-corner-decoration::after {
-  bottom: 0;
-  right: 0;
-  /* 右下：镜像装饰，光源在右下角 */
-  background:
-    repeating-linear-gradient(
-      55deg,
-      rgba(255, 200, 230, 0.09) 0px,
-      rgba(255, 200, 230, 0.09) 1.5px,
-      transparent 1.5px,
-      transparent 14px
-    ),
-    radial-gradient(
-      ellipse at bottom right,
-      rgba(244, 114, 182, 0.55) 0%,
-      rgba(190, 24, 93, 0.28) 35%,
-      transparent 75%
-    );
-  clip-path: polygon(100% 0, 100% 100%, 0 100%);
+/* 上行向左滚 */
+.cinema-bg-row.row-top {
+  animation-name: cinemaBgScrollLeft;
+  animation-duration: 80s;
 }
 
-/* 移动端：缺口更明显（容器更窄），装饰覆盖区扩大 */
+/* 下行向右滚，速度略不同避免周期性同步 */
+.cinema-bg-row.row-bottom {
+  animation-name: cinemaBgScrollRight;
+  animation-duration: 95s;
+  /* 错峰偏移：与上行不对齐，增强层次 */
+  padding-left: 6%;
+}
+
+.cinema-bg-row span {
+  display: inline-block;
+  padding-right: 0.8em;
+}
+
+@keyframes cinemaBgScrollLeft {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
+@keyframes cinemaBgScrollRight {
+  from { transform: translateX(-50%); }
+  to   { transform: translateX(0); }
+}
+
+/* 减弱动效偏好下停止滚动，保留视觉层次 */
+@media (prefers-reduced-motion: reduce) {
+  .cinema-bg-row {
+    animation: none;
+  }
+}
+
+/* 移动端：字号降档、行间距压缩 */
 @media (max-width: 640px) {
-  .cinema-corner-decoration::before,
-  .cinema-corner-decoration::after {
-    width: 30%;
-    height: 32%;
+  .cinema-bg-text {
+    gap: 2vh;
+  }
+  .cinema-bg-row {
+    font-size: clamp(40px, 9vh, 80px);
+    -webkit-text-stroke-width: 1px;
   }
 }
 
