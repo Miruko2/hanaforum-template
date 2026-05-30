@@ -1893,24 +1893,30 @@ body.modal-open {
   display: flex;
   flex-direction: column;
   justify-content: center;
+  /* 关键：让子 row 不被拉伸到父宽，保留 max-content 宽度 */
+  align-items: flex-start;
   gap: 3vh;
 }
 
 .cinema-bg-row {
-  display: flex;
   flex-shrink: 0;
+  /* 关键：宽度 = 内容总宽（而非父宽），translateX(-50%) 才能精确移动一份内容长度 */
+  width: max-content;
   white-space: nowrap;
   /* 用系统粗 sans-serif，italic 模拟展示字 */
   font-family: ui-sans-serif, system-ui, -apple-system, "SF Pro Display",
-    "Helvetica Neue", "Microsoft YaHei", sans-serif;
+    "Helvetica Neue", "Microsoft YaHei", "PingFang SC", sans-serif;
   font-weight: 900;
   font-style: italic;
-  font-size: clamp(60px, 14vh, 180px);
-  line-height: 0.9;
+  font-size: clamp(56px, 12vh, 140px);
+  line-height: 1;
   letter-spacing: 0.04em;
-  /* 镂空：transparent 填充 + stroke 描边 */
-  color: transparent;
-  -webkit-text-stroke: 1.5px rgba(255, 180, 220, 0.18);
+  /* 镂空 + 微弱填色 fallback：
+   *   - 若浏览器支持 -webkit-text-stroke：transparent 填色 + 描边 = 镂空效果
+   *   - 若 stroke 渲染失败：仍有微弱填色保证可见
+   */
+  color: rgba(255, 180, 220, 0.06);
+  -webkit-text-stroke: 2px rgba(255, 180, 220, 0.32);
   will-change: transform;
   animation-timing-function: linear;
   animation-iteration-count: infinite;
@@ -1926,12 +1932,13 @@ body.modal-open {
 .cinema-bg-row.row-bottom {
   animation-name: cinemaBgScrollRight;
   animation-duration: 95s;
-  /* 错峰偏移：与上行不对齐，增强层次 */
-  padding-left: 6%;
+  /* 错峰起始偏移：负 margin 让 row 起始位置左移，与上行节奏错开 */
+  margin-left: -8%;
 }
 
-.cinema-bg-row span {
+.cinema-bg-row > span {
   display: inline-block;
+  flex-shrink: 0;
   padding-right: 0.8em;
 }
 
