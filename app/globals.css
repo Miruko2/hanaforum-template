@@ -1,9 +1,12 @@
+/* 终端机等宽字体（弹幕墙、影院模式跑马灯使用）。
+   必须放在文件最顶端：@tailwind 展开后会变成几千行 CSS，
+   若 @import 在它之后，编译产物中 @import 会出现在真实规则之后，
+   按 CSS 规范浏览器会忽略，字体不会加载。 */
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-/* 终端机等宽字体（弹幕墙、影院模式跑马灯使用），放在 @tailwind 之后以正常生效 */
-@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
 
 /* 系统字体堆栈 */
 @layer base {
