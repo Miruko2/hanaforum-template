@@ -110,7 +110,11 @@ export type Instance = {
  * packing — no per-column wrap, no visible seam.
  *
  * margin: extra pixels around viewport to keep predrawn so wrap-in is
- * never visible during a drag.
+ * never visible during a drag. The default 80 was chosen by A/B comparison:
+ * 80 vs 280 (the original) is the single biggest perf win on this page, and
+ * the visible cards-popping-in artifact 80 was supposed to prevent turns out
+ * to be near-imperceptible at the page's actual drag velocities — on both
+ * mobile and desktop.
  */
 export function computeInstances(
   pack: PackResult,
@@ -118,7 +122,7 @@ export function computeInstances(
   panY: number,
   viewW: number,
   viewH: number,
-  margin = 280,
+  margin = 80,
 ): Instance[] {
   const { cards, tileW, tileH } = pack
   const out: Instance[] = []

@@ -245,16 +245,13 @@ export function MusicCanvas({ onExpand }: Props) {
       const panMoved =
         Math.abs(panX - prevPanX) > 0.01 || Math.abs(panY - prevPanY) > 0.01
 
-      // Recompute the visible set only when the pan actually moved. At rest this
-      // avoids the per-frame array + signature-string allocation entirely.
-      // Lite tier uses a much tighter pre-render margin (80 vs 280): on phones
-      // the slower scroll velocity hides the cards-popping-in artifact that
-      // the wider margin was protecting against, and the smaller visible set
-      // is one of the biggest perf wins available.
+      // Recompute the visible set only when the pan actually moved. At rest
+      // this avoids the per-frame array + signature-string allocation entirely.
+      // Margin is left at the function's default (80): A/B-tested as the
+      // single biggest perf win on this page, with no perceptible popping at
+      // our drag velocities on either mobile or desktop.
       if (panMoved || cachedList.length === 0) {
-        cachedList = computeInstances(
-          pack, panX, panY, viewSize.w, viewSize.h, lite ? 80 : 280,
-        )
+        cachedList = computeInstances(pack, panX, panY, viewSize.w, viewSize.h)
         const sig = cachedList.map((i) => i.key).join("|")
         if (sig !== instanceKeysRef.current) {
           instanceKeysRef.current = sig
