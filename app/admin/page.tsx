@@ -307,9 +307,11 @@ export default function AdminPage() {
     try {
       if (selectedItem.type === "post") {
         // 删除帖子
+        // 注：delete_post 已重写为只接受 p_post_id 参数，权限内部通过 auth.uid() 判断
+        // （旧签名 delete_post(p_post_id, p_user_id) 信任客户端传入的 user_id，
+        //  任何人能伪造管理员 UUID 删任意帖 → 已修复，见 scripts/security-fix-2026-05-31.sql）
         await supabase.rpc("delete_post", {
           p_post_id: selectedItem.id,
-          p_user_id: user?.id,
         })
         toast({
           title: "删除成功",
