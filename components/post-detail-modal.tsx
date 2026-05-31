@@ -319,19 +319,27 @@ export default function PostDetailModal({
                   </div>
                 </div>
               ) : (
-                /* 竖版：图在上，文字评论在下（原版布局） */
+                /* 竖版：图/文字Hero 在上，文字评论在下（手机端） */
                 <div className="flex flex-col">
                   <div className="relative w-full overflow-hidden">
-                    <PostCardImage
-                      post={post}
-                      isMobile={isMobile}
-                      inDetailView={true}
-                      onImageLoad={(dimensions) => {
-                        console.log(
-                          `详情视图图片尺寸: ${dimensions.width}x${dimensions.height}, 比例: ${dimensions.ratio}`,
-                        )
-                      }}
-                    />
+                    {post.image_url ? (
+                      <PostCardImage
+                        post={post}
+                        isMobile={isMobile}
+                        inDetailView={true}
+                        onImageLoad={(dimensions) => {
+                          console.log(
+                            `详情视图图片尺寸: ${dimensions.width}x${dimensions.height}, 比例: ${dimensions.ratio}`,
+                          )
+                        }}
+                      />
+                    ) : (
+                      // 无图帖子：跟 PC 端横版一样走 TextualHero，避免出现孤零零的三角占位
+                      // 高度 280px：够展示标题 + 装饰，又不喧宾夺主挤压内容区
+                      <div className="h-[280px]">
+                        <TextualHero post={post} />
+                      </div>
+                    )}
                   </div>
 
                   <div className="p-6 overflow-y-auto" style={{ maxHeight: "calc(90vh - 300px)" }}>
