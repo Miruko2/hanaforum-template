@@ -4,6 +4,7 @@ import { createContext, useReducer, useContext, ReactNode, useEffect, useState }
 import type { Post } from '@/lib/types'
 import { getPostsWithPinned } from '@/lib/supabase-optimized'
 import { supabase } from '@/lib/supabaseClient'
+import { useSimpleAuth } from '@/contexts/auth-context-simple'
 
 // 添加帖子缓存（按分类）
 // key: category 值，null 对应 "__all__"
@@ -134,6 +135,9 @@ export function PostsProvider({ children }: { children: ReactNode }) {
     error: null,
     category: null,
   })
+
+  // 用于 addPost 时优先用当前登录用户自己的用户名（零延迟，无需查 profiles）
+  const { user } = useSimpleAuth()
   
   // 加载帖子 - 增强版本
   const loadPosts = async () => {
@@ -289,22 +293,56 @@ export function PostsProvider({ children }: { children: ReactNode }) {
   }
   
   // 添加帖子 - 乐观更新UI
+  // username 解析优先级：
+  //   1. post.username 已传入（调用方明确给了）
+  //   2. 自己发的帖 → 直接用当前用户的 metadata.username（零延迟）
+  //   3. 别人发的帖（realtime 推送）→ 先用兜底占位，后台异步查 profiles 拿真名再 dispatch UPDATE_POST
+  // 之所以拆"先占位 + 后修正"是为了不阻塞 UI：用户看到的延迟约 200ms 的名字闪烁，比看到"用户_xxx"几秒后才纠正友好得多
   const addPost = (post: Post) => {
-    // 确保帖子有所有必要的字段
+    const ownerId = post.user_id
+    const fallback = `用户_${ownerId.substring(0, 6)}`
+
+    // 解析初始 username
+    let initialUsername = post.username
+    if (!initialUsername && user && ownerId === user.id) {
+      // 自己刚发的帖：metadata 已经在内存里，直接用
+      initialUsername = (user.user_metadata?.username as string | undefined) || undefined
+    }
+
     const completePost: Post = {
       ...post,
       likes: post.likes ?? 0,
       comments: post.comments ?? 0,
       likes_count: post.likes_count ?? 0,
       comments_count: post.comments_count ?? 0,
-      username: post.username ?? `用户_${post.user_id.substring(0, 6)}`,
+      username: initialUsername ?? fallback,
       imageContent: post.image_url ? undefined : ["+", "X", "O", "□", "△", "◇"][Math.floor(Math.random() * 6)],
-    };
-    
+    }
+
     // 新帖子影响所有分类缓存：全部作废最安全
-    postCacheByCategory.clear();
-    
-    dispatch({ type: 'ADD_POST', payload: completePost });
+    postCacheByCategory.clear()
+
+    dispatch({ type: 'ADD_POST', payload: completePost })
+
+    // 如果初始名是兜底占位，后台异步查 profiles 拿真名再修正
+    if (!initialUsername) {
+      void supabase
+        .from('profiles')
+        .select('username')
+        .eq('id', ownerId)
+        .single()
+        .then(({ data, error }) => {
+          if (error || !data?.username) return // 查不到就保持兜底名，下次 loadPosts 会拉到真名
+          if (data.username === fallback) return
+          dispatch({
+            type: 'UPDATE_POST',
+            payload: {
+              id: post.id,
+              updates: { username: data.username },
+            },
+          })
+        })
+    }
   }
   
   // 删除帖子 - 乐观更新UI

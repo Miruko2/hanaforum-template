@@ -192,21 +192,8 @@ export default function ProfilePage() {
       setUsername(newName)
       setEditingUsername(false)
 
-      // ② 同步老帖署名（失败只警告，不回滚）
-      const { error: postsErr } = await supabase
-        .from("posts")
-        .update({ username: newName })
-        .eq("user_id", user.id)
-
-      if (postsErr) {
-        console.warn("同步 posts.username 失败:", postsErr)
-        toast({
-          title: "用户名已修改",
-          description: "但部分老帖署名同步失败，刷新后可能仍显示旧名",
-        })
-      }
-
-      // ③ 同步 auth.user_metadata.username（弹幕墙 AI 称呼依赖这个）
+      // ② 同步 auth.user_metadata.username（弹幕墙 AI 称呼依赖这个）
+      // 注：posts 表无 username 列（显示名靠前端 join profiles），所以不需要 UPDATE posts
       const { error: metaErr } = await supabase.auth.updateUser({
         data: { username: newName, displayName: newName },
       })
