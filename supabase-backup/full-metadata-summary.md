@@ -1,7 +1,7 @@
 # Supabase Full Metadata Summary
 
 Generated from snapshot: supabase-backup\full-metadata.json
-Snapshot generated at: 2026-05-18T09:01:42.976Z
+Snapshot generated at: 2026-05-31T05:18:16.486Z
 
 ## Tables
 
@@ -75,6 +75,31 @@ RLS policies:
   Command: SELECT; roles: public; permissive: PERMISSIVE
   USING: (auth.uid() IN ( SELECT admins_1.user_id
    FROM admins admins_1))
+
+### ai_config
+
+- Kind: r
+- Owner: postgres
+- RLS enabled: true
+- RLS forced: false
+
+| Column | Type | Nullable | Default |
+| --- | --- | --- | --- |
+| id | integer (int4) | no | 1 |
+| base_url | text (text) | no | 'https://api.deepseek.com/v1'::text |
+| api_key | text (text) | no | ''::text |
+| model | text (text) | no | 'deepseek-chat'::text |
+| updated_at | timestamp with time zone (timestamptz) | yes | now() |
+| updated_by | uuid (uuid) | yes |  |
+
+Constraints:
+- ai_config_id_check: c
+  CHECK (id = 1)
+- ai_config_pkey: p
+  PRIMARY KEY (id)
+
+Indexes:
+- ai_config_pkey: `CREATE UNIQUE INDEX ai_config_pkey ON public.ai_config USING btree (id)`
 
 ### comment_likes
 
@@ -281,7 +306,9 @@ RLS policies:
   WHERE (admin_users.user_id = auth.uid())))
 - live_comments_insert_own
   Command: INSERT; roles: public; permissive: PERMISSIVE
-  WITH CHECK: (auth.uid() = user_id)
+  WITH CHECK: ((auth.uid() = user_id) AND (( SELECT count(*) AS count
+   FROM live_comments live_comments_1
+  WHERE ((live_comments_1.user_id = auth.uid()) AND (live_comments_1.created_at > (now() - '00:00:03'::interval)))) < 2))
 - live_comments_read_all
   Command: SELECT; roles: public; permissive: PERMISSIVE
   USING: true
