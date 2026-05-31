@@ -49,7 +49,17 @@ export const USER_MAX_CONCURRENT = 1
 /** 全局同时在飞的最大 AI 请求数 */
 export const GLOBAL_MAX_CONCURRENT = 2
 
-/** AI 回复最大 token（JSON 包装本身约占 20 token，留够 reply 空间） */
-export const MAX_REPLY_TOKENS = 300
+/** AI 回复最大 token
+ *
+ * 这个值要覆盖"模型实际输出 + 推理模型的内部思考链"两部分。
+ * - 非推理模型（deepseek-chat / gpt-4o-mini 等）：实际只用 50~150 token
+ * - 推理模型（mimo / deepseek-reasoner / R1 / o1 / Qwen-QwQ 等）：
+ *   思考链常占 500~1500 token，再加上最终 JSON 输出
+ *
+ * 设 1500 是兼顾"推理模型也能跑通"的稳妥值。
+ * 提示词里明确要求 1~3 句话回复，实际不会因为上限高就生成很长内容。
+ * 真要超长，模型也会被 EOS / JSON 闭合提前终止。
+ */
+export const MAX_REPLY_TOKENS = 1500
 
 // 白名单从数据库表 hanako_allowed_users 读取（见 app/api/ai-reply/route.ts）
