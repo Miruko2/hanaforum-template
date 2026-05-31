@@ -22,7 +22,16 @@ const supabaseAdmin = createClient(
 // ── AI 配置缓存 ─────────────────────────────────────────────
 // 每次 AI 调用都查表会浪费 DB 配额；缓存 10s 即可让"管理员改完配置"
 // 在 10 秒内全网生效，对用户体验和 DB 都友好
-type AIConfig = { baseUrl: string; apiKey: string; model: string }
+type AIConfig = {
+  baseUrl: string
+  apiKey: string
+  model: string
+  // 是否启用 hanako 对话白名单：
+  // true  → 只有 hanako_allowed_users 表里的用户能调用
+  // false → 任何登录用户都能调用（仍受 rate_limit 限制）
+  // 默认 true，保证 ai_config 表里这列还没建好时也保持"白名单生效"
+  whitelistEnabled: boolean
+}
 let aiConfigCache: { value: AIConfig; expireAt: number } | null = null
 const AI_CONFIG_CACHE_TTL = 10_000 // 10 秒
 
@@ -37,12 +46,13 @@ async function loadAIConfig(): Promise<AIConfig> {
     baseUrl: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com/v1",
     apiKey: process.env.DEEPSEEK_API_KEY || "",
     model: process.env.DEEPSEEK_MODEL || "deepseek-v4-flash",
+    whitelistEnabled: true,
   }
 
   try {
     const { data, error } = await supabaseAdmin
       .from("ai_config")
-      .select("base_url, api_key, model")
+      .select("base_url, api_key, model, whitelist_enabled")
       .eq("id", 1)
       .maybeSingle()
 
@@ -59,6 +69,11 @@ async function loadAIConfig(): Promise<AIConfig> {
         (data?.base_url && data.base_url.trim()) || envFallback.baseUrl,
       apiKey: (data?.api_key && data.api_key.trim()) || envFallback.apiKey,
       model: (data?.model && data.model.trim()) || envFallback.model,
+      // 字段缺失（迁移还没跑）或为 null 时，回退到默认 true
+      whitelistEnabled:
+        typeof data?.whitelist_enabled === "boolean"
+          ? data.whitelist_enabled
+          : true,
     }
 
     aiConfigCache = { value: merged, expireAt: now + AI_CONFIG_CACHE_TTL }
@@ -122,28 +137,35 @@ export async function POST(req: NextRequest) {
       (authUser.email ? authUser.email.split("@")[0] : null) ||
       "匿名"
 
-    // 3. 白名单检查（基于可信的 token 解析出的 user_id）
-    const { data: allowedUsers, error: allowedError } = await supabaseAdmin
-      .from("hanako_allowed_users")
-      .select("user_id")
-      .eq("user_id", userId)
-      .maybeSingle()
+    // 3. 加载 AI 配置（含白名单开关）
+    //    放在白名单检查之前：开关关掉时跳过 DB 查询，省一次查询
+    const { baseUrl, apiKey, model, whitelistEnabled } = await loadAIConfig()
 
-    if (allowedError) {
-      console.error("[Hanako] 白名单查询错误:", allowedError)
+    // 4. 白名单检查（仅在 whitelistEnabled=true 时执行）
+    //    关闭白名单时，任何登录用户都能继续往下走
+    if (whitelistEnabled) {
+      const { data: allowedUsers, error: allowedError } = await supabaseAdmin
+        .from("hanako_allowed_users")
+        .select("user_id")
+        .eq("user_id", userId)
+        .maybeSingle()
+
+      if (allowedError) {
+        console.error("[Hanako] 白名单查询错误:", allowedError)
+      }
+
+      if (!allowedUsers) {
+        return NextResponse.json(
+          {
+            error: "你没有与 hanako 对话的权限（白名单检查未通过）",
+            code: "not_whitelisted",
+          },
+          { status: 403 },
+        )
+      }
     }
 
-    if (!allowedUsers) {
-      return NextResponse.json(
-        {
-          error: "你没有与 hanako 对话的权限（白名单检查未通过）",
-          code: "not_whitelisted",
-        },
-        { status: 403 },
-      )
-    }
-
-    // 4. 限流检查
+    // 5. 限流检查（白名单开关与否都生效，避免滥用）
     const rateCheck = rateLimiter.checkRateLimit(userId)
     if (!rateCheck.allowed) {
       return NextResponse.json(
@@ -153,9 +175,6 @@ export async function POST(req: NextRequest) {
     }
 
     rateLimiter.startCall(userId)
-
-    // 调用上游 AI：优先用 ai_config 表里的动态配置，没配就 fallback 到环境变量
-    const { baseUrl, apiKey, model } = await loadAIConfig()
 
     if (!apiKey) {
       console.error("[Hanako] api_key 未配置（ai_config 表和环境变量都为空）")

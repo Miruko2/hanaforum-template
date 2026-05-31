@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Input } from "@/components/ui/input"
+import { Switch } from "@/components/ui/switch"
 import { useToast } from "@/hooks/use-toast"
 
 // ─── 模块级缓存 ────────────────────────────────────────────
@@ -37,6 +38,10 @@ type CachedAiConfig = {
   api_key_masked: string
   api_key_set: boolean
   model: string
+  // 是否启用 hanako 对话白名单：
+  // true  = 仅白名单内用户能对话（默认）
+  // false = 所有登录用户均可对话
+  whitelist_enabled: boolean
   updated_at: string | null
 }
 let cachedAdminData: CachedAdminData | null = null
@@ -62,6 +67,8 @@ export default function AdminPage() {
   )
   const [newAllowedUserInput, setNewAllowedUserInput] = useState("")
   const [addingAllowedUser, setAddingAllowedUser] = useState(false)
+  // 白名单开关切换中的临时态（防止重复点击）
+  const [togglingWhitelist, setTogglingWhitelist] = useState(false)
 
   // AI 模型配置状态
   const [aiConfig, setAiConfig] = useState<CachedAiConfig | null>(cachedAiConfig)
@@ -472,6 +479,81 @@ export default function AdminPage() {
     }
   }
 
+  // 切换 hanako 白名单开关
+  // 走的是同一个 /api/admin/ai-config PATCH 接口（最多 10 秒后全网生效）
+  const handleToggleWhitelist = async (next: boolean) => {
+    if (togglingWhitelist) return
+    setTogglingWhitelist(true)
+    // 乐观更新：UI 先翻，失败再回滚，避免开关"卡住不动"看着很怪
+    const prev = aiConfig
+    if (aiConfig) {
+      const optimistic = { ...aiConfig, whitelist_enabled: next }
+      setAiConfig(optimistic)
+      cachedAiConfig = optimistic
+    }
+
+    try {
+      const { data: sessionData } = await supabase.auth.getSession()
+      const token = sessionData?.session?.access_token
+      if (!token) {
+        if (prev) {
+          setAiConfig(prev)
+          cachedAiConfig = prev
+        }
+        toast({
+          title: "未登录",
+          description: "请重新登录后再尝试",
+          variant: "destructive",
+        })
+        return
+      }
+
+      const res = await fetch("/api/admin/ai-config", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ whitelist_enabled: next }),
+      })
+      const data = await res.json()
+
+      if (!res.ok) {
+        if (prev) {
+          setAiConfig(prev)
+          cachedAiConfig = prev
+        }
+        toast({
+          title: "切换失败",
+          description: data?.error || `HTTP ${res.status}`,
+          variant: "destructive",
+        })
+        return
+      }
+
+      setAiConfig(data)
+      cachedAiConfig = data
+      toast({
+        title: next ? "已启用白名单" : "已关闭白名单",
+        description: next
+          ? "仅白名单内用户可与 Hanako 对话"
+          : "所有登录用户均可与 Hanako 对话（最多 10 秒生效）",
+      })
+    } catch (err: any) {
+      if (prev) {
+        setAiConfig(prev)
+        cachedAiConfig = prev
+      }
+      toast({
+        title: "切换失败",
+        description: err?.message || "网络错误",
+        variant: "destructive",
+      })
+    } finally {
+      setTogglingWhitelist(false)
+    }
+  }
+
   const handleAddAllowedUser = async () => {
     if (!newAllowedUserInput.trim()) {
       toast({
@@ -784,6 +866,41 @@ export default function AdminPage() {
               <CardDescription>管理允许与 Hanako AI 对话的用户</CardDescription>
             </CardHeader>
             <CardContent>
+              {/* 白名单总开关 */}
+              <div className="mb-5 rounded-md border border-gray-800 bg-gray-950 p-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-white">启用白名单</span>
+                      <span
+                        className={
+                          aiConfig?.whitelist_enabled
+                            ? "text-[11px] px-1.5 py-0.5 rounded bg-lime-900/40 text-lime-300 border border-lime-800"
+                            : "text-[11px] px-1.5 py-0.5 rounded bg-amber-900/40 text-amber-300 border border-amber-800"
+                        }
+                      >
+                        {aiConfig?.whitelist_enabled ? "白名单生效" : "全员开放"}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-400 leading-relaxed">
+                      {aiConfig?.whitelist_enabled
+                        ? "当前仅下方白名单内的用户可与 Hanako 对话。关闭后，所有登录用户均可对话（仍受限流约束）。"
+                        : "当前所有登录用户均可与 Hanako 对话。下方白名单仍可维护，开启后立即生效（最多 10 秒）。"}
+                    </p>
+                  </div>
+                  <Switch
+                    checked={!!aiConfig?.whitelist_enabled}
+                    onCheckedChange={handleToggleWhitelist}
+                    disabled={togglingWhitelist || aiConfigLoading || !aiConfig}
+                    aria-label="切换 hanako 对话白名单开关"
+                    // 项目里没定义 --primary / --input CSS 变量，
+                    // Switch 默认的 bg-primary / bg-input 在深色背景下完全透明 → 显示成"空开关"。
+                    // 这里显式覆盖背景色：开 = lime（与项目主按钮同色），关 = gray-600
+                    className="data-[state=checked]:bg-lime-600 data-[state=unchecked]:bg-gray-600"
+                  />
+                </div>
+              </div>
+
               <div className="flex mb-4">
                 <Input
                   placeholder="输入用户名或用户 ID"
@@ -889,6 +1006,14 @@ export default function AdminPage() {
                       <span className="text-gray-500 w-24 shrink-0">model:</span>
                       <span className="text-white">
                         {aiConfig.model || <span className="text-gray-600 italic">(未设置 → 用环境变量)</span>}
+                      </span>
+                    </div>
+                    <div className="flex">
+                      <span className="text-gray-500 w-24 shrink-0">whitelist:</span>
+                      <span className={aiConfig.whitelist_enabled ? "text-lime-300" : "text-amber-300"}>
+                        {aiConfig.whitelist_enabled
+                          ? "enabled（仅白名单可对话）"
+                          : "disabled（全员可对话）"}
                       </span>
                     </div>
                     {aiConfig.updated_at && (

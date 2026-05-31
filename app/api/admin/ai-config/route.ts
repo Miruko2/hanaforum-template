@@ -74,7 +74,7 @@ export async function GET(req: NextRequest) {
   try {
     const { data, error } = await supabaseAdmin
       .from("ai_config")
-      .select("base_url, api_key, model, updated_at")
+      .select("base_url, api_key, model, whitelist_enabled, updated_at")
       .eq("id", 1)
       .maybeSingle()
 
@@ -87,6 +87,8 @@ export async function GET(req: NextRequest) {
         api_key_masked: "",
         api_key_set: false,
         model: "",
+        // 字段缺失（迁移没跑过）默认 true，保持白名单生效
+        whitelist_enabled: true,
         updated_at: null,
       })
     }
@@ -96,6 +98,11 @@ export async function GET(req: NextRequest) {
       api_key_masked: maskApiKey(data.api_key || ""),
       api_key_set: !!data.api_key,
       model: data.model || "",
+      // null/undefined 兜底 true，与 ai-reply 路由的兜底语义一致
+      whitelist_enabled:
+        typeof data.whitelist_enabled === "boolean"
+          ? data.whitelist_enabled
+          : true,
       updated_at: data.updated_at,
     })
   } catch (error: any) {
@@ -116,17 +123,19 @@ export async function PATCH(req: NextRequest) {
 
   try {
     const body = await req.json().catch(() => ({}))
-    const { base_url, api_key, model } = body as {
+    const { base_url, api_key, model, whitelist_enabled } = body as {
       base_url?: string
       api_key?: string
       model?: string
+      whitelist_enabled?: boolean
     }
 
     // 至少要传一个字段
     if (
       base_url === undefined &&
       api_key === undefined &&
-      model === undefined
+      model === undefined &&
+      whitelist_enabled === undefined
     ) {
       return NextResponse.json(
         { error: "没有可更新的字段" },
@@ -167,6 +176,11 @@ export async function PATCH(req: NextRequest) {
       patch.api_key = api_key.trim()
     }
 
+    // 白名单开关：严格要求 boolean，避免 truthy/falsy 误判
+    if (typeof whitelist_enabled === "boolean") {
+      patch.whitelist_enabled = whitelist_enabled
+    }
+
     // upsert 到 id=1 这一行
     // 先尝试 update，更新到 0 行就回退 insert（应对建表后未插入默认行的情况）
     const { data: updated, error: updateErr } = await supabaseAdmin
@@ -185,6 +199,11 @@ export async function PATCH(req: NextRequest) {
         base_url: patch.base_url ?? "https://api.deepseek.com/v1",
         api_key: patch.api_key ?? "",
         model: patch.model ?? "deepseek-chat",
+        // 没显式传 → 用 DB 默认值 true（与 SQL 迁移保持一致）
+        whitelist_enabled:
+          typeof patch.whitelist_enabled === "boolean"
+            ? patch.whitelist_enabled
+            : true,
         updated_at: patch.updated_at,
         updated_by: patch.updated_by,
       }
@@ -197,7 +216,7 @@ export async function PATCH(req: NextRequest) {
     // 回填最新数据（api_key 掩码）
     const { data: latest } = await supabaseAdmin
       .from("ai_config")
-      .select("base_url, api_key, model, updated_at")
+      .select("base_url, api_key, model, whitelist_enabled, updated_at")
       .eq("id", 1)
       .maybeSingle()
 
@@ -206,6 +225,10 @@ export async function PATCH(req: NextRequest) {
       api_key_masked: maskApiKey(latest?.api_key || ""),
       api_key_set: !!latest?.api_key,
       model: latest?.model || "",
+      whitelist_enabled:
+        typeof latest?.whitelist_enabled === "boolean"
+          ? latest.whitelist_enabled
+          : true,
       updated_at: latest?.updated_at || null,
     })
   } catch (error: any) {
