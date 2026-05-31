@@ -19,6 +19,60 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
 )
 
+// ── AI 配置缓存 ─────────────────────────────────────────────
+// 每次 AI 调用都查表会浪费 DB 配额；缓存 10s 即可让"管理员改完配置"
+// 在 10 秒内全网生效，对用户体验和 DB 都友好
+type AIConfig = { baseUrl: string; apiKey: string; model: string }
+let aiConfigCache: { value: AIConfig; expireAt: number } | null = null
+const AI_CONFIG_CACHE_TTL = 10_000 // 10 秒
+
+async function loadAIConfig(): Promise<AIConfig> {
+  const now = Date.now()
+  if (aiConfigCache && aiConfigCache.expireAt > now) {
+    return aiConfigCache.value
+  }
+
+  // 环境变量兜底（仅用于 DB 没值时的 fallback）
+  const envFallback: AIConfig = {
+    baseUrl: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com/v1",
+    apiKey: process.env.DEEPSEEK_API_KEY || "",
+    model: process.env.DEEPSEEK_MODEL || "deepseek-v4-flash",
+  }
+
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("ai_config")
+      .select("base_url, api_key, model")
+      .eq("id", 1)
+      .maybeSingle()
+
+    if (error) {
+      // 表可能还没建（首次部署），不要打死服务
+      console.warn("[Hanako] 读取 ai_config 失败，回退到环境变量:", error.message)
+      aiConfigCache = { value: envFallback, expireAt: now + AI_CONFIG_CACHE_TTL }
+      return envFallback
+    }
+
+    // 任一字段为空就拿环境变量补齐
+    const merged: AIConfig = {
+      baseUrl:
+        (data?.base_url && data.base_url.trim()) || envFallback.baseUrl,
+      apiKey: (data?.api_key && data.api_key.trim()) || envFallback.apiKey,
+      model: (data?.model && data.model.trim()) || envFallback.model,
+    }
+
+    aiConfigCache = { value: merged, expireAt: now + AI_CONFIG_CACHE_TTL }
+    return merged
+  } catch (err: any) {
+    console.warn("[Hanako] 读取 ai_config 异常，回退到环境变量:", err?.message)
+    aiConfigCache = { value: envFallback, expireAt: now + AI_CONFIG_CACHE_TTL }
+    return envFallback
+  }
+}
+
+// 注：serverless 环境下每个函数 instance 内存独立，跨路由清缓存无意义。
+// 管理员改完配置最多 10s（TTL）后全网生效，已经足够。
+
 export async function POST(req: NextRequest) {
   let userId = ""
 
@@ -100,14 +154,11 @@ export async function POST(req: NextRequest) {
 
     rateLimiter.startCall(userId)
 
-    // 调用 DeepSeek
-    const apiKey = process.env.DEEPSEEK_API_KEY
-    const baseUrl = process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com/v1"
-    // 模型名走环境变量，默认 deepseek-v4-flash；可在 env 中覆盖为 deepseek-chat / deepseek-reasoner 等
-    const model = process.env.DEEPSEEK_MODEL || "deepseek-v4-flash"
+    // 调用上游 AI：优先用 ai_config 表里的动态配置，没配就 fallback 到环境变量
+    const { baseUrl, apiKey, model } = await loadAIConfig()
 
     if (!apiKey) {
-      console.error("[Hanako] DEEPSEEK_API_KEY 未配置")
+      console.error("[Hanako] api_key 未配置（ai_config 表和环境变量都为空）")
       return NextResponse.json({ error: "AI 服务未配置" }, { status: 500 })
     }
 
