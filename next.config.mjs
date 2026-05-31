@@ -38,12 +38,18 @@ const nextConfig = {
     // 安全：之前是 hostname:'**' 接受任意 HTTPS 主机，相当于把 /_next/image
     // 端点变成开放代理，攻击者能用它去 SSRF / 流量放大。改成显式白名单：
     // - *.supabase.co：所有 Supabase 项目的 storage URL（头像、帖子图）
-    // 网易音乐封面走 /api/img-proxy 不走 next/image，不在此处加。
+    // - *.music.126.net：网易云音乐封面 CDN（p1/p2/p3/p4.music.126.net）
+    //   /music 页面 MusicCard/ExpandedCard/MusicPlayer 走 next/image 必须放行；
+    //   CoverBackdrop 走原生 <img> 不受影响。useDominantHue 走 /api/img-proxy。
     // 以后接 OAuth 或别的 CDN，往这里加对应 hostname。
     remotePatterns: [
       {
         protocol: 'https',
         hostname: '**.supabase.co',
+      },
+      {
+        protocol: 'https',
+        hostname: '**.music.126.net',
       },
     ],
   },
