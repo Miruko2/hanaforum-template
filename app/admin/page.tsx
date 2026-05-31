@@ -310,9 +310,14 @@ export default function AdminPage() {
         // 注：delete_post 已重写为只接受 p_post_id 参数，权限内部通过 auth.uid() 判断
         // （旧签名 delete_post(p_post_id, p_user_id) 信任客户端传入的 user_id，
         //  任何人能伪造管理员 UUID 删任意帖 → 已修复，见 scripts/security-fix-2026-05-31.sql）
-        await supabase.rpc("delete_post", {
+        //
+        // 历史 bug：之前这里 await 后直接 toast 成功，没解 error，
+        // 导致 RPC 失败（比如签名不匹配 / 权限拒绝）时仍提示删除成功，
+        // 用户误以为帖子还在 → 反过来也踩过。下面强制解 error 后再 toast。
+        const { error } = await supabase.rpc("delete_post", {
           p_post_id: selectedItem.id,
         })
+        if (error) throw error
         toast({
           title: "删除成功",
           description: "帖子已成功删除",

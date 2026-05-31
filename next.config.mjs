@@ -35,10 +35,15 @@ const nextConfig = {
     minimumCacheTTL: 86400, // 24小时缓存
     dangerouslyAllowSVG: true,
     contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;",
+    // 安全：之前是 hostname:'**' 接受任意 HTTPS 主机，相当于把 /_next/image
+    // 端点变成开放代理，攻击者能用它去 SSRF / 流量放大。改成显式白名单：
+    // - *.supabase.co：所有 Supabase 项目的 storage URL（头像、帖子图）
+    // 网易音乐封面走 /api/img-proxy 不走 next/image，不在此处加。
+    // 以后接 OAuth 或别的 CDN，往这里加对应 hostname。
     remotePatterns: [
       {
         protocol: 'https',
-        hostname: '**',
+        hostname: '**.supabase.co',
       },
     ],
   },
