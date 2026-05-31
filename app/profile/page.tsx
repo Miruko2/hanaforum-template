@@ -6,17 +6,34 @@ import { useEffect, useState, useRef } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import Navbar from "@/components/navbar"
 import BackgroundEffects from "@/components/background-effects"
-import { Bell, LogOut, ChevronRight, Camera, MessageSquare } from "lucide-react"
+import { Bell, LogOut, ChevronRight, Camera, MessageSquare, Pencil, Check, X } from "lucide-react"
 import { useRouter } from "next/navigation"
+import { useToast } from "@/hooks/use-toast"
+
+// 用户名校验：trim 后 2-20 字符，允许中英数 + 下划线 + 连字符
+const USERNAME_RE = /^[一-龥a-zA-Z0-9_-]+$/
+function validateUsername(raw: string): { ok: true; value: string } | { ok: false; error: string } {
+  const value = raw.trim()
+  if (value.length < 2) return { ok: false, error: "用户名至少 2 个字符" }
+  if (value.length > 20) return { ok: false, error: "用户名不能超过 20 个字符" }
+  if (!USERNAME_RE.test(value)) return { ok: false, error: "只能包含中英文、数字、下划线和连字符" }
+  return { ok: true, value }
+}
 
 export default function ProfilePage() {
   const { user, signOut } = useSimpleAuth()
   const router = useRouter()
+  const { toast } = useToast()
   const [username, setUsername] = useState("")
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // 用户名编辑态
+  const [editingUsername, setEditingUsername] = useState(false)
+  const [draftUsername, setDraftUsername] = useState("")
+  const [savingUsername, setSavingUsername] = useState(false)
+  const usernameInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (user) {
@@ -116,6 +133,118 @@ export default function ProfilePage() {
     }
   }
 
+  // 进入编辑模式
+  const handleStartEditUsername = () => {
+    setDraftUsername(username)
+    setEditingUsername(true)
+    // 下一帧 focus，确保 input 已挂载
+    setTimeout(() => usernameInputRef.current?.focus(), 0)
+  }
+
+  // 取消编辑
+  const handleCancelEditUsername = () => {
+    setEditingUsername(false)
+    setDraftUsername("")
+  }
+
+  // 保存新用户名
+  const handleSaveUsername = async () => {
+    if (!user) return
+    if (savingUsername) return
+
+    // 1. 本地校验
+    const result = validateUsername(draftUsername)
+    if (!result.ok) {
+      toast({ title: "用户名不合法", description: result.error, variant: "destructive" })
+      return
+    }
+    const newName = result.value
+
+    // 无变化直接退出，不发请求
+    if (newName === username) {
+      setEditingUsername(false)
+      return
+    }
+
+    setSavingUsername(true)
+    try {
+      // ① 更新 profiles（RLS 已限定 auth.uid()=id，安全）
+      const { error: profileErr } = await supabase
+        .from("profiles")
+        .update({ username: newName })
+        .eq("id", user.id)
+
+      if (profileErr) {
+        // 唯一约束冲突
+        if ((profileErr as any).code === "23505") {
+          toast({ title: "用户名已被占用", description: "请换一个", variant: "destructive" })
+        } else {
+          toast({
+            title: "保存失败",
+            description: profileErr.message || "请稍后再试",
+            variant: "destructive",
+          })
+        }
+        return
+      }
+
+      // 主操作成功 → 先把 UI 切回展示态
+      setUsername(newName)
+      setEditingUsername(false)
+
+      // ② 同步老帖署名（失败只警告，不回滚）
+      const { error: postsErr } = await supabase
+        .from("posts")
+        .update({ username: newName })
+        .eq("user_id", user.id)
+
+      if (postsErr) {
+        console.warn("同步 posts.username 失败:", postsErr)
+        toast({
+          title: "用户名已修改",
+          description: "但部分老帖署名同步失败，刷新后可能仍显示旧名",
+        })
+      }
+
+      // ③ 同步 auth.user_metadata.username（弹幕墙 AI 称呼依赖这个）
+      const { error: metaErr } = await supabase.auth.updateUser({
+        data: { username: newName, displayName: newName },
+      })
+
+      if (metaErr) {
+        console.warn("同步 user_metadata 失败:", metaErr)
+        toast({
+          title: "用户名已修改",
+          description: "弹幕墙等部分场景下次登录才会生效",
+        })
+        return
+      }
+
+      // 全链路成功
+      toast({ title: "用户名已更新", description: `现在你叫「${newName}」` })
+    } catch (err: any) {
+      console.error("修改用户名异常:", err)
+      toast({
+        title: "保存出错",
+        description: err?.message || "请稍后重试",
+        variant: "destructive",
+      })
+    } finally {
+      setSavingUsername(false)
+    }
+  }
+
+  // 编辑框回车/Esc 快捷键
+  const handleUsernameKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault()
+      handleSaveUsername()
+    } else if (e.key === "Escape") {
+      e.preventDefault()
+      handleCancelEditUsername()
+    }
+  }
+
   if (loading) {
     return (
       <main className="min-h-screen">
@@ -180,9 +309,54 @@ export default function ProfilePage() {
                   onChange={handleFileChange}
                 />
               </div>
-              <h2 className="text-2xl font-bold text-white">
-                {username || "用户"}
-              </h2>
+              {editingUsername ? (
+                <div className="flex items-center gap-2 w-full max-w-xs">
+                  <input
+                    ref={usernameInputRef}
+                    type="text"
+                    value={draftUsername}
+                    onChange={(e) => setDraftUsername(e.target.value)}
+                    onKeyDown={handleUsernameKeyDown}
+                    disabled={savingUsername}
+                    maxLength={20}
+                    placeholder="2-20 字符，中英数_-"
+                    className="flex-1 bg-white/5 border border-white/15 focus:border-lime-400/60 focus:outline-none rounded-lg px-3 py-2 text-white placeholder:text-white/30 text-center text-lg font-semibold transition-colors disabled:opacity-50"
+                  />
+                  <button
+                    onClick={handleSaveUsername}
+                    disabled={savingUsername}
+                    aria-label="保存"
+                    className="p-2 rounded-lg bg-lime-500/20 hover:bg-lime-500/30 text-lime-400 transition-colors disabled:opacity-50"
+                  >
+                    {savingUsername ? (
+                      <div className="w-4 h-4 border-2 border-lime-400 border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <Check className="w-4 h-4" />
+                    )}
+                  </button>
+                  <button
+                    onClick={handleCancelEditUsername}
+                    disabled={savingUsername}
+                    aria-label="取消"
+                    className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-white/60 transition-colors disabled:opacity-50"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 group/name">
+                  <h2 className="text-2xl font-bold text-white">
+                    {username || "用户"}
+                  </h2>
+                  <button
+                    onClick={handleStartEditUsername}
+                    aria-label="编辑用户名"
+                    className="p-1.5 rounded-md text-white/30 hover:text-lime-400 hover:bg-white/5 opacity-0 group-hover/name:opacity-100 transition-all"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
               <p className="text-sm text-white/50">{user?.email}</p>
             </div>
           </div>
@@ -196,6 +370,20 @@ export default function ProfilePage() {
               <div className="flex items-center space-x-3">
                 <Camera className="w-5 h-5 text-lime-400" />
                 <span className="text-white">编辑头像</span>
+              </div>
+              <ChevronRight className="profile-menu-arrow w-5 h-5 text-white/40" />
+            </button>
+
+            <div className="h-px bg-white/5 mx-6" />
+
+            <button
+              className="profile-menu-item"
+              onClick={handleStartEditUsername}
+              disabled={editingUsername}
+            >
+              <div className="flex items-center space-x-3">
+                <Pencil className="w-5 h-5 text-lime-400" />
+                <span className="text-white">编辑用户名</span>
               </div>
               <ChevronRight className="profile-menu-arrow w-5 h-5 text-white/40" />
             </button>
