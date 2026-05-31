@@ -1,218 +1,326 @@
-import type { Metadata } from "next"
-import Image from "next/image"
-import Link from "next/link"
-import { CheckCircle, Download, RefreshCw, Shield } from "lucide-react"
+// app/download/page.tsx
+// 「安装应用」页 —— 主推 PWA（覆盖 iOS + Android + 桌面），APK 作为补充。
+// 客户端组件：需要做设备识别 + 监听 beforeinstallprompt 事件。
+"use client"
 
+import { useEffect, useState } from "react"
+import {
+  Smartphone,
+  Apple,
+  Monitor,
+  Download,
+  Share,
+  PlusSquare,
+  CheckCircle2,
+  Zap,
+  RefreshCw,
+  Bell,
+} from "lucide-react"
+import Navbar from "@/components/navbar"
+import BackgroundEffects from "@/components/background-effects"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
-import { Separator } from "@/components/ui/separator"
+import { useToast } from "@/hooks/use-toast"
 
-export const metadata: Metadata = {
-  title: "下载我们的应用",
-  description: "获取最新版本的应用，享受全新功能和改进的用户体验",
+// PWA 安装事件类型（标准 Web API，但 TS DOM lib 还没收录）
+interface BeforeInstallPromptEvent extends Event {
+  readonly platforms: string[]
+  prompt(): Promise<void>
+  userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>
+}
+
+type Platform = "ios" | "android" | "desktop" | "unknown"
+
+function detectPlatform(): Platform {
+  if (typeof navigator === "undefined") return "unknown"
+  const ua = navigator.userAgent.toLowerCase()
+  // iOS 包括 iPadOS（最新版伪装成 Mac，需要单独判定）
+  const isIOS =
+    /iphone|ipad|ipod/.test(ua) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+  if (isIOS) return "ios"
+  if (/android/.test(ua)) return "android"
+  return "desktop"
+}
+
+function isStandalone(): boolean {
+  if (typeof window === "undefined") return false
+  // 安卓/桌面：display-mode media query；iOS：navigator.standalone（非标准但只有 iOS 这么搞）
+  return (
+    window.matchMedia("(display-mode: standalone)").matches ||
+    (navigator as any).standalone === true
+  )
 }
 
 export default function DownloadPage() {
-  // 应用信息 - 实际使用时请更新这些信息
-  const appInfo = {
-    name: "社区论坛",
-    version: "1.2.0",
-    versionCode: 120,
-    releaseDate: "2025-05-21",
-    size: "15.4 MB",
-    downloadUrl: "/downloads/app-release.apk", // 更新为实际的下载链接
-    qrCodeUrl: "/downloads/app-qrcode.png", // 更新为实际的二维码图片
-    minAndroidVersion: "Android 6.0+",
-    releaseNotes: [
-      "修复了帖子内容显示问题",
-      "优化了应用性能",
-      "改进了用户界面",
-      "添加了新的主题选项",
-      "修复了已知的错误",
-    ],
+  const { toast } = useToast()
+  const [platform, setPlatform] = useState<Platform>("unknown")
+  const [alreadyInstalled, setAlreadyInstalled] = useState(false)
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null)
+  const [installing, setInstalling] = useState(false)
+
+  useEffect(() => {
+    setPlatform(detectPlatform())
+    setAlreadyInstalled(isStandalone())
+
+    // 监听 PWA 可安装事件（Android Chrome / 桌面 Chrome 触发，iOS Safari 不触发）
+    const onBeforeInstall = (e: Event) => {
+      e.preventDefault() // 阻止浏览器默认的安装提示横幅，我们用自己的按钮触发
+      setInstallPrompt(e as BeforeInstallPromptEvent)
+    }
+    const onInstalled = () => {
+      setInstallPrompt(null)
+      setAlreadyInstalled(true)
+      toast({ title: "安装成功", description: "桌面图标已生成，下次直接点开就行" })
+    }
+
+    window.addEventListener("beforeinstallprompt", onBeforeInstall)
+    window.addEventListener("appinstalled", onInstalled)
+    return () => {
+      window.removeEventListener("beforeinstallprompt", onBeforeInstall)
+      window.removeEventListener("appinstalled", onInstalled)
+    }
+  }, [toast])
+
+  const handlePwaInstall = async () => {
+    if (!installPrompt) return
+    setInstalling(true)
+    try {
+      await installPrompt.prompt()
+      const choice = await installPrompt.userChoice
+      if (choice.outcome === "dismissed") {
+        toast({ title: "取消了安装", description: "想装的话再点一次按钮" })
+      }
+      setInstallPrompt(null)
+    } catch (err) {
+      console.error("PWA install failed:", err)
+    } finally {
+      setInstalling(false)
+    }
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900">
-      <div className="container mx-auto px-4 py-12 md:py-24">
-        <div className="grid gap-8 md:grid-cols-2 lg:gap-12">
-          {/* 左侧：应用信息 */}
-          <div className="flex flex-col justify-center space-y-6">
-            <div>
-              <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">下载{appInfo.name}应用</h1>
-              <p className="mt-4 text-lg text-slate-600 dark:text-slate-400">
-                随时随地访问社区论坛，获取最新内容，参与讨论，分享您的想法。
-              </p>
-            </div>
+    <main className="min-h-screen text-white">
+      <BackgroundEffects />
+      <Navbar />
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <Card>
-                <CardContent className="flex items-center gap-4 p-4">
-                  <RefreshCw className="h-8 w-8 text-emerald-500" />
-                  <div>
-                    <h3 className="font-medium">实时更新</h3>
-                    <p className="text-sm text-slate-500 dark:text-slate-400">获取最新内容</p>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="flex items-center gap-4 p-4">
-                  <Shield className="h-8 w-8 text-emerald-500" />
-                  <div>
-                    <h3 className="font-medium">安全可靠</h3>
-                    <p className="text-sm text-slate-500 dark:text-slate-400">数据加密保护</p>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-
-            <div className="rounded-lg bg-white p-6 shadow-sm dark:bg-slate-800">
-              <h2 className="text-xl font-semibold">版本信息</h2>
-              <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-                <dt className="text-slate-500 dark:text-slate-400">版本号</dt>
-                <dd className="font-medium">
-                  {appInfo.version} (Build {appInfo.versionCode})
-                </dd>
-                <dt className="text-slate-500 dark:text-slate-400">发布日期</dt>
-                <dd className="font-medium">{appInfo.releaseDate}</dd>
-                <dt className="text-slate-500 dark:text-slate-400">文件大小</dt>
-                <dd className="font-medium">{appInfo.size}</dd>
-                <dt className="text-slate-500 dark:text-slate-400">系统要求</dt>
-                <dd className="font-medium">{appInfo.minAndroidVersion}</dd>
-              </dl>
-            </div>
-
-            <div className="flex flex-col space-y-4">
-              <Button
-                size="lg"
-                className="group relative h-14 overflow-hidden rounded-lg bg-emerald-600 text-lg font-medium text-white hover:bg-emerald-700"
-              >
-                <span className="absolute inset-0 flex items-center justify-center transition-opacity group-hover:opacity-0">
-                  下载应用 ({appInfo.version})
-                </span>
-                <span className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100">
-                  <Download className="mr-2 h-5 w-5" /> 开始下载
-                </span>
-                <Link href={appInfo.downloadUrl} className="absolute inset-0" aria-label="下载应用"></Link>
-              </Button>
-              <p className="text-center text-sm text-slate-500 dark:text-slate-400">点击按钮开始下载APK文件</p>
-            </div>
+      <div className="container mx-auto max-w-3xl px-4 pt-24 pb-16 space-y-10">
+        {/* 标题区 */}
+        <div className="text-center space-y-3">
+          <div className="inline-flex w-16 h-16 rounded-2xl bg-lime-500/15 border border-lime-500/30 items-center justify-center mb-2">
+            <Smartphone className="w-8 h-8 text-lime-400" />
           </div>
-
-          {/* 右侧：应用预览和下载信息 */}
-          <div className="flex flex-col items-center justify-center space-y-8">
-            <div className="relative h-[500px] w-[250px] overflow-hidden rounded-[2rem] border-8 border-slate-800 shadow-xl">
-              <div className="absolute inset-0 bg-white">
-                <Image
-                  src="/mobile-forum-screenshot.png"
-                  alt="应用截图"
-                  width={250}
-                  height={500}
-                  className="h-full w-full object-cover"
-                />
-              </div>
-            </div>
-
-            <div className="rounded-lg bg-white p-6 shadow-sm dark:bg-slate-800">
-              <h2 className="mb-4 text-xl font-semibold">扫码下载</h2>
-              <div className="flex flex-col items-center">
-                <div className="relative h-40 w-40 overflow-hidden rounded-lg bg-white p-2">
-                  <Image
-                    src="/placeholder.svg?height=160&width=160&query=QR code"
-                    alt="下载二维码"
-                    width={160}
-                    height={160}
-                    className="h-full w-full"
-                  />
-                </div>
-                <p className="mt-3 text-center text-sm text-slate-500 dark:text-slate-400">
-                  使用手机扫描二维码下载应用
-                </p>
-              </div>
-            </div>
-          </div>
+          <h1 className="text-3xl sm:text-4xl font-bold">
+            把<span className="text-lime-400">萤火虫之国</span>装到手机
+          </h1>
+          <p className="text-white/60 text-sm sm:text-base max-w-xl mx-auto">
+            添加到主屏幕后跟原生 app 一样：全屏运行、桌面图标、自动同步最新版本
+          </p>
         </div>
 
-        {/* 更新日志 */}
-        <div className="mt-16">
-          <h2 className="text-2xl font-bold">更新日志</h2>
-          <Separator className="my-4" />
-          <div className="rounded-lg bg-white p-6 shadow-sm dark:bg-slate-800">
-            <h3 className="mb-4 font-semibold">版本 {appInfo.version}</h3>
-            <ul className="space-y-2">
-              {appInfo.releaseNotes.map((note, index) => (
-                <li key={index} className="flex items-start gap-2">
-                  <CheckCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-emerald-500" />
-                  <span>{note}</span>
-                </li>
-              ))}
-            </ul>
+        {alreadyInstalled && (
+          <div className="rounded-xl border border-lime-500/30 bg-lime-500/10 px-5 py-4 flex items-center gap-3">
+            <CheckCircle2 className="w-5 h-5 text-lime-400 flex-shrink-0" />
+            <p className="text-sm text-lime-200">
+              你已经从主屏幕打开了应用，不需要重复安装。
+            </p>
           </div>
-        </div>
+        )}
 
-        {/* 安装指南 */}
-        <div className="mt-16">
-          <h2 className="text-2xl font-bold">安装指南</h2>
-          <Separator className="my-4" />
-          <div className="rounded-lg bg-white p-6 shadow-sm dark:bg-slate-800">
-            <ol className="space-y-6">
-              <li className="flex gap-4">
-                <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-600 dark:bg-emerald-900 dark:text-emerald-300">
-                  1
-                </div>
-                <div>
-                  <h3 className="font-medium">下载APK文件</h3>
-                  <p className="mt-1 text-slate-600 dark:text-slate-400">
-                    点击上方的"下载应用"按钮，或使用手机扫描二维码下载APK文件。
-                  </p>
-                </div>
-              </li>
-              <li className="flex gap-4">
-                <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-600 dark:bg-emerald-900 dark:text-emerald-300">
-                  2
-                </div>
-                <div>
-                  <h3 className="font-medium">允许安装未知来源应用</h3>
-                  <p className="mt-1 text-slate-600 dark:text-slate-400">
-                    在Android设备上，前往"设置" &gt; "安全"或"隐私"，启用"未知来源"或"安装未知应用"选项。
-                  </p>
-                </div>
-              </li>
-              <li className="flex gap-4">
-                <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-600 dark:bg-emerald-900 dark:text-emerald-300">
-                  3
-                </div>
-                <div>
-                  <h3 className="font-medium">打开APK文件</h3>
-                  <p className="mt-1 text-slate-600 dark:text-slate-400">
-                    下载完成后，点击通知或在文件管理器中找到APK文件并点击打开。
-                  </p>
-                </div>
-              </li>
-              <li className="flex gap-4">
-                <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-600 dark:bg-emerald-900 dark:text-emerald-300">
-                  4
-                </div>
-                <div>
-                  <h3 className="font-medium">安装应用</h3>
-                  <p className="mt-1 text-slate-600 dark:text-slate-400">点击"安装"按钮，等待安装完成。</p>
-                </div>
-              </li>
-              <li className="flex gap-4">
-                <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-600 dark:bg-emerald-900 dark:text-emerald-300">
-                  5
-                </div>
-                <div>
-                  <h3 className="font-medium">打开应用</h3>
-                  <p className="mt-1 text-slate-600 dark:text-slate-400">
-                    安装完成后，点击"打开"按钮或在主屏幕上找到应用图标并点击打开。
-                  </p>
-                </div>
-              </li>
-            </ol>
+        {/* PWA 卡片 —— 主推方案 */}
+        <section className="rounded-2xl border border-lime-500/30 bg-black/30 backdrop-blur-xl p-6 sm:p-8 space-y-5 shadow-xl shadow-lime-500/5">
+          <div className="flex items-center gap-3">
+            <span className="text-xs font-mono px-2 py-1 rounded-md bg-lime-500/20 text-lime-300 border border-lime-500/30">
+              推荐
+            </span>
+            <h2 className="text-xl font-bold">添加到主屏幕（PWA）</h2>
           </div>
-        </div>
+
+          {/* 优点速览 */}
+          <div className="grid grid-cols-3 gap-2 sm:gap-3 text-center text-xs sm:text-sm">
+            <div className="flex flex-col items-center gap-1 p-3 rounded-lg bg-white/5">
+              <Zap className="w-5 h-5 text-lime-400" />
+              <span className="text-white/80">秒装无警告</span>
+            </div>
+            <div className="flex flex-col items-center gap-1 p-3 rounded-lg bg-white/5">
+              <RefreshCw className="w-5 h-5 text-lime-400" />
+              <span className="text-white/80">自动更新</span>
+            </div>
+            <div className="flex flex-col items-center gap-1 p-3 rounded-lg bg-white/5">
+              <Bell className="w-5 h-5 text-lime-400" />
+              <span className="text-white/80">支持推送*</span>
+            </div>
+          </div>
+
+          {/* 设备特定引导 */}
+          {platform === "ios" && <IosInstallGuide />}
+          {platform === "android" && (
+            <AndroidInstallGuide
+              installPrompt={installPrompt}
+              installing={installing}
+              onInstall={handlePwaInstall}
+            />
+          )}
+          {platform === "desktop" && (
+            <DesktopInstallGuide
+              installPrompt={installPrompt}
+              installing={installing}
+              onInstall={handlePwaInstall}
+            />
+          )}
+          {platform === "unknown" && (
+            <p className="text-sm text-white/60">
+              请用手机浏览器打开本页面查看安装方法。
+            </p>
+          )}
+
+          <p className="text-xs text-white/40 pt-2 border-t border-white/5">
+            * 推送通知功能需 iOS 16.4 以上 / Android Chrome 才能开启。
+          </p>
+        </section>
+
       </div>
+    </main>
+  )
+}
+
+// ─── iOS 引导（Safari 必须手动操作，没有 beforeinstallprompt） ─────────
+function IosInstallGuide() {
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2 text-sm text-white/70">
+        <Apple className="w-4 h-4" />
+        <span>检测到你在用 iPhone / iPad</span>
+      </div>
+
+      <ol className="space-y-3">
+        <li className="flex gap-3">
+          <span className="flex-shrink-0 w-7 h-7 rounded-full bg-lime-500/20 text-lime-300 text-sm font-bold flex items-center justify-center">
+            1
+          </span>
+          <div className="text-sm text-white/80 leading-relaxed">
+            在 <span className="text-white font-semibold">Safari 浏览器</span> 里打开这个页面
+            <p className="text-xs text-white/40 mt-0.5">微信内置浏览器装不了，请右上角"在浏览器中打开"</p>
+          </div>
+        </li>
+        <li className="flex gap-3">
+          <span className="flex-shrink-0 w-7 h-7 rounded-full bg-lime-500/20 text-lime-300 text-sm font-bold flex items-center justify-center">
+            2
+          </span>
+          <div className="text-sm text-white/80 leading-relaxed">
+            点击底部工具栏的 <Share className="w-4 h-4 inline-block -mt-0.5 mx-0.5 text-lime-400" /> <span className="text-white font-semibold">分享按钮</span>
+          </div>
+        </li>
+        <li className="flex gap-3">
+          <span className="flex-shrink-0 w-7 h-7 rounded-full bg-lime-500/20 text-lime-300 text-sm font-bold flex items-center justify-center">
+            3
+          </span>
+          <div className="text-sm text-white/80 leading-relaxed">
+            在弹出菜单里下滑，选 <PlusSquare className="w-4 h-4 inline-block -mt-0.5 mx-0.5 text-lime-400" /> <span className="text-white font-semibold">"添加到主屏幕"</span>
+          </div>
+        </li>
+        <li className="flex gap-3">
+          <span className="flex-shrink-0 w-7 h-7 rounded-full bg-lime-500/20 text-lime-300 text-sm font-bold flex items-center justify-center">
+            4
+          </span>
+          <div className="text-sm text-white/80 leading-relaxed">
+            点右上角 <span className="text-white font-semibold">"添加"</span>，桌面就有图标了
+          </div>
+        </li>
+      </ol>
+    </div>
+  )
+}
+
+// ─── Android 引导 ─────────
+function AndroidInstallGuide({
+  installPrompt,
+  installing,
+  onInstall,
+}: {
+  installPrompt: BeforeInstallPromptEvent | null
+  installing: boolean
+  onInstall: () => void
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2 text-sm text-white/70">
+        <Smartphone className="w-4 h-4" />
+        <span>检测到你在用 Android</span>
+      </div>
+
+      {installPrompt ? (
+        <>
+          <p className="text-sm text-white/80">
+            浏览器已确认本站可安装，点下面按钮一键添加到主屏幕：
+          </p>
+          <Button
+            onClick={onInstall}
+            disabled={installing}
+            className="w-full bg-lime-500 hover:bg-lime-600 text-black h-12 text-base font-semibold"
+          >
+            {installing ? "安装中..." : "一键安装到主屏幕"}
+          </Button>
+        </>
+      ) : (
+        <>
+          <p className="text-sm text-white/70">
+            没有看到一键安装按钮？说明你的浏览器还没准备好。手动方式：
+          </p>
+          <ol className="space-y-3">
+            <li className="flex gap-3">
+              <span className="flex-shrink-0 w-7 h-7 rounded-full bg-lime-500/20 text-lime-300 text-sm font-bold flex items-center justify-center">1</span>
+              <span className="text-sm text-white/80">推荐用 <span className="text-white font-semibold">Chrome</span> 或 <span className="text-white font-semibold">Edge</span> 打开（微信/QQ 内置浏览器装不了）</span>
+            </li>
+            <li className="flex gap-3">
+              <span className="flex-shrink-0 w-7 h-7 rounded-full bg-lime-500/20 text-lime-300 text-sm font-bold flex items-center justify-center">2</span>
+              <span className="text-sm text-white/80">点浏览器右上角 <span className="text-white font-semibold">⋮ 三点菜单</span></span>
+            </li>
+            <li className="flex gap-3">
+              <span className="flex-shrink-0 w-7 h-7 rounded-full bg-lime-500/20 text-lime-300 text-sm font-bold flex items-center justify-center">3</span>
+              <span className="text-sm text-white/80">选 <span className="text-white font-semibold">"添加到主屏幕"</span> 或 <span className="text-white font-semibold">"安装应用"</span></span>
+            </li>
+          </ol>
+        </>
+      )}
+    </div>
+  )
+}
+
+// ─── 桌面引导 ─────────
+function DesktopInstallGuide({
+  installPrompt,
+  installing,
+  onInstall,
+}: {
+  installPrompt: BeforeInstallPromptEvent | null
+  installing: boolean
+  onInstall: () => void
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2 text-sm text-white/70">
+        <Monitor className="w-4 h-4" />
+        <span>检测到你在用电脑</span>
+      </div>
+
+      {installPrompt ? (
+        <>
+          <p className="text-sm text-white/80">
+            装到桌面后可以像独立应用一样从开始菜单 / Dock 启动：
+          </p>
+          <Button
+            onClick={onInstall}
+            disabled={installing}
+            className="w-full bg-lime-500 hover:bg-lime-600 text-black h-12 text-base font-semibold"
+          >
+            {installing ? "安装中..." : "安装到桌面"}
+          </Button>
+        </>
+      ) : (
+        <p className="text-sm text-white/70">
+          你的浏览器暂时不支持一键安装。建议用 <span className="text-white font-semibold">Chrome</span> 或 <span className="text-white font-semibold">Edge</span> 打开本页面，地址栏右侧会有一个安装图标 <Download className="w-4 h-4 inline-block -mt-0.5 mx-0.5 text-lime-400" /> 点它即可。
+        </p>
+      )}
     </div>
   )
 }
