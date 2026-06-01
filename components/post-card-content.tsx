@@ -59,13 +59,20 @@ export default function PostCardContent({
         </div>
       </div>
 
-      <p className="text-sm text-white/80 mb-2 line-clamp-2" title={post.description || post.content}>
+      {/* 帖子正文摘要：移动端首页不显示（避免卡片过高 + 信息密度过载），
+          桌面/平板（md 及以上）显示前两行。完整正文走点开后的详情弹窗。 */}
+      <p
+        className="hidden md:block text-sm text-white/80 mb-2 line-clamp-2"
+        title={post.description || post.content}
+      >
         {post.description || post.content}
       </p>
 
-      <div className="flex justify-between items-center text-xs text-white/70">
-        <span>{username}</span>
-        <span title={new Date(post.created_at).toLocaleString()}>
+      <div className="flex justify-between items-center text-xs text-white/70 gap-2">
+        {/* 用户名可能很长（例如纯数字 ID），用 truncate 截断；
+            min-w-0 必须有，否则 flex 子项不会缩到内容以下、truncate 失效 */}
+        <span className="truncate min-w-0" title={username}>{username}</span>
+        <span className="whitespace-nowrap flex-shrink-0" title={new Date(post.created_at).toLocaleString()}>
           {formattedDate}
         </span>
       </div>
