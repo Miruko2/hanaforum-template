@@ -344,11 +344,19 @@ export default function LiveWallContent() {
     channel
       .on("presence", { event: "sync" }, () => {
         const state = channel.presenceState()
-        setOnlineCount(Object.keys(state).length)
+        // 至少把自己算上，避免某些时序下 sync 事件先于 track 触发、
+        // 导致首次 sync 读到的 state 不包含自己 → onlineCount 一直是 0、
+        // 头部一直显示"连接中..."的问题（在手机弱网/VPN 下尤其明显）
+        setOnlineCount(Math.max(Object.keys(state).length, 1))
       })
       .subscribe(async (status) => {
         if (status === "SUBSCRIBED") {
           await channel.track({ online_at: new Date().toISOString() })
+          // 兜底：track 完成后主动读一次 presenceState，
+          // 不依赖 sync 事件回调。某些边缘情况下 sync 不一定立刻触发，
+          // 这里至少能保证显示 "1 在线" 而不是永久"连接中..."
+          const state = channel.presenceState()
+          setOnlineCount(Math.max(Object.keys(state).length, 1))
         }
       })
 

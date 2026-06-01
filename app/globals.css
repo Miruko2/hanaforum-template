@@ -3115,6 +3115,16 @@ body.modal-open {
     padding: 4px 6px;
     gap: 4px;
     margin-bottom: 1px;
+    /* 手机端允许换行：屏幕窄，长弹幕（特别是 AI 回复）很容易被
+       默认的 white-space: nowrap + ellipsis 截断。这里整段覆盖，
+       让超长内容自动换到下一行，同时 flex 子项也允许换行（
+       这样 username 在第一行，content 可以继续在下一行接上）。 */
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    flex-wrap: wrap;
+    word-break: break-word;
+    overflow-wrap: anywhere;
   }
 
   .live-wall-user {
