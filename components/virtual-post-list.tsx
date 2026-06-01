@@ -22,12 +22,13 @@ interface VirtualPostListProps {
 
 // 响应式列数配置：key 是最大视口宽度，value 是列数
 // "default" 是超出最大断点时的默认列数
+// 注意：仅调整列数，不动瀑布流 (react-masonry-css) 的结构/样式
 const breakpointColumns = {
   default: 5, // >= 1920
   1919: 4,    // 1536 - 1919
   1535: 3,    // 1280 - 1535
-  1279: 2,    // 768 - 1279
-  767: 2,     // < 768
+  1279: 3,    // 768 - 1279：平板 (iPad 竖/横屏、iPad Pro 11"/12.9" 等) 显示 3 列
+  767: 2,     // < 768：手机保持 2 列
 }
 
 /**
