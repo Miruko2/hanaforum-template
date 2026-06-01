@@ -25,8 +25,14 @@ const config: CapacitorConfig = {
     CapacitorCookies: {
       enabled: true, // 确保启用Cookie
     },
+    // CapacitorHttp 全局劫持 XMLHttpRequest 和 fetch，让请求走 native HTTP（号称绕过 CORS）。
+    // 但它的 patch 跟 Next.js 客户端路由（pushState + RSC XHR）冲突，表现为：
+    //   InvalidStateError: setRequestHeader on XMLHttpRequest in non-OPENED state
+    // → 切换任何页面 500 / 白屏。
+    // 我们的项目走 server.url 远程加载 + 标准 fetch（Supabase / API endpoints），完全
+    // 不需要这个插件。关掉。
     CapacitorHttp: {
-      enabled: true,
+      enabled: false,
     },
     WebView: {
       serverAssets: ['public'],
