@@ -148,7 +148,9 @@ export default function PostDetailModal({
 
       {/* Post content */}
       <motion.p
-        className="text-gray-200 text-[15px] md:text-base leading-relaxed mb-7 whitespace-pre-line"
+        // 手机端正文从 15px 微调到 16.5px (text-[16.5px])，配合更大的 padding
+        // 让正文成为视觉焦点；md+ 保持原本的 16px (text-base)
+        className="text-gray-200 text-[16.5px] md:text-base leading-relaxed mb-7 whitespace-pre-line"
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, delay: 0.5 }}
@@ -227,7 +229,9 @@ export default function PostDetailModal({
             animate={{ scale: 1, opacity: 1, y: 0 }}
             exit={{ scale: 0.95, opacity: 0, y: 10, transition: { duration: 0.18, ease: "easeOut" } }}
             transition={{ type: "spring", stiffness: 300, damping: 30 }}
-            style={{ maxHeight: "90vh", zIndex: 41 }}
+            // 手机端缩到 82vh，让模态框周围露出一圈背景（不再"贴满全屏"），
+            // 视觉上更像浮起来的卡片；PC 横版维持 90vh 不变
+            style={{ maxHeight: isMobile ? "82vh" : "90vh", zIndex: 41 }}
           >
             {/* Close button */}
             <motion.button
@@ -342,7 +346,9 @@ export default function PostDetailModal({
                     )}
                   </div>
 
-                  <div className="p-6 overflow-y-auto" style={{ maxHeight: "calc(90vh - 300px)" }}>
+                  {/* 手机端内容区：padding 加大 (p-6 → p-7) 让正文有更多呼吸空间；
+                      maxHeight 同步调整为 calc(82vh - 280px) 跟新的外层匹配 */}
+                  <div className="p-7 overflow-y-auto" style={{ maxHeight: "calc(82vh - 280px)" }}>
                     {contentBody}
                   </div>
                 </div>
