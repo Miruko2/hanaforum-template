@@ -6,6 +6,7 @@ import Image from "next/image"
 import { Pause, Play, SkipBack, SkipForward, History as HistoryIcon, Heart } from "lucide-react"
 import { usePlayback } from "../_context/PlaybackContext"
 import { useDominantHue } from "../_lib/useDominantHue"
+import { useIsAndroid } from "../_lib/useIsAndroid"
 import type { Track } from "../_data/tracks"
 import type { ExpandRect } from "./ExpandedCard"
 
@@ -25,6 +26,12 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
   const { currentTrack, isPlaying, currentTime, duration, isFallback, togglePlay, seek, next, prev, isFavorite, toggleFavorite } =
     usePlayback()
   const fav = currentTrack ? isFavorite(currentTrack.id) : false
+  // 安卓 Chromium 合成器 bug：MusicCanvas 内 preserve-3d 卡片会逃出 stacking
+  // context，渲染在 z-60 的底部播放器上面（呈现为"鬼影/花屏"）。
+  // 上次修复只覆盖了弹窗（ExpandedCard / HistoryPanel），但底部 player 是
+  // 常驻 UI 不属于"弹窗"，所以漏掉了。这里走和弹窗一样的不透明降级路径：
+  // 桌面 / iOS / iPad 保留毛玻璃，仅安卓改为深色不透明背景。
+  const isAndroid = useIsAndroid()
 
   // Local scrub state — while user drags the progress bar we suppress the
   // external `currentTime` so the thumb doesn't jitter.
@@ -101,13 +108,22 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
             (e.currentTarget as HTMLDivElement).getBoundingClientRect(),
           )
         }
-        style={{
-          background: "rgba(255,255,255,0.05)",
-          backdropFilter: "blur(32px) saturate(140%)",
-          WebkitBackdropFilter: "blur(32px) saturate(140%)",
-          boxShadow:
-            "0 20px 60px -10px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.12), inset 0 1px 0 rgba(255,255,255,0.08)",
-        }}
+        style={
+          isAndroid
+            ? {
+                // 安卓降级：深色不透明背景，规避 3D 卡片穿透鬼影
+                background: "rgba(18,18,24,0.94)",
+                boxShadow:
+                  "0 20px 60px -10px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.12), inset 0 1px 0 rgba(255,255,255,0.08)",
+              }
+            : {
+                background: "rgba(255,255,255,0.05)",
+                backdropFilter: "blur(32px) saturate(140%)",
+                WebkitBackdropFilter: "blur(32px) saturate(140%)",
+                boxShadow:
+                  "0 20px 60px -10px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.12), inset 0 1px 0 rgba(255,255,255,0.08)",
+              }
+        }
         // Same Gaussian-blur condensation as ExpandedCard. Fires on initial
         // appearance AND on track change (because key={currentTrack.id} forces
         // an exit+enter cycle when the id changes).
