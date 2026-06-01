@@ -59,14 +59,10 @@ export default function PostCardContent({
         </div>
       </div>
 
-      {/* 帖子正文摘要：移动端首页不显示（避免卡片过高 + 信息密度过载），
-          桌面/平板（md 及以上）显示前两行。完整正文走点开后的详情弹窗。 */}
-      <p
-        className="hidden md:block text-sm text-white/80 mb-2 line-clamp-2"
-        title={post.description || post.content}
-      >
-        {post.description || post.content}
-      </p>
+      {/* 帖子正文摘要：全平台（手机/平板/PC）首页列表卡片都不显示。
+          只保留标题 + 分类 + 互动数 + 作者/时间。
+          完整正文走点开后的详情弹窗（PostDetailModal）。
+          理由：避免卡片高度参差不齐影响瀑布流观感，同时减少首页信息密度。 */}
 
       <div className="flex justify-between items-center text-xs text-white/70 gap-2">
         {/* 用户名可能很长（例如纯数字 ID），用 truncate 截断；
