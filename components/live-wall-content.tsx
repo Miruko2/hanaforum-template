@@ -328,39 +328,76 @@ export default function LiveWallContent() {
     }
   }, [toDisplay])
 
-  // 在线人数（Supabase Presence）
-  // 每个 tab 一个独立 presence key——同用户开两个 tab 算两个在线（符合 connection 语义）
-  // 未登录访客也计入，弹幕墙本来就是公开看的
+  // 在线人数（Broadcast 心跳）
+  // 这里特意不用 Supabase Presence：实测本项目的 Realtime 服务端不下发 presence_state
+  // 初始全量快照，只发 presence_diff。realtime-js 收不到 presence_state 就永远停在
+  // "pending sync" 状态，所有 diff 被堆进队列不应用、sync/join 事件不触发、
+  // presenceState() 恒为空 → 在线人数永远是 0（曾被 Math.max(count,1) 粉饰成"1 在线"）。
+  //
+  // 改用 Broadcast：每个 tab 周期性广播一个带唯一 id 的心跳，各端维护一张
+  // "id → 最后心跳时间" 表，超时未续约就剔除，计数 = 表大小。完全前端可控、
+  // 不依赖那个坏掉的快照；live_comments 的 postgres_changes 订阅一直正常，
+  // 已证明 WebSocket 实时通道本身健康，broadcast 必然可达。
+  // 计数语义不变：每个 tab 算 1，未登录访客也计入（弹幕墙本就公开）。
   useEffect(() => {
-    const presenceKey =
+    const selfId =
       typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
         ? crypto.randomUUID()
         : `anon-${Math.random().toString(36).slice(2)}-${Date.now()}`
 
-    const channel = supabase.channel("live_wall_presence", {
-      config: { presence: { key: presenceKey } },
+    const HEARTBEAT_MS = 10000 // 每 10 秒广播一次心跳
+    const TIMEOUT_MS = 30000 // 30 秒（3 个心跳周期）没续约就判离线，容忍偶发丢包
+    const PRUNE_MS = 3000 // 每 3 秒清理一次过期项并重算
+
+    // id → 最后一次收到心跳的时间戳
+    const seen = new Map<string, number>()
+    // 进场即把自己算上，避免订阅成功到首个心跳回声之间出现"连接中"闪烁
+    seen.set(selfId, Date.now())
+    setOnlineCount(1)
+
+    const recount = () => {
+      const now = Date.now()
+      for (const [id, ts] of seen) {
+        if (now - ts > TIMEOUT_MS) seen.delete(id)
+      }
+      setOnlineCount(Math.max(seen.size, 1))
+    }
+
+    // broadcast.self=true：让自己也能收到自己的心跳，从而被持续续约不被剔除
+    const channel = supabase.channel("live_wall_online", {
+      config: { broadcast: { self: true } },
     })
 
+    const beat = () => {
+      channel.send({ type: "broadcast", event: "heartbeat", payload: { id: selfId } })
+    }
+
     channel
-      .on("presence", { event: "sync" }, () => {
-        const state = channel.presenceState()
-        // 至少把自己算上，避免某些时序下 sync 事件先于 track 触发、
-        // 导致首次 sync 读到的 state 不包含自己 → onlineCount 一直是 0、
-        // 头部一直显示"连接中..."的问题（在手机弱网/VPN 下尤其明显）
-        setOnlineCount(Math.max(Object.keys(state).length, 1))
-      })
-      .subscribe(async (status) => {
-        if (status === "SUBSCRIBED") {
-          await channel.track({ online_at: new Date().toISOString() })
-          // 兜底：track 完成后主动读一次 presenceState，
-          // 不依赖 sync 事件回调。某些边缘情况下 sync 不一定立刻触发，
-          // 这里至少能保证显示 "1 在线" 而不是永久"连接中..."
-          const state = channel.presenceState()
-          setOnlineCount(Math.max(Object.keys(state).length, 1))
+      .on("broadcast", { event: "heartbeat" }, ({ payload }) => {
+        const id = payload?.id
+        if (typeof id === "string") {
+          seen.set(id, Date.now())
+          setOnlineCount(Math.max(seen.size, 1))
         }
       })
+      .on("broadcast", { event: "leave" }, ({ payload }) => {
+        const id = payload?.id
+        if (typeof id === "string" && seen.delete(id)) {
+          setOnlineCount(Math.max(seen.size, 1))
+        }
+      })
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") beat()
+      })
+
+    const beatTimer = setInterval(beat, HEARTBEAT_MS)
+    const pruneTimer = setInterval(recount, PRUNE_MS)
 
     return () => {
+      clearInterval(beatTimer)
+      clearInterval(pruneTimer)
+      // 主动告知其他端我离开了，让对方立即剔除（best-effort，发不出去也有超时兜底）
+      channel.send({ type: "broadcast", event: "leave", payload: { id: selfId } })
       supabase.removeChannel(channel)
     }
   }, [])
