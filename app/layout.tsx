@@ -18,8 +18,14 @@ export const metadata: Metadata = {
     statusBarStyle: "black-translucent",
   },
   icons: {
-    icon: "/favicon.ico",
-    apple: "/icons/icon-512.png", // iOS 主屏图标
+    // 浏览器 tab favicon：用多尺寸 PNG，浏览器自动挑最匹配的；
+    // 老的 /favicon.ico 仍存在作为最终兜底，但 <link rel="icon"> 优先级更高
+    icon: [
+      { url: "/favicon-32x32.png", sizes: "32x32", type: "image/png" },
+      { url: "/favicon-16x16.png", sizes: "16x16", type: "image/png" },
+      { url: "/favicon-48x48.png", sizes: "48x48", type: "image/png" },
+    ],
+    apple: "/apple-touch-icon.png", // iOS 主屏图标 (180x180 是 iOS 推荐尺寸)
   },
 }
 
