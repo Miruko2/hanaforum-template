@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo } from "react"
+import { Suspense, useEffect, useMemo } from "react"
 import { useSearchParams } from "next/navigation"
 import { AnimatePresence } from "framer-motion"
 import PostGrid from "@/components/post-grid"
@@ -13,7 +13,9 @@ import { isValidCategory, CATEGORY_LABELS } from "@/lib/categories"
 import { Loader2 } from "lucide-react"
 import { motion } from "framer-motion"
 
-export default function HomePage() {
+// HomePage 内部使用了 useSearchParams()，在 Next.js `output:'export'`
+// 静态构建（Capacitor APK）模式下必须包 Suspense，否则 build 阶段 prerender 失败。
+function HomeContent() {
   const { loading } = useSimpleAuth()
   const { setCategory, state } = usePosts()
   const searchParams = useSearchParams()
@@ -125,5 +127,13 @@ export default function HomePage() {
 
       <FloatingActionButton />
     </div>
+  )
+}
+
+export default function HomePage() {
+  return (
+    <Suspense fallback={null}>
+      <HomeContent />
+    </Suspense>
   )
 }

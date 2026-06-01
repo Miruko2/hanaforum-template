@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
+import { apiUrl } from "@/lib/api-base"
 import { Shield, Users, FileText, Trash2, AlertCircle, Bot, Cpu, Save, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
@@ -378,7 +379,7 @@ export default function AdminPage() {
         return
       }
 
-      const res = await fetch("/api/admin/ai-config", {
+      const res = await fetch(apiUrl("/api/admin/ai-config"), {
         headers: { Authorization: `Bearer ${token}` },
         cache: "no-store",
       })
@@ -440,7 +441,7 @@ export default function AdminPage() {
         return
       }
 
-      const res = await fetch("/api/admin/ai-config", {
+      const res = await fetch(apiUrl("/api/admin/ai-config"), {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
@@ -508,7 +509,7 @@ export default function AdminPage() {
         return
       }
 
-      const res = await fetch("/api/admin/ai-config", {
+      const res = await fetch(apiUrl("/api/admin/ai-config"), {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",

@@ -1,0 +1,4 @@
+# 此目录托管 APK 等可下载产物。
+# 实际 .apk 文件不进 git（见 .gitignore 的 public/downloads/*.apk 规则），
+# 因为体积大且每次 release 都会重生成。
+# 此 .gitkeep 仅为让 git 跟踪空目录本身。

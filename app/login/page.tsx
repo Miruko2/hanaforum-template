@@ -1,3 +1,4 @@
+import { Suspense } from "react"
 import LoginForm from "@/components/login-form"
 
 export default function LoginPage() {
@@ -30,7 +31,11 @@ export default function LoginPage() {
         bg-black/20 backdrop-blur-lg border border-white/10 shadow-2xl
         transition-all duration-300"
       >
-        <LoginForm />
+        {/* LoginForm 内部用 useSearchParams() 读 ?redirect=...；
+            output:'export' 模式下必须包 Suspense，否则 build 报错。 */}
+        <Suspense fallback={null}>
+          <LoginForm />
+        </Suspense>
       </div>
     </div>
   )

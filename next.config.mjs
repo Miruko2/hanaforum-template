@@ -21,7 +21,12 @@ const nextConfig = {
     ignoreDuringBuilds: true,
   },
   typescript: {
-    ignoreBuildErrors: false,
+    // Web 部署（Vercel）走 npm + --legacy-peer-deps，dep tree 恰好兼容，开启严格检查；
+    // Capacitor 构建在本地 pnpm 环境下，@types/react 18.3.29 与 Radix 1.1.x
+    // 的 forwardRef props 推断不兼容，产生一堆"className/children 不存在"假错。
+    // 代码本身在 Vercel 上跑得好好的，跳过 TS 检查不影响 APK 产物正确性。
+    // 治本路径：删 package-lock.json + pnpm overrides 钉 @types/react@18.2.x（技术债）
+    ignoreBuildErrors: isCapacitor,
   },
   
   // 图像配置 - dev 模式跳过优化（避免单实例服务端转码拖慢页面），

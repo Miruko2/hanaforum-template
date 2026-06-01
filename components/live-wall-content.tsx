@@ -9,6 +9,7 @@ import {
 import { useRouter } from "next/navigation"
 import { ArrowLeft, Send } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
+import { apiUrl } from "@/lib/api-base"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useToast } from "@/hooks/use-toast"
 import LiveHostStage from "./live-host-stage"
@@ -201,8 +202,7 @@ export default function LiveWallContent() {
           .reverse()
           .map((c) => ({ username: c.username, content: c.content }))
 
-        const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || ""
-        const res = await fetch(`${apiBase}/api/ai-reply`, {
+        const res = await fetch(apiUrl("/api/ai-reply"), {
           method: "POST",
           headers: {
             "Content-Type": "application/json",

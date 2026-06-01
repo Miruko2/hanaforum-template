@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { apiUrl } from "@/lib/api-base"
 
 /**
  * Extracts the dominant hue (0..359) from a remote cover image.
@@ -105,7 +106,7 @@ export function useDominantHue(coverUrl: string | null | undefined): number | nu
       cache.set(coverUrl, null)
       setHue(null)
     }
-    img.src = `/api/img-proxy?url=${encodeURIComponent(coverUrl)}`
+    img.src = apiUrl(`/api/img-proxy?url=${encodeURIComponent(coverUrl)}`)
 
     return () => {
       cancelled = true

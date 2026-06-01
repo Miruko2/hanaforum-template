@@ -1,6 +1,12 @@
 "use client"
 
 import { cachedQuery } from "./cache-utils"
+import { apiUrl } from "./api-base"
+
+// 注：本文件目前是 dead code（全项目没人 import optimizeImage），
+// 且引用的 /api/image 路由也不存在。保留是为了将来可能的图片优化方案。
+// 此处用 apiUrl() 包裹路径只是为了和其它前端 API 调用统一，未来真要启用
+// 这条链路时不会忘记加 NEXT_PUBLIC_API_BASE_URL 前缀。
 
 /**
  * 优化图片
@@ -19,11 +25,13 @@ export async function optimizeImage(
     `image:${url}:${width}:${format}`,
     async () => {
       try {
-        // 构建API URL
-        const apiUrl = `/api/image?url=${encodeURIComponent(url)}&width=${width}&format=${format}`
+        // 构建 API URL（apiUrl 工具会在 APK 构建时自动加上 NEXT_PUBLIC_API_BASE_URL）
+        const reqUrl = apiUrl(
+          `/api/image?url=${encodeURIComponent(url)}&width=${width}&format=${format}`,
+        )
 
         // 获取图片
-        const response = await fetch(apiUrl)
+        const response = await fetch(reqUrl)
 
         if (!response.ok) {
           throw new Error(`图片优化失败: ${response.statusText}`)

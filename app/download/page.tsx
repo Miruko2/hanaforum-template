@@ -1,6 +1,8 @@
 // app/download/page.tsx
-// 「安装应用」页 —— 主推 PWA（覆盖 iOS + Android + 桌面），APK 作为补充。
-// 客户端组件：需要做设备识别 + 监听 beforeinstallprompt 事件。
+// 「下载应用」页 —— 根据设备类型分流：
+//   - iOS  → 引导添加到主屏幕（PWA），Safari 不支持 beforeinstallprompt，只能手动
+//   - 安卓 → 直接下载 APK（release 版，由 capacitor 打包）
+//   - 桌面 → 引导安装 PWA（开发者自己用，普通用户用不到）
 "use client"
 
 import { useEffect, useState } from "react"
@@ -12,14 +14,13 @@ import {
   Share,
   PlusSquare,
   CheckCircle2,
-  Zap,
-  RefreshCw,
-  Bell,
+  ShieldAlert,
 } from "lucide-react"
 import Navbar from "@/components/navbar"
 import BackgroundEffects from "@/components/background-effects"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/hooks/use-toast"
+import { supabase } from "@/lib/supabaseClient"
 
 // PWA 安装事件类型（标准 Web API，但 TS DOM lib 还没收录）
 interface BeforeInstallPromptEvent extends Event {
@@ -29,6 +30,18 @@ interface BeforeInstallPromptEvent extends Event {
 }
 
 type Platform = "ios" | "android" | "desktop" | "unknown"
+
+// APK 托管在 Supabase Storage 的 public bucket 「downloads」中。
+// 发版流程：
+//   1. gradle assembleRelease 产出 android/app/build/outputs/apk/release/app-release.apk
+//   2. 把这个文件上传到 Supabase Dashboard > Storage > downloads bucket（同名覆盖）
+//   3. 前端代码不用动，用户下次访问本页就拿到最新 APK
+//
+// getPublicUrl 是纯字符串拼接（不发请求），所以可以放模块顶层；
+// public bucket 允许匿名 GET，不需要 token。
+const APK_PATH: string = supabase.storage
+  .from("downloads")
+  .getPublicUrl("app-release.apk").data.publicUrl
 
 function detectPlatform(): Platform {
   if (typeof navigator === "undefined") return "unknown"
@@ -62,9 +75,10 @@ export default function DownloadPage() {
     setPlatform(detectPlatform())
     setAlreadyInstalled(isStandalone())
 
-    // 监听 PWA 可安装事件（Android Chrome / 桌面 Chrome 触发，iOS Safari 不触发）
+    // 桌面 Chrome / Edge 触发 beforeinstallprompt；iOS Safari 不触发；
+    // 安卓走 APK 下载，也不需要 PWA prompt
     const onBeforeInstall = (e: Event) => {
-      e.preventDefault() // 阻止浏览器默认的安装提示横幅，我们用自己的按钮触发
+      e.preventDefault() // 阻止浏览器默认横幅，用自己的按钮触发
       setInstallPrompt(e as BeforeInstallPromptEvent)
     }
     const onInstalled = () => {
@@ -103,7 +117,7 @@ export default function DownloadPage() {
       <BackgroundEffects />
       <Navbar />
 
-      <div className="container mx-auto max-w-3xl px-4 pt-24 pb-16 space-y-10">
+      <div className="container mx-auto max-w-3xl px-4 pt-24 pb-16 space-y-8">
         {/* 标题区 */}
         <div className="text-center space-y-3">
           <div className="inline-flex w-16 h-16 rounded-2xl bg-lime-500/15 border border-lime-500/30 items-center justify-center mb-2">
@@ -113,7 +127,7 @@ export default function DownloadPage() {
             把<span className="text-lime-400">萤火虫之国</span>装到手机
           </h1>
           <p className="text-white/60 text-sm sm:text-base max-w-xl mx-auto">
-            添加到主屏幕后跟原生 app 一样：全屏运行、桌面图标、自动同步最新版本
+            iPhone 添加到主屏幕，Android 直接下载安装包
           </p>
         </div>
 
@@ -126,71 +140,41 @@ export default function DownloadPage() {
           </div>
         )}
 
-        {/* PWA 卡片 —— 主推方案 */}
-        <section className="rounded-2xl border border-lime-500/30 bg-black/30 backdrop-blur-xl p-6 sm:p-8 space-y-5 shadow-xl shadow-lime-500/5">
-          <div className="flex items-center gap-3">
-            <span className="text-xs font-mono px-2 py-1 rounded-md bg-lime-500/20 text-lime-300 border border-lime-500/30">
-              推荐
-            </span>
-            <h2 className="text-xl font-bold">添加到主屏幕（PWA）</h2>
-          </div>
-
-          {/* 优点速览 */}
-          <div className="grid grid-cols-3 gap-2 sm:gap-3 text-center text-xs sm:text-sm">
-            <div className="flex flex-col items-center gap-1 p-3 rounded-lg bg-white/5">
-              <Zap className="w-5 h-5 text-lime-400" />
-              <span className="text-white/80">秒装无警告</span>
-            </div>
-            <div className="flex flex-col items-center gap-1 p-3 rounded-lg bg-white/5">
-              <RefreshCw className="w-5 h-5 text-lime-400" />
-              <span className="text-white/80">自动更新</span>
-            </div>
-            <div className="flex flex-col items-center gap-1 p-3 rounded-lg bg-white/5">
-              <Bell className="w-5 h-5 text-lime-400" />
-              <span className="text-white/80">支持推送*</span>
-            </div>
-          </div>
-
-          {/* 设备特定引导 */}
-          {platform === "ios" && <IosInstallGuide />}
-          {platform === "android" && (
-            <AndroidInstallGuide
-              installPrompt={installPrompt}
-              installing={installing}
-              onInstall={handlePwaInstall}
-            />
-          )}
-          {platform === "desktop" && (
-            <DesktopInstallGuide
-              installPrompt={installPrompt}
-              installing={installing}
-              onInstall={handlePwaInstall}
-            />
-          )}
-          {platform === "unknown" && (
+        {/* 根据平台分流到对应卡片 */}
+        {platform === "ios" && <IosInstallCard />}
+        {platform === "android" && <AndroidDownloadCard />}
+        {platform === "desktop" && (
+          <DesktopInstallCard
+            installPrompt={installPrompt}
+            installing={installing}
+            onInstall={handlePwaInstall}
+          />
+        )}
+        {platform === "unknown" && (
+          <section className="rounded-2xl border border-white/10 bg-black/30 backdrop-blur-xl p-6 sm:p-8">
             <p className="text-sm text-white/60">
               请用手机浏览器打开本页面查看安装方法。
             </p>
-          )}
-
-          <p className="text-xs text-white/40 pt-2 border-t border-white/5">
-            * 推送通知功能需 iOS 16.4 以上 / Android Chrome 才能开启。
-          </p>
-        </section>
-
+          </section>
+        )}
       </div>
     </main>
   )
 }
 
-// ─── iOS 引导（Safari 必须手动操作，没有 beforeinstallprompt） ─────────
-function IosInstallGuide() {
+// ─── iOS：手动添加到主屏幕（PWA） ───────────────────────────────────────
+function IosInstallCard() {
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-2 text-sm text-white/70">
-        <Apple className="w-4 h-4" />
-        <span>检测到你在用 iPhone / iPad</span>
+    <section className="rounded-2xl border border-lime-500/30 bg-black/30 backdrop-blur-xl p-6 sm:p-8 space-y-5 shadow-xl shadow-lime-500/5">
+      <div className="flex items-center gap-3">
+        <Apple className="w-6 h-6 text-lime-400" />
+        <h2 className="text-xl font-bold">添加到主屏幕（iPhone / iPad）</h2>
       </div>
+
+      <p className="text-sm text-white/70 leading-relaxed">
+        iOS 不支持下载安装包，但可以把网页添加到主屏幕，使用体验跟原生 app 几乎一样：
+        全屏运行、桌面图标、自动跟网页保持同步。
+      </p>
 
       <ol className="space-y-3">
         <li className="flex gap-3">
@@ -227,12 +211,77 @@ function IosInstallGuide() {
           </div>
         </li>
       </ol>
-    </div>
+    </section>
   )
 }
 
-// ─── Android 引导 ─────────
-function AndroidInstallGuide({
+// ─── Android：直接下载 APK ──────────────────────────────────────────────
+function AndroidDownloadCard() {
+  return (
+    <section className="rounded-2xl border border-lime-500/30 bg-black/30 backdrop-blur-xl p-6 sm:p-8 space-y-5 shadow-xl shadow-lime-500/5">
+      <div className="flex items-center gap-3">
+        <Smartphone className="w-6 h-6 text-lime-400" />
+        <h2 className="text-xl font-bold">下载 Android 应用</h2>
+      </div>
+
+      <p className="text-sm text-white/70 leading-relaxed">
+        点下方按钮下载安装包，安装后从桌面图标启动。
+      </p>
+
+      {/* 下载按钮：用 <a download> 触发浏览器下载行为 */}
+      <a href={APK_PATH} download className="block">
+        <Button className="w-full bg-lime-500 hover:bg-lime-600 text-black h-12 text-base font-semibold">
+          <Download className="w-5 h-5 mr-2" />
+          下载 APK
+        </Button>
+      </a>
+
+      {/* 安装提示：Android 对未知来源应用有警告，需要用户手动允许 */}
+      <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 flex gap-3">
+        <ShieldAlert className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+        <div className="text-xs text-amber-100/90 leading-relaxed space-y-1">
+          <p className="font-semibold text-amber-200">关于"未知来源应用"提示</p>
+          <p>
+            首次安装 Android 会提示"未知来源"，这是正常的（应用没上架 Google
+            Play）。点提示里的"设置"或"更多信息"，允许从浏览器安装即可。
+          </p>
+        </div>
+      </div>
+
+      <ol className="space-y-3 pt-2 border-t border-white/5">
+        <li className="flex gap-3">
+          <span className="flex-shrink-0 w-7 h-7 rounded-full bg-lime-500/20 text-lime-300 text-sm font-bold flex items-center justify-center">
+            1
+          </span>
+          <span className="text-sm text-white/80">点击上方按钮下载 APK 文件</span>
+        </li>
+        <li className="flex gap-3">
+          <span className="flex-shrink-0 w-7 h-7 rounded-full bg-lime-500/20 text-lime-300 text-sm font-bold flex items-center justify-center">
+            2
+          </span>
+          <span className="text-sm text-white/80">下载完成后，从通知栏或文件管理器点开 APK</span>
+        </li>
+        <li className="flex gap-3">
+          <span className="flex-shrink-0 w-7 h-7 rounded-full bg-lime-500/20 text-lime-300 text-sm font-bold flex items-center justify-center">
+            3
+          </span>
+          <span className="text-sm text-white/80">
+            按提示允许"未知来源应用"安装权限（每个手机品牌设置位置略有不同）
+          </span>
+        </li>
+        <li className="flex gap-3">
+          <span className="flex-shrink-0 w-7 h-7 rounded-full bg-lime-500/20 text-lime-300 text-sm font-bold flex items-center justify-center">
+            4
+          </span>
+          <span className="text-sm text-white/80">安装完成，从桌面图标启动</span>
+        </li>
+      </ol>
+    </section>
+  )
+}
+
+// ─── 桌面：PWA 安装（保留给开发者 / 想钉到 Dock 的用户） ────────────────
+function DesktopInstallCard({
   installPrompt,
   installing,
   onInstall,
@@ -242,70 +291,15 @@ function AndroidInstallGuide({
   onInstall: () => void
 }) {
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-2 text-sm text-white/70">
-        <Smartphone className="w-4 h-4" />
-        <span>检测到你在用 Android</span>
+    <section className="rounded-2xl border border-lime-500/30 bg-black/30 backdrop-blur-xl p-6 sm:p-8 space-y-5 shadow-xl shadow-lime-500/5">
+      <div className="flex items-center gap-3">
+        <Monitor className="w-6 h-6 text-lime-400" />
+        <h2 className="text-xl font-bold">安装到桌面</h2>
       </div>
 
       {installPrompt ? (
         <>
-          <p className="text-sm text-white/80">
-            浏览器已确认本站可安装，点下面按钮一键添加到主屏幕：
-          </p>
-          <Button
-            onClick={onInstall}
-            disabled={installing}
-            className="w-full bg-lime-500 hover:bg-lime-600 text-black h-12 text-base font-semibold"
-          >
-            {installing ? "安装中..." : "一键安装到主屏幕"}
-          </Button>
-        </>
-      ) : (
-        <>
-          <p className="text-sm text-white/70">
-            没有看到一键安装按钮？说明你的浏览器还没准备好。手动方式：
-          </p>
-          <ol className="space-y-3">
-            <li className="flex gap-3">
-              <span className="flex-shrink-0 w-7 h-7 rounded-full bg-lime-500/20 text-lime-300 text-sm font-bold flex items-center justify-center">1</span>
-              <span className="text-sm text-white/80">推荐用 <span className="text-white font-semibold">Chrome</span> 或 <span className="text-white font-semibold">Edge</span> 打开（微信/QQ 内置浏览器装不了）</span>
-            </li>
-            <li className="flex gap-3">
-              <span className="flex-shrink-0 w-7 h-7 rounded-full bg-lime-500/20 text-lime-300 text-sm font-bold flex items-center justify-center">2</span>
-              <span className="text-sm text-white/80">点浏览器右上角 <span className="text-white font-semibold">⋮ 三点菜单</span></span>
-            </li>
-            <li className="flex gap-3">
-              <span className="flex-shrink-0 w-7 h-7 rounded-full bg-lime-500/20 text-lime-300 text-sm font-bold flex items-center justify-center">3</span>
-              <span className="text-sm text-white/80">选 <span className="text-white font-semibold">"添加到主屏幕"</span> 或 <span className="text-white font-semibold">"安装应用"</span></span>
-            </li>
-          </ol>
-        </>
-      )}
-    </div>
-  )
-}
-
-// ─── 桌面引导 ─────────
-function DesktopInstallGuide({
-  installPrompt,
-  installing,
-  onInstall,
-}: {
-  installPrompt: BeforeInstallPromptEvent | null
-  installing: boolean
-  onInstall: () => void
-}) {
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-2 text-sm text-white/70">
-        <Monitor className="w-4 h-4" />
-        <span>检测到你在用电脑</span>
-      </div>
-
-      {installPrompt ? (
-        <>
-          <p className="text-sm text-white/80">
+          <p className="text-sm text-white/80 leading-relaxed">
             装到桌面后可以像独立应用一样从开始菜单 / Dock 启动：
           </p>
           <Button
@@ -317,10 +311,10 @@ function DesktopInstallGuide({
           </Button>
         </>
       ) : (
-        <p className="text-sm text-white/70">
+        <p className="text-sm text-white/70 leading-relaxed">
           你的浏览器暂时不支持一键安装。建议用 <span className="text-white font-semibold">Chrome</span> 或 <span className="text-white font-semibold">Edge</span> 打开本页面，地址栏右侧会有一个安装图标 <Download className="w-4 h-4 inline-block -mt-0.5 mx-0.5 text-lime-400" /> 点它即可。
         </p>
       )}
-    </div>
+    </section>
   )
 }

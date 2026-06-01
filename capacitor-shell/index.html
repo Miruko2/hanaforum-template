@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>萤火虫之国</title>
+  <style>
+    /*
+     * 这个文件实际**不会**被用户看到——capacitor.config.ts 的 server.url 会让 WebView
+     * 直接加载线上 https://forum.hanakos.cc。只有在极端情况（server.url 配置错 /
+     * 网络极差时连首字节都没拿到 / 用户清除 WebView 数据）才会显示这个占位。
+     *
+     * 设计目标：单文件、零依赖、最小可读性，让用户知道"正在加载"而不是"app 坏了"
+     */
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #0a0a0a;
+      color: #d1d5db;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      min-height: 100vh;
+    }
+    .container {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 24px;
+    }
+    .box {
+      max-width: 320px;
+    }
+    h1 {
+      color: #a3e635;
+      margin: 0 0 12px;
+      font-size: 22px;
+      letter-spacing: 0.05em;
+    }
+    p {
+      margin: 8px 0;
+      line-height: 1.6;
+      font-size: 14px;
+      opacity: 0.8;
+    }
+    .hint {
+      margin-top: 20px;
+      font-size: 12px;
+      opacity: 0.5;
+    }
+    .dot {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      margin: 0 2px;
+      border-radius: 50%;
+      background: #a3e635;
+      animation: blink 1.4s infinite both;
+    }
+    .dot:nth-child(2) { animation-delay: 0.2s; }
+    .dot:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes blink {
+      0%, 80%, 100% { opacity: 0.2; }
+      40% { opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="box">
+      <h1>萤火虫之国</h1>
+      <p>正在连接服务器<span class="dot"></span><span class="dot"></span><span class="dot"></span></p>
+      <p class="hint">如果长时间无响应，请检查网络后重启应用</p>
+    </div>
+  </div>
+  <script>
+    // 终极兜底：如果由于某种原因 capacitor.config.ts 的 server.url 没生效，
+    // 1.5 秒后手动跳到线上域名。注：这条几乎永远不会跑——server.url 在 native 层
+    // 就接管了 WebView 的初始 URL，比这条 JS 早得多
+    setTimeout(function () {
+      if (location.protocol === 'file:' || /^(localhost|127\.0\.0\.1)$/i.test(location.hostname)) {
+        location.replace('https://forum.hanakos.cc')
+      }
+    }, 1500)
+  </script>
+</body>
+</html>

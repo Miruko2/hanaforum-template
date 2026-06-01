@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { Suspense, useEffect, useMemo, useRef, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -23,7 +23,9 @@ import { useCinemaMode } from "@/contexts/cinema-mode-context"
 import { isValidCategory } from "@/lib/categories"
 import { Clapperboard, Zap, Music } from "lucide-react"
 
-export default function Navigation() {
+// Navigation 内用 useSearchParams 读 ?category=xxx 高亮分类；
+// output:'export' 静态构建下必须包 Suspense（见底部 default export）。
+function NavigationContent() {
   const pathname = usePathname()
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -494,4 +496,12 @@ export default function Navigation() {
       )}
     </header>
   )
-} 
+}
+
+export default function Navigation() {
+  return (
+    <Suspense fallback={null}>
+      <NavigationContent />
+    </Suspense>
+  )
+}

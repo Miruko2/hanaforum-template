@@ -35,5 +35,20 @@ supabase_apikey.txt
 /out/
 tsconfig.tsbuildinfo
 
+# Capacitor 静态构建过程中临时挪走 app/api 的备份位置
+# 正常情况下 scripts/build-capacitor.js 的 finally 块会恢复，目录不会存在
+# 但万一中断 / 异常残留，这条规则避免误 commit
+/_api_backup/
+
+# Android APK 产物：体积大、每次发版重生成，不进 git。
+# 当前线上分发走 Supabase Storage 的 downloads bucket，public/downloads/ 仅是本地兜底/备份
+public/downloads/*.apk
+
+# 切换包管理器（pnpm → npm）时改名出来的临时目录，等你方便时手动 rm 掉
+/node_modules_old/
+
+# capacitor / next 构建过程中重定向输出的调试日志
+build.log
+
 # 测试输出日志
 jest-out.log
