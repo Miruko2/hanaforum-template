@@ -54,9 +54,14 @@ export default function MusicPage() {
     )
   }, [])
 
+  // 当任一覆盖层（HistoryPanel 抽屉 / ExpandedCard 弹窗）打开时为 true。
+  // 仅 Android Chrome 上 MusicCanvas 会据此退出渲染，规避 preserve-3d 元素
+  // 逃出 stacking context、渲染在覆盖层上面导致的"鬼影"花屏。
+  const overlayOpen = libraryOpen || expand !== null
+
   return (
     <PlaybackProvider>
-      <MusicCanvas onExpand={handleExpand} />
+      <MusicCanvas onExpand={handleExpand} overlayOpen={overlayOpen} />
       <MusicPlayer
         onToggleHistory={() => setLibraryOpen((v) => !v)}
         onExpand={handleExpand}

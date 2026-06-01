@@ -15,6 +15,7 @@ import { VideoBackdrop } from "./VideoBackdrop"
 import { Grain } from "./Grain"
 import { useReducedMotion } from "../_lib/useReducedMotion"
 import { useIsMobile } from "../_lib/useIsMobile"
+import { useIsAndroid } from "../_lib/useIsAndroid"
 // Toggle between cover-image backdrop (per track) and a single looping video.
 const USE_VIDEO_BACKDROP = true
 
@@ -32,10 +33,22 @@ type Vec2 = { x: number; y: number }
 
 type Props = {
   onExpand: (track: Track, rect: ExpandRect) => void
+  /**
+   * 是否有覆盖层（ExpandedCard 或 HistoryPanel）当前打开。
+   * 仅在 Android Chrome 上生效：弹窗期间整个 canvas 淡出 + visibility:hidden 退出渲染，
+   * 规避 Chromium 安卓合成器的 `preserve-3d` z-index 排序 bug ——
+   * 3D 上下文里的卡片会"逃出" stacking context、渲染在更高 z-index 的覆盖层上面，
+   * 表现为透过不透明面板能看到卡片"鬼影"。
+   * 桌面 / iOS / iPad 该属性被忽略，canvas 始终可见。
+   */
+  overlayOpen?: boolean
 }
 
-export function MusicCanvas({ onExpand }: Props) {
+export function MusicCanvas({ onExpand, overlayOpen = false }: Props) {
   const reducedMotion = useReducedMotion()
+  const isAndroid = useIsAndroid()
+  // 安卓上有弹窗时退出渲染。其他平台 / 无弹窗时保持 canvas 显示。
+  const hideForOverlay = isAndroid && overlayOpen
   // Distinct from the layout-driven `isMobile` (viewSize.w < 768) below —
   // this is a *device-tier* signal that drives perf degradation: when true
   // we drop the video backdrop, grain, parallax, and lighten the card blur.
@@ -372,10 +385,26 @@ export function MusicCanvas({ onExpand }: Props) {
 
       {/* Stage — pointer-events:none so its flat z=0 plane doesn't intercept
           hits meant for the cards (which sit at z<0 behind it in the preserve-3d
-          space). Each card re-enables pointer-events on itself. */}
+          space). Each card re-enables pointer-events on itself.
+
+          安卓覆盖层打开时，仅隐藏这个 3D Stage（卡片层）—— 外层 viewport
+          的黑色背景 + VideoBackdrop/CoverBackdrop 视频背景照常保留，
+          确保弹窗后面仍是 "music 页面的氛围底色"，不会穿到全局 layout
+          露出首页背景 + 导航栏。
+          只 hide 这一层就够了：preserve-3d 上下文是逃出 stacking context
+          的元凶，把它退出渲染就根除问题。 */}
       <div
         className="absolute inset-0 pointer-events-none"
-        style={{ transformStyle: "preserve-3d" }}
+        style={{
+          transformStyle: "preserve-3d",
+          opacity: hideForOverlay ? 0 : 1,
+          visibility: hideForOverlay ? "hidden" : "visible",
+          // visibility 延迟到 opacity 淡完才切，避免"瞬间消失"——
+          // 关闭时 visibility 立刻 visible 再淡入
+          transition:
+            "opacity 200ms ease-out, visibility 0s linear " +
+            (hideForOverlay ? "200ms" : "0s"),
+        }}
       >
         {instances.map((inst) => (
           <MusicCard
