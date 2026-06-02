@@ -12,7 +12,8 @@ import { Button } from "@/components/ui/button"
 import { LoadingAnimation } from "./ui/loading-animation"
 import NotificationCard from "@/components/notification-card"
 import PostDetailModal from "@/components/post-detail-modal"
-import { getPost, likePost, unlikePost, checkUserLiked } from "@/lib/supabase"
+import AnnouncementModal from "@/components/announcement-modal"
+import { getPost, likePost, unlikePost, checkUserLiked, getAnnouncement } from "@/lib/supabase"
 import type { Notification, Post } from "@/lib/types"
 
 interface NotificationBellProps {
@@ -32,6 +33,10 @@ export default function NotificationBell({ mobileView = false }: NotificationBel
 
   // 帖子详情模态框
   const [activePost, setActivePost] = useState<Post | null>(null)
+  // 公告弹窗
+  const [activeAnnouncement, setActiveAnnouncement] = useState<
+    { title: string; content: string; created_at: string } | null
+  >(null)
   const [modalLiked, setModalLiked] = useState(false)
   const [modalLikeCount, setModalLikeCount] = useState(0)
   const [modalIsLiking, setModalIsLiking] = useState(false)
@@ -63,6 +68,23 @@ export default function NotificationBell({ mobileView = false }: NotificationBel
         if (!notification.is_read) {
           markAsRead(notification.id)
         }
+
+        // 公告类通知：打开公告弹窗（先关铃铛弹窗）
+        if (notification.type === "announcement") {
+          if (!notification.announcement_id) return
+          setLoadingPostId(notification.id)
+          try {
+            const ann = await getAnnouncement(notification.announcement_id)
+            if (ann) {
+              setActiveAnnouncement(ann)
+              setIsOpen(false)
+            }
+          } finally {
+            setLoadingPostId(null)
+          }
+          return
+        }
+
         if (!notification.post_id) return
 
         setLoadingPostId(notification.id)
@@ -263,6 +285,15 @@ export default function NotificationBell({ mobileView = false }: NotificationBel
           isAdmin={isAdmin}
         />
       )}
+
+      {/* 系统公告弹窗（从通知弹出） */}
+      <AnnouncementModal
+        isOpen={!!activeAnnouncement}
+        onClose={() => setActiveAnnouncement(null)}
+        title={activeAnnouncement?.title ?? null}
+        content={activeAnnouncement?.content ?? null}
+        createdAt={activeAnnouncement?.created_at}
+      />
     </>
   )
 }

@@ -1,6 +1,6 @@
 "use client"
 
-import { Heart, MessageCircle, Reply, ShieldAlert, Loader2 } from "lucide-react"
+import { Heart, MessageCircle, Reply, ShieldAlert, Megaphone, Loader2 } from "lucide-react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { formatDate, cn } from "@/lib/utils"
 import type { Notification } from "@/lib/types"
@@ -33,6 +33,12 @@ const TYPE_META: Record<
     color: "text-amber-400",
     bg: "bg-amber-500/15 border-amber-500/25",
   },
+  // 全员公告（系统通知，头像用站点 logo）
+  announcement: {
+    icon: Megaphone,
+    color: "text-lime-400",
+    bg: "bg-lime-500/15 border-lime-500/25",
+  },
 }
 
 interface NotificationCardProps {
@@ -53,8 +59,12 @@ export default function NotificationCard({
   onClick,
   compact = false,
 }: NotificationCardProps) {
-  const username = notification.actor?.username || "匿名用户"
-  const avatarUrl = notification.actor?.avatar_url
+  // 公告类通知：发件人显示为系统、头像用站点 logo
+  const isAnnouncement = notification.type === "announcement"
+  const username = isAnnouncement
+    ? "系统公告"
+    : notification.actor?.username || "匿名用户"
+  const avatarUrl = isAnnouncement ? "/logo.png" : notification.actor?.avatar_url
   const message = notification.message || "新通知"
   const createdAt = notification.created_at || new Date().toISOString()
   const isRead = notification.is_read ?? false

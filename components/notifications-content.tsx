@@ -10,7 +10,8 @@ import type { Notification, Post } from "@/lib/types"
 import Container from "@/components/container"
 import PostDetailModal from "@/components/post-detail-modal"
 import NotificationCard from "@/components/notification-card"
-import { getPost, likePost, unlikePost, checkUserLiked } from "@/lib/supabase"
+import AnnouncementModal from "@/components/announcement-modal"
+import { getPost, likePost, unlikePost, checkUserLiked, getAnnouncement } from "@/lib/supabase"
 import { useToast } from "@/hooks/use-toast"
 import { useIsMobile } from "@/hooks/use-mobile"
 
@@ -29,6 +30,10 @@ export default function NotificationsContent() {
   // 帖子详情模态框状态
   const [activePost, setActivePost] = useState<Post | null>(null)
   const [loadingPostId, setLoadingPostId] = useState<string | null>(null)
+  // 公告弹窗状态
+  const [activeAnnouncement, setActiveAnnouncement] = useState<
+    { title: string; content: string; created_at: string } | null
+  >(null)
   const [modalLiked, setModalLiked] = useState(false)
   const [modalLikeCount, setModalLikeCount] = useState(0)
   const [modalIsLiking, setModalIsLiking] = useState(false)
@@ -47,6 +52,27 @@ export default function NotificationsContent() {
         // 先立即标记已读（乐观更新）
         if (!notification.is_read) {
           markAsRead(notification.id)
+        }
+
+        // 公告类通知：打开公告弹窗
+        if (notification.type === "announcement") {
+          if (!notification.announcement_id) return
+          setLoadingPostId(notification.id)
+          try {
+            const ann = await getAnnouncement(notification.announcement_id)
+            if (ann) {
+              setActiveAnnouncement(ann)
+            } else {
+              toast({
+                title: "公告不存在",
+                description: "该公告可能已被删除",
+                variant: "destructive",
+              })
+            }
+          } finally {
+            setLoadingPostId(null)
+          }
+          return
         }
 
         if (!notification.post_id) {
@@ -228,6 +254,15 @@ export default function NotificationsContent() {
           isAdmin={isAdmin}
         />
       )}
+
+      {/* 系统公告弹窗 */}
+      <AnnouncementModal
+        isOpen={!!activeAnnouncement}
+        onClose={() => setActiveAnnouncement(null)}
+        title={activeAnnouncement?.title ?? null}
+        content={activeAnnouncement?.content ?? null}
+        createdAt={activeAnnouncement?.created_at}
+      />
     </Container>
   )
 }

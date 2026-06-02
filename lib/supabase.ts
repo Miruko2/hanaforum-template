@@ -740,6 +740,77 @@ export async function createNotification({
   }
 }
 
+// 管理员发布全员公告：调用 SECURITY DEFINER 函数 broadcast_announcement，
+// 由数据库给所有用户各插一条 announcement 类型通知（服务端用 is_admin 鉴权）。
+// 取 token 方式与 createNotification 一致：优先 localStorage，getSession 兜底
+//（本项目 getSession 偶发返回失效/匿名 token）。
+export async function broadcastAnnouncement(title: string, content: string): Promise<string> {
+  let accessToken: string | undefined;
+  try {
+    if (typeof window !== 'undefined') {
+      const raw = localStorage.getItem('supabase.auth.token');
+      if (raw && raw !== 'undefined' && raw !== 'null') {
+        const parsed = JSON.parse(raw);
+        accessToken = parsed?.access_token || parsed?.currentSession?.access_token;
+      }
+    }
+  } catch {
+    // 解析失败走兜底
+  }
+  if (!accessToken) {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      accessToken = session?.access_token;
+    } catch {
+      // 忽略
+    }
+  }
+  if (!accessToken) throw new Error('登录态失效，请重新登录后再发布');
+
+  const rpcUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL || ''}/rest/v1/rpc/broadcast_announcement`;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+  const resp = await fetch(rpcUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: anonKey,
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({ p_title: title, p_content: content }),
+  });
+
+  if (!resp.ok) {
+    let msg = '';
+    try {
+      const j = await resp.json();
+      msg = j?.message || j?.error || JSON.stringify(j);
+    } catch {
+      try { msg = await resp.text(); } catch { /* 忽略 */ }
+    }
+    throw new Error(msg || `发布失败 (${resp.status})`);
+  }
+  // RPC 标量返回：PostgREST 返回新公告的 uuid（JSON 字符串）
+  return await resp.json();
+}
+
+// 按 id 读取公告全文（公告弹窗用）。announcements 的 SELECT 策略对所有人开放。
+export async function getAnnouncement(
+  id: string,
+): Promise<{ id: string; title: string; content: string; created_at: string } | null> {
+  try {
+    const { data, error } = await supabase
+      .from('announcements')
+      .select('id, title, content, created_at')
+      .eq('id', id)
+      .single();
+    if (error) throw error;
+    return data as any;
+  } catch (error) {
+    console.error('获取公告失败:', error);
+    return null;
+  }
+}
+
 // 获取用户的通知
 export async function getUserNotifications(userId: string, {
   limit = 20,

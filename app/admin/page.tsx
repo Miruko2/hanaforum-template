@@ -5,7 +5,7 @@ import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { apiUrl } from "@/lib/api-base"
-import { Shield, Users, FileText, Trash2, AlertCircle, Bot, Cpu, Save, RefreshCw } from "lucide-react"
+import { Shield, Users, FileText, Trash2, AlertCircle, Bot, Cpu, Save, RefreshCw, Megaphone } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -20,8 +20,10 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import { useToast } from "@/hooks/use-toast"
+import { broadcastAnnouncement } from "@/lib/supabase"
 
 // ─── 模块级缓存 ────────────────────────────────────────────
 // 同一个 tab 内导航走又回来时，沿用上次数据，避免每次都重新请求 spinner。
@@ -79,6 +81,44 @@ export default function AdminPage() {
   const [aiBaseUrl, setAiBaseUrl] = useState(cachedAiConfig?.base_url || "")
   const [aiModel, setAiModel] = useState(cachedAiConfig?.model || "")
   const [aiApiKey, setAiApiKey] = useState("")
+
+  // 公告广播状态
+  const [annTitle, setAnnTitle] = useState("")
+  const [annContent, setAnnContent] = useState("")
+  const [sendingAnn, setSendingAnn] = useState(false)
+  const [showBroadcastConfirm, setShowBroadcastConfirm] = useState(false)
+
+  // 发布全员公告
+  const handleBroadcast = async () => {
+    if (!annTitle.trim() || !annContent.trim()) {
+      toast({
+        title: "请填写完整",
+        description: "标题和内容都不能为空",
+        variant: "destructive",
+      })
+      return
+    }
+    try {
+      setSendingAnn(true)
+      await broadcastAnnouncement(annTitle.trim(), annContent.trim())
+      toast({
+        title: "已推送",
+        description: "公告已发送给所有用户",
+      })
+      setAnnTitle("")
+      setAnnContent("")
+    } catch (e: any) {
+      console.error("发布公告失败:", e)
+      toast({
+        title: "发布失败",
+        description: e?.message || "请稍后重试",
+        variant: "destructive",
+      })
+    } finally {
+      setSendingAnn(false)
+      setShowBroadcastConfirm(false)
+    }
+  }
 
   useEffect(() => {
     // 等待认证状态完成初始化再判断
@@ -708,6 +748,10 @@ export default function AdminPage() {
             <Cpu className="mr-2 h-4 w-4" />
             AI 模型
           </TabsTrigger>
+          <TabsTrigger value="announcements" className="data-[state=active]:bg-lime-900/30 data-[state=active]:text-lime-400">
+            <Megaphone className="mr-2 h-4 w-4" />
+            公告
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="admins">
@@ -1099,7 +1143,93 @@ export default function AdminPage() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        <TabsContent value="announcements">
+          <Card className="bg-gray-900 border-gray-800">
+            <CardHeader>
+              <CardTitle className="flex items-center">
+                <Megaphone className="mr-2 h-5 w-5 text-lime-400" />
+                发布公告
+              </CardTitle>
+              <CardDescription>
+                公告会作为系统通知推送给<span className="text-lime-400">所有当前用户</span>，
+                头像显示站点 logo，用户点击通知即可查看全文。
+                <span className="text-gray-500">（仅推送给发送时刻已注册的用户，之后注册的新用户看不到旧公告）</span>
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm text-gray-400">标题</label>
+                <Input
+                  placeholder="例如：更新公告"
+                  value={annTitle}
+                  onChange={(e) => setAnnTitle(e.target.value)}
+                  className="bg-gray-800 border-gray-700"
+                  maxLength={60}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm text-gray-400">内容（支持换行）</label>
+                <Textarea
+                  placeholder="输入公告内容..."
+                  value={annContent}
+                  onChange={(e) => setAnnContent(e.target.value)}
+                  className="bg-gray-800 border-gray-700 min-h-[160px]"
+                  maxLength={2000}
+                />
+                <p className="text-right text-xs text-gray-500">{annContent.length}/2000</p>
+              </div>
+            </CardContent>
+            <CardFooter className="justify-end">
+              <Button
+                onClick={() => setShowBroadcastConfirm(true)}
+                disabled={sendingAnn || !annTitle.trim() || !annContent.trim()}
+                className="bg-lime-700 hover:bg-lime-600"
+              >
+                <Megaphone className="h-4 w-4 mr-2" />
+                {sendingAnn ? "推送中..." : "推送给所有人"}
+              </Button>
+            </CardFooter>
+          </Card>
+        </TabsContent>
       </Tabs>
+
+      {/* 公告广播二次确认 */}
+      <AlertDialog open={showBroadcastConfirm} onOpenChange={setShowBroadcastConfirm}>
+        <AlertDialogContent className="bg-gray-900 border-gray-800 text-white">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-lime-400 flex items-center">
+              <Megaphone className="mr-2 h-5 w-5" />
+              确认推送公告
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-gray-300">
+              这条公告将作为系统通知推送给<span className="text-lime-400">所有当前用户</span>，无法撤回。确定要发送吗？
+              <span className="block mt-2 rounded-md bg-gray-800/70 p-3 text-sm">
+                <span className="block font-semibold text-white">{annTitle || "（无标题）"}</span>
+                <span className="mt-1 block whitespace-pre-wrap break-words text-gray-400 line-clamp-4">
+                  {annContent || "（无内容）"}
+                </span>
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="bg-gray-800 text-white hover:bg-gray-700 border-gray-700">
+              取消
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-lime-700 hover:bg-lime-600 text-white"
+              onClick={(e) => {
+                // 阻止 AlertDialog 默认关闭，由 handleBroadcast 完成后再关
+                e.preventDefault()
+                handleBroadcast()
+              }}
+              disabled={sendingAnn}
+            >
+              {sendingAnn ? "推送中..." : "确认推送"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <AlertDialogContent className="bg-gray-900 border-gray-800 text-white">

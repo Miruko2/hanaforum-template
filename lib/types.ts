@@ -62,7 +62,7 @@ export interface Comment {
 }
 
 // 通知类型
-export type NotificationType = 'like_post' | 'comment_post' | 'like_comment' | 'post_removed';
+export type NotificationType = 'like_post' | 'comment_post' | 'like_comment' | 'post_removed' | 'announcement';
 
 // 通知接口
 export interface Notification {
@@ -71,6 +71,7 @@ export interface Notification {
   type: NotificationType
   post_id?: string     // 相关帖子ID（可选）
   comment_id?: string  // 相关评论ID（可选）
+  announcement_id?: string // 相关公告ID（type=announcement 时有值）
   actor_id?: string    // 触发者ID
   message: string      // 通知内容
   is_read: boolean     // 是否已读
