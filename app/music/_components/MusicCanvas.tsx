@@ -345,6 +345,11 @@ export function MusicCanvas({ onExpand, overlayOpen = false }: Props) {
       style={{
         perspective: 1600,
         perspectiveOrigin: "50% 50%",
+        // 把整个画布封进自己的 GPU 合成层。preserve-3d 卡片在安卓 WebView 下会
+        // 逃出本容器、画到 z-60 底部播放器之上（封面附近方形鬼影/闪动）。translateZ(0)
+        // 让本层光栅化为单一纹理，3D 卡片只能在层内绘制、无法外溢，播放器即可干净叠加其上。
+        // 注：perspective 属性作用于子级，与本元素自身 transform 互不影响，3D 鱼眼不受损。
+        transform: "translateZ(0)",
       }}
     >
       {/* Ambient background — radial halo (kept faint as a fallback for the

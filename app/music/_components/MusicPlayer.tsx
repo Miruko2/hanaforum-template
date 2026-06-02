@@ -87,16 +87,7 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
 
   return (
     <div
-      className="pointer-events-none fixed bottom-5 left-1/2 z-[60] w-[min(640px,calc(100vw-32px))]"
-      // 强制把播放器提升到独立 GPU 合成层 + 自建堆叠上下文，压在 MusicCanvas 的
-      // preserve-3d 3D 场景之上。这是安卓 WebView 下「fixed 元素被 3D 卡片穿透
-      // （鬼影）」的对症修法：translateZ(0) 让它成为真正的 3D 合成层，isolation
-      // 隔离堆叠上下文。translateX(-50%) 同时承担原 -translate-x-1/2 的水平居中。
-      style={{
-        transform: "translateX(-50%) translateZ(0)",
-        isolation: "isolate",
-        willChange: "transform",
-      }}
+      className="pointer-events-none fixed bottom-5 left-1/2 z-[60] w-[min(640px,calc(100vw-32px))] -translate-x-1/2"
     >
       <AnimatePresence mode="popLayout">
       {currentTrack && (
