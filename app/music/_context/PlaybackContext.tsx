@@ -15,6 +15,7 @@ import { TRACKS, type Track } from "../_data/tracks"
 const HISTORY_KEY = "music-history-v1"
 const HISTORY_LIMIT = 50
 const FAVORITES_KEY = "music-favorites-v1"
+const REPEAT_ONE_KEY = "music-repeat-one-v1"
 const FALLBACK_AUDIO = "/cover.mp3" // local placeholder when remote audio fails (region/VIP/etc.)
 
 export type HistoryEntry = {
@@ -28,6 +29,8 @@ export type PlaybackState = {
   currentTime: number
   duration: number
   isFallback: boolean      // true when current track is using the placeholder audio
+  /** Single-track repeat: when on, the current track loops seamlessly. Persisted. */
+  repeatOne: boolean
   history: HistoryEntry[]
   /** Favorite track ids, newest first. Persisted to localStorage. */
   favorites: string[]
@@ -42,6 +45,8 @@ export type PlaybackState = {
   clearHistory: () => void
   isFavorite: (id: string) => boolean
   toggleFavorite: (id: string) => void
+  /** Toggle single-track repeat on/off. */
+  toggleRepeatOne: () => void
   /**
    * Returns the current audio intensity in [0, 1], smoothed across frames.
    * Implementation strategy:
@@ -73,6 +78,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
   const [isFallback, setIsFallback] = useState(false)
+  const [repeatOne, setRepeatOne] = useState(false)
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [favorites, setFavorites] = useState<string[]>([])
   // Track which track is currently loading so the error handler knows whether
@@ -140,6 +146,29 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       /* ignore quota errors */
     }
   }, [favorites])
+
+  // ---- Load single-track repeat preference on mount ----
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(REPEAT_ONE_KEY) === "1") setRepeatOne(true)
+    } catch {
+      /* ignore */
+    }
+  }, [])
+
+  // ---- Persist repeat preference + drive the native `loop` flag ----
+  // Using the audio element's built-in `loop` gives a seamless gapless repeat
+  // (no `ended` round-trip), and it persists across `src` reassignment so we
+  // only need to sync it when the preference itself changes.
+  useEffect(() => {
+    try {
+      localStorage.setItem(REPEAT_ONE_KEY, repeatOne ? "1" : "0")
+    } catch {
+      /* ignore quota errors */
+    }
+    const el = audioRef.current
+    if (el) el.loop = repeatOne
+  }, [repeatOne])
 
   // ---- Init audio element + bind listeners once ----
   useEffect(() => {
@@ -330,6 +359,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     )
   }, [])
 
+  const toggleRepeatOne = useCallback(() => setRepeatOne((v) => !v), [])
+
   const getAudioIntensity = useCallback((): number => {
     // Steady "normal" when paused / no track — no pulse.
     if (!isPlayingRef.current) {
@@ -355,6 +386,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       currentTime,
       duration,
       isFallback,
+      repeatOne,
       history,
       favorites,
       tracks: TRACKS,
@@ -367,9 +399,10 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       clearHistory,
       isFavorite,
       toggleFavorite,
+      toggleRepeatOne,
       getAudioIntensity,
     }),
-    [currentTrack, isPlaying, currentTime, duration, isFallback, history, favorites, play, pause, togglePlay, seek, next, prev, clearHistory, isFavorite, toggleFavorite, getAudioIntensity],
+    [currentTrack, isPlaying, currentTime, duration, isFallback, repeatOne, history, favorites, play, pause, togglePlay, seek, next, prev, clearHistory, isFavorite, toggleFavorite, toggleRepeatOne, getAudioIntensity],
   )
 
   return <PlaybackCtx.Provider value={value}>{children}</PlaybackCtx.Provider>

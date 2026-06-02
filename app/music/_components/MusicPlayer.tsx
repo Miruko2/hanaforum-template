@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import Image from "next/image"
-import { Pause, Play, SkipBack, SkipForward, History as HistoryIcon, Heart } from "lucide-react"
+import { Pause, Play, SkipBack, SkipForward, History as HistoryIcon, Heart, Repeat1 } from "lucide-react"
 import { usePlayback } from "../_context/PlaybackContext"
 import { useDominantHue } from "../_lib/useDominantHue"
 import { useIsAndroid } from "../_lib/useIsAndroid"
@@ -23,7 +23,7 @@ type Props = {
 }
 
 export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
-  const { currentTrack, isPlaying, currentTime, duration, isFallback, togglePlay, seek, next, prev, isFavorite, toggleFavorite } =
+  const { currentTrack, isPlaying, currentTime, duration, isFallback, togglePlay, seek, next, prev, isFavorite, toggleFavorite, repeatOne, toggleRepeatOne } =
     usePlayback()
   const fav = currentTrack ? isFavorite(currentTrack.id) : false
   // 安卓 Chromium 合成器 bug：MusicCanvas 内 preserve-3d 卡片会逃出 stacking
@@ -226,6 +226,21 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
               }}
             >
               <SkipForward size={16} />
+            </button>
+            <button
+              type="button"
+              aria-label={repeatOne ? "关闭单曲循环" : "开启单曲循环"}
+              aria-pressed={repeatOne}
+              title={repeatOne ? "单曲循环：开" : "单曲循环：关"}
+              className={`ml-1 h-8 w-8 grid place-items-center rounded-full hover:bg-white/10 transition-colors ${
+                repeatOne ? "text-lime-400" : "text-white/60 hover:text-white"
+              }`}
+              onClick={(e) => {
+                e.stopPropagation()
+                toggleRepeatOne()
+              }}
+            >
+              <Repeat1 size={15} />
             </button>
             <button
               type="button"
