@@ -47,6 +47,9 @@ function MusicCardBase(
     <div
       ref={ref}
       data-card
+      // A2：初始 "0"（保留毛玻璃）。canvas 的 rAF 循环按鱼眼模糊量逐帧把外围卡
+      // 切到 "1"，CSS 据此关掉看不见的 backdrop-blur。首帧给 0 避免任何闪烁。
+      data-far="0"
       onPointerDown={(e) => {
         downRef.current = { x: e.clientX, y: e.clientY, t: performance.now() }
       }}
@@ -100,7 +103,7 @@ function MusicCardBase(
           compensate with a denser solid fill (65% → 80%) so the text stays
           readable without any sampling work. */}
       <div
-        className={`absolute inset-x-0 bottom-0 p-3 ${
+        className={`music-card-info absolute inset-x-0 bottom-0 p-3 ${
           lite ? "bg-black/80" : "bg-black/65 backdrop-blur-md"
         }`}
       >

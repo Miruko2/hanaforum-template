@@ -264,7 +264,19 @@ export function MusicCanvas({ onExpand, overlayOpen = false }: Props) {
     let prevPanY = NaN
     let prevParallax = ""
     let cachedList: Instance[] = []
-    const prevStyle = new Map<string, { t: string; o: string; f: string; v: string }>()
+    // A1（静止停渲）：pan 停稳后整段跳过逐卡循环，省下每秒上千次空算 fisheye。
+    //   paintSeq —— 可见集每次变化时自增（有新卡要画）。
+    //   lastPainted —— 仅当某一帧把当前可见集"全部"卡片都写到了 DOM 才追平；
+    //     setInstances 是异步挂载的，新卡可能晚一帧才出现，故未挂全就不追平，
+    //     下一帧继续补画，保证不漏卡。
+    //   prevOcclude —— 安卓 app 播放器遮挡态翻转时也要强制补一帧（即便 pan 没动）。
+    let paintSeq = 0
+    let lastPainted = -1
+    let prevOcclude = false
+    const prevStyle = new Map<
+      string,
+      { t: string; o: string; f: string; v: string; far: string }
+    >()
 
     const loop = () => {
       if (!mounted) return
@@ -315,6 +327,7 @@ export function MusicCanvas({ onExpand, overlayOpen = false }: Props) {
         const sig = cachedList.map((i) => i.key).join("|")
         if (sig !== instanceKeysRef.current) {
           instanceKeysRef.current = sig
+          paintSeq++ // 可见集变了 → 需要(至少)一次逐卡重画，把新卡画出来
           // Prune style cache for cards that scrolled out of view.
           const live = new Set(cachedList.map((i) => i.key))
           for (const k of prevStyle.keys()) if (!live.has(k)) prevStyle.delete(k)
@@ -324,61 +337,99 @@ export function MusicCanvas({ onExpand, overlayOpen = false }: Props) {
         }
       }
 
-      // Per-frame fisheye transforms via direct, dirty-checked DOM writes.
-      for (const inst of cachedList) {
-        const node = cardRefs.current.get(inst.key)
-        if (!node) continue
-        const sx = inst.worldX + panX
-        const sy = inst.worldY + panY
-        const cx = sx + inst.card.width / 2
-        const cy = sy + inst.card.height / 2
-        const f = fisheye(cx, cy, focusX, focusY, radius)
-        // Order matters: translate (screen coords) THEN rotate (around center) THEN scale.
-        const transform =
-          `translate3d(${sx.toFixed(2)}px, ${sy.toFixed(2)}px, ${f.z.toFixed(1)}px) ` +
-          `rotateX(${f.rotX.toFixed(2)}deg) rotateY(${f.rotY.toFixed(2)}deg) ` +
-          `scale(${f.scale.toFixed(3)})`
-        const opacity = f.opacity.toFixed(3)
-        // Quantize blur to 0.5px steps → stable string across frames → the
-        // compositor can reuse the cached blurred layer instead of re-rendering.
-        const filter =
-          f.blur > 0.15 ? `blur(${(Math.round(f.blur * 2) / 2).toFixed(1)}px)` : ""
+      // A1（静止停渲）：只有 pan 在动 / 可见集刚变 / 遮挡态翻转时才逐卡重写。
+      // 三者皆否 = 墙面静止，本帧整段跳过（rAF 仍在转，但不再空算 fisheye）。
+      const occludeNow = occludeForPlayerRef.current
+      const needPass =
+        panMoved || paintSeq !== lastPainted || occludeNow !== prevOcclude
 
-        // 安卓 app + 播放中：落入底部播放器矩形区的卡片整张隐藏，根除穿透鬼影。
-        // 用未变换前的基础矩形 [sx,sy,w,h] 判定（鱼眼在边缘是缩小的，故略偏保守，
-        // 利于完全遮住）。其余情形恒为 visible。
-        const occluded =
-          occludeForPlayerRef.current &&
-          sx < playerZoneRight &&
-          sx + inst.card.width > playerZoneLeft &&
-          sy + inst.card.height > playerZoneTop
-        const visibility = occluded ? "hidden" : "visible"
+      if (needPass) {
+        // 本帧是否把当前可见集的每张卡都画到了。异步挂载的新卡若还没出现，
+        // 置 false → 不追平 lastPainted，下一帧继续补画。
+        let allFound = true
 
-        const prev = prevStyle.get(inst.key)
-        if (!prev) {
-          node.style.transform = transform
-          node.style.opacity = opacity
-          node.style.filter = filter
-          node.style.visibility = visibility
-          prevStyle.set(inst.key, { t: transform, o: opacity, f: filter, v: visibility })
-        } else {
-          if (prev.t !== transform) {
+        // Per-frame fisheye transforms via direct, dirty-checked DOM writes.
+        for (const inst of cachedList) {
+          const node = cardRefs.current.get(inst.key)
+          if (!node) {
+            allFound = false
+            continue
+          }
+          const sx = inst.worldX + panX
+          const sy = inst.worldY + panY
+          const cx = sx + inst.card.width / 2
+          const cy = sy + inst.card.height / 2
+          const f = fisheye(cx, cy, focusX, focusY, radius)
+          // Order matters: translate (screen coords) THEN rotate (around center) THEN scale.
+          const transform =
+            `translate3d(${sx.toFixed(2)}px, ${sy.toFixed(2)}px, ${f.z.toFixed(1)}px) ` +
+            `rotateX(${f.rotX.toFixed(2)}deg) rotateY(${f.rotY.toFixed(2)}deg) ` +
+            `scale(${f.scale.toFixed(3)})`
+          const opacity = f.opacity.toFixed(3)
+          // 模糊量化 → 字符串跨帧稳定 → 合成器复用已糊图层、不必每帧重栅格化。
+          // B1：手机(lite)粗量化到 0/1/2px（仅 3 个取值，缓存命中率最高、最省 GPU，
+          //     小屏上景深差异肉眼难辨）；桌面保持 0.5px 步进的细腻模糊。
+          let filter = ""
+          if (f.blur > 0.15) {
+            if (lite) {
+              const lb = Math.min(2, Math.round(f.blur))
+              filter = lb > 0 ? `blur(${lb}px)` : ""
+            } else {
+              filter = `blur(${(Math.round(f.blur * 2) / 2).toFixed(1)}px)`
+            }
+          }
+
+          // A2：外围卡整张已被鱼眼 filter:blur 糊过，其底部信息栏里那层 backdrop-blur
+          // 此时根本看不见 —— 标记 data-far=1，用 CSS 关掉这层昂贵的 backdrop-filter，
+          // 省下一大笔 GPU 重采样。中心清晰卡(far=0)保留毛玻璃。阈值 2.0px（鱼眼最大
+          // 3.5px）：到这个糊度整卡已明显模糊，毛玻璃→实底的切换被完全盖住、看不出
+          // 跳变；想更省把阈值调低、想更稳调高。
+          const far = f.blur > 2.0 ? "1" : "0"
+
+          // 安卓 app + 播放中：落入底部播放器矩形区的卡片整张隐藏，根除穿透鬼影。
+          // 用未变换前的基础矩形 [sx,sy,w,h] 判定（鱼眼在边缘是缩小的，故略偏保守，
+          // 利于完全遮住）。其余情形恒为 visible。
+          const occluded =
+            occludeNow &&
+            sx < playerZoneRight &&
+            sx + inst.card.width > playerZoneLeft &&
+            sy + inst.card.height > playerZoneTop
+          const visibility = occluded ? "hidden" : "visible"
+
+          const prev = prevStyle.get(inst.key)
+          if (!prev) {
             node.style.transform = transform
-            prev.t = transform
-          }
-          if (prev.o !== opacity) {
             node.style.opacity = opacity
-            prev.o = opacity
-          }
-          if (prev.f !== filter) {
             node.style.filter = filter
-            prev.f = filter
-          }
-          if (prev.v !== visibility) {
             node.style.visibility = visibility
-            prev.v = visibility
+            if (node.dataset.far !== far) node.dataset.far = far
+            prevStyle.set(inst.key, { t: transform, o: opacity, f: filter, v: visibility, far })
+          } else {
+            if (prev.t !== transform) {
+              node.style.transform = transform
+              prev.t = transform
+            }
+            if (prev.o !== opacity) {
+              node.style.opacity = opacity
+              prev.o = opacity
+            }
+            if (prev.f !== filter) {
+              node.style.filter = filter
+              prev.f = filter
+            }
+            if (prev.v !== visibility) {
+              node.style.visibility = visibility
+              prev.v = visibility
+            }
+            if (prev.far !== far) {
+              node.dataset.far = far
+              prev.far = far
+            }
           }
         }
+
+        if (allFound) lastPainted = paintSeq
+        prevOcclude = occludeNow
       }
 
       prevPanX = panX
