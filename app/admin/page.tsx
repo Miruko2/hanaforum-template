@@ -823,8 +823,19 @@ export default function AdminPage() {
         <TabsContent value="users">
           <Card className="bg-gray-900 border-gray-800">
             <CardHeader>
-              <CardTitle>用户列表</CardTitle>
-              <CardDescription>查看所有注册用户</CardDescription>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <CardTitle>用户列表</CardTitle>
+                  <CardDescription>查看所有注册用户</CardDescription>
+                </div>
+                {/* 注册用户总数：等于下方列表行数（profiles 表） */}
+                <div className="shrink-0 text-right">
+                  <div className="text-3xl font-bold text-lime-400 tabular-nums leading-none">
+                    {users.length}
+                  </div>
+                  <div className="mt-1 text-xs text-gray-500">注册用户总数</div>
+                </div>
+              </div>
             </CardHeader>
             <CardContent>
               <div className="border rounded-md border-gray-800">
