@@ -233,8 +233,10 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
               aria-pressed={repeatOne}
               title={repeatOne ? "单曲循环：开" : "单曲循环：关"}
               className={`ml-1 h-8 w-8 grid place-items-center rounded-full hover:bg-white/10 transition-colors ${
-                repeatOne ? "text-lime-400" : "text-white/60 hover:text-white"
+                repeatOne ? "" : "text-white/60 hover:text-white"
               }`}
+              // 点亮时用与进度条一致的封面主色（进度条左端色 hsl(hue 75% 65%)）
+              style={repeatOne ? { color: `hsl(${hue} 75% 65%)` } : undefined}
               onClick={(e) => {
                 e.stopPropagation()
                 toggleRepeatOne()
