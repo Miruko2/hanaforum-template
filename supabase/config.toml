@@ -8,3 +8,9 @@ project_id = "your-project-ref"
 # 注意：通过网页控制台部署时，config.toml 不生效，需在函数 Settings 里手动把
 #       "Verify JWT" 开关关掉。
 verify_jwt = false
+
+[functions.moderate-text]
+# 同 moderate-image：文本敏感词审核(先发后审)，由 posts/comments/live_comments 的
+# 数据库 Webhook 触发。同样关 JWT、用 x-moderation-secret 鉴权。
+# 网页控制台部署时需手动在函数 Settings 里关掉 "Verify JWT"。
+verify_jwt = false

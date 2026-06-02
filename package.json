@@ -20,6 +20,7 @@
     "android:open": "npx cap open android",
     "setup:capacitor": "node scripts/setup-capacitor.js",
     "music:refresh": "node scripts/refresh-playlist.mjs",
+    "seed:sensitive-words": "node scripts/seed-sensitive-words.mjs",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage"
