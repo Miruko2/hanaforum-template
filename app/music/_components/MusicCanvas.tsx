@@ -15,7 +15,8 @@ import { VideoBackdrop } from "./VideoBackdrop"
 import { Grain } from "./Grain"
 import { useReducedMotion } from "../_lib/useReducedMotion"
 import { useIsMobile } from "../_lib/useIsMobile"
-import { useIsAndroid } from "../_lib/useIsAndroid"
+import { useIsAndroid, useIsAndroidApp } from "../_lib/useIsAndroid"
+import { usePlayback } from "../_context/PlaybackContext"
 // Toggle between cover-image backdrop (per track) and a single looping video.
 const USE_VIDEO_BACKDROP = true
 
@@ -44,11 +45,48 @@ type Props = {
   overlayOpen?: boolean
 }
 
+/**
+ * 极轻量探针：订阅播放上下文，仅把"当前是否有曲目（即底部播放器是否显示）"
+ * 通过回调上报。单独成组件，把 timeupdate 引发的高频 re-render 隔离在这里，
+ * 不波及重量级的 MusicCanvas 本体（它只读 refs、不订阅播放状态）。
+ */
+function PlaybackPresenceProbe({
+  onChange,
+}: {
+  onChange: (present: boolean) => void
+}) {
+  const { currentTrack } = usePlayback()
+  const present = currentTrack != null
+  useEffect(() => {
+    onChange(present)
+  }, [present, onChange])
+  return null
+}
+
 export function MusicCanvas({ onExpand, overlayOpen = false }: Props) {
   const reducedMotion = useReducedMotion()
   const isAndroid = useIsAndroid()
   // 安卓上有弹窗时退出渲染。其他平台 / 无弹窗时保持 canvas 显示。
   const hideForOverlay = isAndroid && overlayOpen
+
+  // ---- 安卓 app 底部播放器鬼影根治：遮挡播放器矩形区内的卡片 ----
+  // 安卓 WebView 的合成器 bug 让 preserve-3d 卡片穿透、画到 z-60 底部播放器上
+  // （封面附近方形鬼影/闪动）。纯 CSS（不透明背景 / 提层 / 封层）均压不住，唯一
+  // 可靠手段是隐藏卡片本身（与弹窗 hideForOverlay 同理）。仅在「安卓 app + 正在
+  // 播放（播放器可见）」时启用；rAF 循环每帧读该 ref，把落入播放器区的卡片
+  // visibility:hidden。浏览器/iOS/桌面恒为 false，墙面完整不受影响。
+  const isAndroidApp = useIsAndroidApp()
+  const isAndroidAppRef = useRef(false)
+  const trackPresentRef = useRef(false)
+  const occludeForPlayerRef = useRef(false)
+  useEffect(() => {
+    isAndroidAppRef.current = isAndroidApp
+    occludeForPlayerRef.current = isAndroidApp && trackPresentRef.current
+  }, [isAndroidApp])
+  const handleTrackPresence = useCallback((present: boolean) => {
+    trackPresentRef.current = present
+    occludeForPlayerRef.current = isAndroidAppRef.current && present
+  }, [])
   // Distinct from the layout-driven `isMobile` (viewSize.w < 768) below —
   // this is a *device-tier* signal that drives perf degradation: when true
   // we drop the video backdrop, grain, parallax, and lighten the card blur.
@@ -203,6 +241,15 @@ export function MusicCanvas({ onExpand, overlayOpen = false }: Props) {
     const focusY = viewSize.h / 2
     const radius = Math.min(viewSize.w, viewSize.h) * FISHEYE_RADIUS_FACTOR
 
+    // 底部播放器遮挡区（屏幕坐标；viewport 是 fixed inset-0，故与屏幕坐标一致）。
+    // 高度 120 覆盖 bottom-5 边距 + 面板高度并留余量；宽度对齐播放器最大宽 640 + 两侧余量。
+    // 仅当 occludeForPlayerRef 为真（安卓 app + 播放中）时用于隐藏落入此区的卡片。
+    const PLAYER_ZONE_H = 120
+    const playerZoneTop = viewSize.h - PLAYER_ZONE_H
+    const playerZoneW = Math.min(640, viewSize.w - 32) + 24
+    const playerZoneLeft = (viewSize.w - playerZoneW) / 2
+    const playerZoneRight = playerZoneLeft + playerZoneW
+
     // --- Per-frame work caches (perf) ---
     // The dominant cost is re-writing each card's transform/opacity/filter every
     // frame — especially `filter: blur()`, which forces a GPU re-render. We:
@@ -217,7 +264,7 @@ export function MusicCanvas({ onExpand, overlayOpen = false }: Props) {
     let prevPanY = NaN
     let prevParallax = ""
     let cachedList: Instance[] = []
-    const prevStyle = new Map<string, { t: string; o: string; f: string }>()
+    const prevStyle = new Map<string, { t: string; o: string; f: string; v: string }>()
 
     const loop = () => {
       if (!mounted) return
@@ -297,12 +344,23 @@ export function MusicCanvas({ onExpand, overlayOpen = false }: Props) {
         const filter =
           f.blur > 0.15 ? `blur(${(Math.round(f.blur * 2) / 2).toFixed(1)}px)` : ""
 
+        // 安卓 app + 播放中：落入底部播放器矩形区的卡片整张隐藏，根除穿透鬼影。
+        // 用未变换前的基础矩形 [sx,sy,w,h] 判定（鱼眼在边缘是缩小的，故略偏保守，
+        // 利于完全遮住）。其余情形恒为 visible。
+        const occluded =
+          occludeForPlayerRef.current &&
+          sx < playerZoneRight &&
+          sx + inst.card.width > playerZoneLeft &&
+          sy + inst.card.height > playerZoneTop
+        const visibility = occluded ? "hidden" : "visible"
+
         const prev = prevStyle.get(inst.key)
         if (!prev) {
           node.style.transform = transform
           node.style.opacity = opacity
           node.style.filter = filter
-          prevStyle.set(inst.key, { t: transform, o: opacity, f: filter })
+          node.style.visibility = visibility
+          prevStyle.set(inst.key, { t: transform, o: opacity, f: filter, v: visibility })
         } else {
           if (prev.t !== transform) {
             node.style.transform = transform
@@ -315,6 +373,10 @@ export function MusicCanvas({ onExpand, overlayOpen = false }: Props) {
           if (prev.f !== filter) {
             node.style.filter = filter
             prev.f = filter
+          }
+          if (prev.v !== visibility) {
+            node.style.visibility = visibility
+            prev.v = visibility
           }
         }
       }
@@ -345,13 +407,11 @@ export function MusicCanvas({ onExpand, overlayOpen = false }: Props) {
       style={{
         perspective: 1600,
         perspectiveOrigin: "50% 50%",
-        // 把整个画布封进自己的 GPU 合成层。preserve-3d 卡片在安卓 WebView 下会
-        // 逃出本容器、画到 z-60 底部播放器之上（封面附近方形鬼影/闪动）。translateZ(0)
-        // 让本层光栅化为单一纹理，3D 卡片只能在层内绘制、无法外溢，播放器即可干净叠加其上。
-        // 注：perspective 属性作用于子级，与本元素自身 transform 互不影响，3D 鱼眼不受损。
-        transform: "translateZ(0)",
       }}
     >
+      {/* 隔离播放状态订阅的轻量探针（返回 null，不渲染任何 DOM） */}
+      <PlaybackPresenceProbe onChange={handleTrackPresence} />
+
       {/* Ambient background — radial halo (kept faint as a fallback for the
           no-track state; the CoverBackdrop layer takes over the moment a
           track starts playing). */}
