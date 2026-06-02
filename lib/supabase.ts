@@ -667,28 +667,73 @@ export async function createNotification({
       return null;
     }
 
-    const { data, error } = await supabase
-      .from('notifications')
-      .insert({
+    // 直接用带 JWT 的 REST 请求插入通知，绕开本项目偶发的
+    // "通过 supabase 客户端写请求时掉登录态、以匿名身份发出" 问题
+    //（该问题会让 INSERT 以 anon 身份发出、被 notifications 表 RLS 拦下，报 42501）。
+    //
+    // 注意：access_token 优先直接从 localStorage 取（这是经手动验证能拿到
+    // 201 的可靠来源）；supabase.auth.getSession() 在本项目的自定义会话管理下
+    // 有时会返回失效/匿名的 token，故仅作兜底。
+    let accessToken: string | undefined;
+    try {
+      if (typeof window !== 'undefined') {
+        const raw = localStorage.getItem('supabase.auth.token');
+        if (raw && raw !== 'undefined' && raw !== 'null') {
+          const parsed = JSON.parse(raw);
+          accessToken = parsed?.access_token || parsed?.currentSession?.access_token;
+        }
+      }
+    } catch {
+      // 解析失败则走兜底
+    }
+    if (!accessToken) {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        accessToken = session?.access_token;
+      } catch {
+        // 忽略
+      }
+    }
+    if (!accessToken) {
+      console.error('通知创建失败: 当前没有有效登录态(access_token)');
+      return null;
+    }
+
+    const restUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL || ''}/rest/v1/notifications`;
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+    const resp = await fetch(restUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: anonKey,
+        Authorization: `Bearer ${accessToken}`,
+        // 关键：用 return=minimal 不回读插入行。
+        // 通知的 user_id 是“接收者”(通常不是创建者本人)，而 SELECT 策略是
+        // auth.uid() = user_id；PostgreSQL 对 INSERT...RETURNING 会同时校验 SELECT 策略，
+        // 回读这条“发给别人的通知”会失败并报 42501（与 INSERT 被拦的报错相同，极易误判）。
+        // minimal 跳过回读，INSERT 只走 WITH CHECK(actor_id = auth.uid()) 即可成功。
+        Prefer: 'return=minimal',
+      },
+      body: JSON.stringify({
         user_id: userId,
         type,
-        post_id: postId,
-        comment_id: commentId,
-        actor_id: actorId,
+        post_id: postId ?? null,
+        comment_id: commentId ?? null,
+        actor_id: actorId ?? null,
         message,
         is_read: false,
         created_at: new Date().toISOString(),
-      })
-      .select()
-      .single();
+      }),
+    });
 
-    if (error) {
-      console.error('数据库创建通知失败:', error);
-      throw error;
+    if (!resp.ok) {
+      const errText = await resp.text();
+      console.error('数据库创建通知失败:', errText);
+      return null;
     }
-    
-    console.debug('通知创建成功:', data);
-    return data;
+
+    console.debug('通知创建成功');
+    return true;
   } catch (error) {
     console.error('创建通知失败:', error);
     return null;
