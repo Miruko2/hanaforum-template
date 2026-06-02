@@ -5,12 +5,9 @@ import type React from "react"
 
 import { useState } from "react"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
-import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { useToast } from "@/hooks/use-toast"
-import { Mail } from "lucide-react"
 
 export function RegisterForm() {
   const [email, setEmail] = useState("")
@@ -18,11 +15,7 @@ export function RegisterForm() {
   const [username, setUsername] = useState("")
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
-  // 注册成功后切到"请查邮箱"视图，不跳路由（避免邮箱出现在 URL）
-  const [submittedEmail, setSubmittedEmail] = useState<string | null>(null)
   const { signUp } = useSimpleAuth()
-  const router = useRouter()
-  const { toast } = useToast()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -38,66 +31,16 @@ export function RegisterForm() {
         return
       }
 
-      // 切到"请查邮箱"视图。不再跳 /login，因为用户没点验证链接前登录会失败，
-      // 直接跳过去会让人误以为注册流程结束了。
-      setSubmittedEmail(email)
+      // 邮箱验证已关闭：注册成功即自动登录。
+      // 等会话写入 localStorage 后整页跳首页，确保首页能读到登录态（与登录流程一致）。
+      await new Promise((resolve) => setTimeout(resolve, 500))
+      window.location.href = "/"
     } catch (err: any) {
-      console.error("注册错误:", err);
+      console.error("注册错误:", err)
       setError(err.message || "注册失败")
     } finally {
       setLoading(false)
     }
-  }
-
-  // 注册成功后的"请查邮箱"视图
-  if (submittedEmail) {
-    return (
-      <div className="w-full max-w-md mx-auto p-8 rounded-2xl
-        bg-black/20 backdrop-blur-lg border border-white/10 shadow-2xl
-        transition-all duration-300 text-white">
-        <div className="flex flex-col items-center text-center space-y-5">
-          <div className="w-16 h-16 rounded-full bg-lime-500/20 flex items-center justify-center">
-            <Mail className="w-8 h-8 text-lime-400" />
-          </div>
-          <h2 className="text-2xl font-bold text-lime-400">请查收验证邮件</h2>
-          <div className="space-y-2 text-sm text-white/80 leading-relaxed">
-            <p>
-              我们已向 <span className="text-lime-300 font-mono break-all">{submittedEmail}</span> 发送了一封验证邮件。
-            </p>
-            <p className="font-semibold text-white">
-              请打开邮箱点击邮件里的链接，激活后才能登录。
-            </p>
-          </div>
-
-          <div className="w-full p-4 rounded-lg bg-amber-500/10 border border-amber-500/30 text-left text-xs text-amber-200/90 space-y-1.5">
-            <p>📮 <span className="font-semibold">发件人</span>：萤火虫之国 &lt;noreply@mail.hanakos.cc&gt;</p>
-            <p>🔍 <span className="font-semibold">没收到？</span>请检查<span className="text-amber-300 font-semibold">「垃圾邮件」</span>文件夹（QQ、163 邮箱常见）</p>
-            <p>⏱️ <span className="font-semibold">延迟</span>：通常 5-30 秒，国内邮箱偶尔 1-5 分钟</p>
-          </div>
-
-          <div className="w-full flex flex-col gap-2 pt-2">
-            <Button
-              onClick={() => router.push("/login")}
-              className="w-full bg-lime-500 hover:bg-lime-600 text-black"
-            >
-              已完成验证，去登录
-            </Button>
-            <Button
-              onClick={() => {
-                setSubmittedEmail(null)
-                setEmail("")
-                setPassword("")
-                setUsername("")
-              }}
-              variant="ghost"
-              className="w-full text-white/60 hover:text-white hover:bg-white/5"
-            >
-              换个邮箱重新注册
-            </Button>
-          </div>
-        </div>
-      </div>
-    )
   }
 
   return (

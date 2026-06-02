@@ -253,11 +253,10 @@ export const SimpleAuthProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }
 
       console.debug('✅ SimpleAuth: 注册完成，用户:', data.user.email, '用户名:', username);
-      // 注：实际页面用 RegisterForm 内嵌的"请查邮箱"视图做主引导，
-      // 这里只放一个轻量提示。文案不再说"账户已创建"，避免用户以为流程已结束。
+      // 邮箱验证已关闭：注册即自动登录，不再发验证邮件。
       toast({
-        title: "已发送验证邮件",
-        description: "请去邮箱点击验证链接激活账号",
+        title: "注册成功",
+        description: "欢迎加入萤火虫之国！",
       })
       return { data, error: null }
     } catch (error: any) {
