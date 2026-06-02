@@ -2149,6 +2149,19 @@ body.modal-open {
   animation: glassDropdownOut 0.15s ease-out both;
 }
 
+/* 移动端导航下拉菜单：完全复用头像菜单的进/退场关键帧，1:1 一致。
+   通过 data-state 切换；退场动画播放期间组件保持挂载（见 navigation.tsx
+   的 onAnimationEnd 延迟卸载逻辑）。 */
+.mobile-nav-bounce {
+  transform-origin: top center;
+}
+.mobile-nav-bounce[data-state="open"] {
+  animation: glassDropdownIn 0.28s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.mobile-nav-bounce[data-state="closed"] {
+  animation: glassDropdownOut 0.15s ease-out both;
+}
+
 /* 菜单项高亮态：和整体粉/绿色调协调，不使用 popover 默认色 */
 .glass-dropdown [role="menuitem"],
 .glass-dropdown [role="menuitemcheckbox"],

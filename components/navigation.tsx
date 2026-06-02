@@ -31,6 +31,8 @@ function NavigationContent() {
   const searchParams = useSearchParams()
   const { user, signOut, isAdmin } = useSimpleAuth()
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+  // 退场动画需要在关闭后短暂保留挂载，由 onAnimationEnd 真正卸载
+  const [mobileMenuRender, setMobileMenuRender] = useState(false)
   const [mounted, setMounted] = useState(false)
   const [isNavVisible, setIsNavVisible] = useState(true)
   // lastScrollY 只在滚动 handler 内做比较，不参与渲染，用 ref 避免 set 触发
@@ -51,6 +53,11 @@ function NavigationContent() {
   useEffect(() => {
     setMounted(true)
   }, [])
+
+  // 开菜单即挂载；关菜单时保持挂载，等退场动画结束后再卸载（见 onAnimationEnd）
+  useEffect(() => {
+    if (isMobileMenuOpen) setMobileMenuRender(true)
+  }, [isMobileMenuOpen])
 
   // 获取用户头像
   useEffect(() => {
@@ -370,9 +377,18 @@ function NavigationContent() {
       </div>
 
       {/* 移动端菜单 */}
-      {isMobileMenuOpen && (
+      {mobileMenuRender && (
         <div className="absolute top-full left-0 right-0 mt-2 md:hidden">
-          <div className="bg-black/30 backdrop-blur-lg border border-white/10 rounded-2xl mx-0 shadow-lg">
+          <div
+            className="mobile-nav-bounce bg-black/30 backdrop-blur-lg border border-white/10 rounded-2xl mx-0 shadow-lg"
+            data-state={isMobileMenuOpen ? "open" : "closed"}
+            // 退场动画播完再卸载；用 target===currentTarget 过滤子元素冒泡上来的 animationend
+            onAnimationEnd={(e) => {
+              if (e.target === e.currentTarget && !isMobileMenuOpen) {
+                setMobileMenuRender(false)
+              }
+            }}
+          >
             <div className="px-6 py-4">
               <nav className="flex flex-col space-y-2">
                 <Link
