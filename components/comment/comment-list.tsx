@@ -24,6 +24,18 @@ interface OptimisticComment extends Comment {
   tempId?: string
 }
 
+// 从评论树中递归移除指定 id 的评论（连同其子树）。
+// 后端 delete_comment 会级联删除所有后代回复，这里同步把整棵子树摘掉。
+function removeCommentById(list: Comment[], commentId: string): Comment[] {
+  return list
+    .filter((c) => c.id !== commentId)
+    .map((c) =>
+      c.replies && c.replies.length > 0
+        ? { ...c, replies: removeCommentById(c.replies, commentId) }
+        : c,
+    )
+}
+
 export default function CommentList({ 
   postId, 
   onCommentAdded,
@@ -267,6 +279,14 @@ export default function CommentList({
     }
   }, [user, postId, onCommentAdded])
 
+  // 处理评论删除：从真实列表与乐观列表中即时移除（后端已删除）
+  const handleCommentDeleted = useCallback((commentId: string) => {
+    setComments((prev) => removeCommentById(prev, commentId))
+    setOptimisticComments((prev) =>
+      prev.filter((c) => c.id !== commentId && c.tempId !== commentId),
+    )
+  }, [])
+
   // 处理登录按钮点击
   const handleLoginClick = () => {
     router.push("/login")
@@ -425,6 +445,7 @@ export default function CommentList({
                 comment={comment}
                 postId={postId}
                 onCommentAdded={handleCommentAdded}
+                onCommentDeleted={handleCommentDeleted}
                 isOptimistic={true}
                 isPinned={isPinned}
                 isAdmin={isAdmin}
@@ -438,6 +459,7 @@ export default function CommentList({
                 comment={comment}
                 postId={postId}
                 onCommentAdded={handleCommentAdded}
+                onCommentDeleted={handleCommentDeleted}
                 isPinned={isPinned}
                 isAdmin={isAdmin}
               />

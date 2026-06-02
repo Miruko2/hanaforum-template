@@ -1536,6 +1536,19 @@ export async function addComment(postId: string, userId: string, content: string
   }
 }
 
+// 删除评论
+// 权限由后端 delete_comment(SECURITY DEFINER) 校验：仅评论作者本人或
+// 管理员可删；并级联删除该评论的所有子回复与点赞。前端无需传 userId，
+// 由数据库 auth.uid() 判定，避免伪造。
+export async function deleteComment(commentId: string) {
+  const { error } = await supabase.rpc("delete_comment", { p_comment_id: commentId });
+  if (error) {
+    console.error("删除评论失败:", error);
+    throw error;
+  }
+  return true;
+}
+
 // 实时订阅帖子更新
 export function subscribeToPostsUpdates(callback: (posts: any[]) => void) {
   // 初始加载帖子
