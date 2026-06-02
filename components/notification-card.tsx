@@ -1,6 +1,6 @@
 "use client"
 
-import { Heart, MessageCircle, Reply, Loader2 } from "lucide-react"
+import { Heart, MessageCircle, Reply, ShieldAlert, Loader2 } from "lucide-react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { formatDate, cn } from "@/lib/utils"
 import type { Notification } from "@/lib/types"
@@ -26,6 +26,12 @@ const TYPE_META: Record<
     icon: Reply,
     color: "text-violet-400",
     bg: "bg-violet-500/15 border-violet-500/25",
+  },
+  // 内容被审核移除（系统通知，无触发者）
+  post_removed: {
+    icon: ShieldAlert,
+    color: "text-amber-400",
+    bg: "bg-amber-500/15 border-amber-500/25",
   },
 }
 

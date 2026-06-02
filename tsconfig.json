@@ -38,6 +38,7 @@
   ],
   "exclude": [
     "node_modules",
-    "_api_backup"
+    "_api_backup",
+    "supabase"
   ]
 }

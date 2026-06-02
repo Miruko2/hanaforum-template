@@ -1,0 +1,10 @@
+# Supabase 本地/部署配置。
+# 部署前先把项目关联上：`npx supabase link --project-ref <你的项目ref>`
+project_id = "your-project-ref"
+
+[functions.moderate-image]
+# 关闭 JWT 校验：本函数是【数据库 Webhook 的后台目标】，调用方是 Postgres 而非登录用户，
+# 没有 Supabase JWT 可带。改用共享密钥头 x-moderation-secret 鉴权(见函数内逻辑 + Webhook 配置)。
+# 注意：通过网页控制台部署时，config.toml 不生效，需在函数 Settings 里手动把
+#       "Verify JWT" 开关关掉。
+verify_jwt = false
