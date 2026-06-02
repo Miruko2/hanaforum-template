@@ -1,10 +1,11 @@
 // Supabase Edge Function: moderate-image
 //
-// 【先发后审 / 异步审核】帖子发布后，由数据库 Webhook(posts 表 INSERT)触发本函数：
+// 【先发后审 / 异步审核】由数据库 Webhook(posts 表 INSERT + UPDATE)触发本函数：
 //   - 用 service role 在后台对帖子图片做色情/裸露检测(Sightengine)；
-//   - 判定违规 → 删帖 + 删图 + 给作者写一条 post_removed 通知；
-//   - 判定正常 / 无图片 → 什么都不做。
-// 因此用户发帖是"秒发"，审核在后台跑(代价：违规图会短暂公开几秒再被撤下)。
+//   - 新发帖(INSERT)违规 → 删整帖 + 删图 + 通知作者；
+//   - 编辑换图(UPDATE)违规 → 只删图(把 image_url 清空)、保留正文 + 通知作者；
+//   - 正常 / 无图 / 图片没变 → 什么都不做。
+// 因此用户发帖、编辑都是"秒回"，审核在后台跑(代价：违规图会短暂可见几秒再被撤下)。
 //
 // 这是 Webhook 的后台目标、不面向客户端，所以：
 //   - 函数关闭 JWT 校验(verify_jwt = false)；
@@ -32,12 +33,13 @@ const EXPLICIT_THRESHOLD = 0.5
 //    null = 不拦，只挡真正的色情；想更严就设成 0.8 这类数值。
 const VERY_SUGGESTIVE_THRESHOLD: number | null = null
 // 3) 审核服务异常(密钥错/Sightengine 故障)时的策略：
-//    false = 保留帖子(降级：不误删用户正常帖，但违规图会留着 —— 默认)；
-//    true  = 删除帖子(零漏网，但第三方故障期会误删正常帖)。
-const DELETE_ON_MODERATION_ERROR = false
+//    false = 保留内容(降级：不误删用户正常帖/图，但违规图会留着 —— 默认)；
+//    true  = 按违规处理(零漏网，但第三方故障期会误删正常内容)。
+const ENFORCE_ON_MODERATION_ERROR = false
 // ────────────────────────────────────────────────────────────────────────────
 
-const NOTIFY_MESSAGE = "你发布的帖子因图片含有违规内容，已被系统自动移除。"
+const MSG_POST_REMOVED = "你发布的帖子因图片含有违规内容，已被系统自动移除。"
+const MSG_IMAGE_REMOVED = "你帖子里新更换的图片含有违规内容，已被系统移除。"
 
 // 本项目 post-images 公开桶的 URL 前缀，用于从 image_url 反解出存储路径来删图。
 const POST_IMAGES_PREFIX = `${SUPABASE_URL}/storage/v1/object/public/post-images/`
@@ -49,6 +51,7 @@ const json = (body: unknown, status = 200) =>
   })
 
 const num = (v: unknown) => (typeof v === "number" ? v : 0)
+const str = (v: unknown) => (typeof v === "string" ? v : "")
 
 Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "method not allowed" }, 405)
@@ -60,19 +63,34 @@ Deno.serve(async (req) => {
   }
 
   // 解析数据库 Webhook 负载：{ type, table, record, old_record, schema }
-  let record: Record<string, unknown> | null = null
+  let payload: any
   try {
-    const body = await req.json()
-    record = (body?.record ?? null) as Record<string, unknown> | null
+    payload = await req.json()
   } catch {
     return json({ error: "bad payload" }, 400)
   }
 
-  const postId = typeof record?.id === "string" ? record.id : ""
-  const userId = typeof record?.user_id === "string" ? record.user_id : ""
-  const imageUrl = typeof record?.image_url === "string" ? (record.image_url as string) : ""
+  const eventType = str(payload?.type) // INSERT | UPDATE | DELETE
+  const record = (payload?.record ?? null) as Record<string, unknown> | null
+  const oldRecord = (payload?.old_record ?? null) as Record<string, unknown> | null
 
-  // 无图片的帖子：无需审核，直接放过(不消耗 Sightengine 额度)
+  // 只处理 INSERT 和 UPDATE
+  if (eventType !== "INSERT" && eventType !== "UPDATE") {
+    return json({ skipped: "ignored event" })
+  }
+
+  const postId = str(record?.id)
+  const userId = str(record?.user_id)
+  const imageUrl = str(record?.image_url)
+  const oldImageUrl = str(oldRecord?.image_url)
+
+  // UPDATE 时只在"图片真的变了"才审：避免点赞/评论计数等无关更新浪费额度、误删，
+  // 也避免本函数清空图片后再次触发 Webhook 造成死循环。
+  if (eventType === "UPDATE" && imageUrl === oldImageUrl) {
+    return json({ skipped: "image unchanged" })
+  }
+
+  // 无(新)图片：无需审核，直接放过(不消耗 Sightengine 额度)
   if (!imageUrl) return json({ skipped: "no image" })
 
   const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
@@ -80,7 +98,7 @@ Deno.serve(async (req) => {
   // 密钥没配好：按降级策略处理
   if (!SIGHTENGINE_API_USER || !SIGHTENGINE_API_SECRET) {
     console.error("[moderate-image] Sightengine 密钥未配置，按降级策略处理")
-    if (DELETE_ON_MODERATION_ERROR) await removePost(admin, postId, userId, imageUrl)
+    if (ENFORCE_ON_MODERATION_ERROR) await enforce(admin, eventType, postId, userId, imageUrl)
     return json({ degraded: true, reason: "not configured" })
   }
 
@@ -97,13 +115,13 @@ Deno.serve(async (req) => {
     data = await res.json()
   } catch (e) {
     console.error("[moderate-image] Sightengine 请求失败:", e)
-    if (DELETE_ON_MODERATION_ERROR) await removePost(admin, postId, userId, imageUrl)
+    if (ENFORCE_ON_MODERATION_ERROR) await enforce(admin, eventType, postId, userId, imageUrl)
     return json({ degraded: true, reason: "request failed" })
   }
 
   if (data?.status !== "success") {
     console.error("[moderate-image] Sightengine 返回错误:", data?.error)
-    if (DELETE_ON_MODERATION_ERROR) await removePost(admin, postId, userId, imageUrl)
+    if (ENFORCE_ON_MODERATION_ERROR) await enforce(admin, eventType, postId, userId, imageUrl)
     return json({ degraded: true, reason: data?.error?.message ?? "moderation error" })
   }
 
@@ -116,48 +134,71 @@ Deno.serve(async (req) => {
   }
 
   if (blocked) {
-    await removePost(admin, postId, userId, imageUrl)
-    return json({ removed: true, score: Number(explicit.toFixed(4)) })
+    await enforce(admin, eventType, postId, userId, imageUrl)
+    return json({ removed: eventType === "INSERT" ? "post" : "image", score: Number(explicit.toFixed(4)) })
   }
 
   return json({ allowed: true, score: Number(explicit.toFixed(4)) })
 })
 
-// 删帖 + 删图 + 通知作者。各步独立 try，单步失败不影响其余步骤。
-async function removePost(
+// 按事件类型执行移除：新发帖删整帖，编辑换图只删图保留正文。
+async function enforce(
   admin: SupabaseClient,
+  eventType: string,
   postId: string,
   userId: string,
   imageUrl: string,
 ): Promise<void> {
-  // 1) 删存储里的违规图(仅当确属本项目 post-images 桶)
-  if (imageUrl.startsWith(POST_IMAGES_PREFIX)) {
-    try {
-      const path = decodeURIComponent(imageUrl.slice(POST_IMAGES_PREFIX.length).split("?")[0])
-      const { error } = await admin.storage.from("post-images").remove([path])
-      if (error) console.error("[moderate-image] 删图失败:", error)
-    } catch (e) {
-      console.error("[moderate-image] 删图异常:", e)
-    }
+  if (eventType === "INSERT") {
+    await removePost(admin, postId, userId, imageUrl)
+  } else {
+    await stripImage(admin, postId, userId, imageUrl)
   }
+}
 
-  // 2) 删帖
+// 删整帖 + 删图 + 通知作者(用于新发帖违规)。
+async function removePost(admin: SupabaseClient, postId: string, userId: string, imageUrl: string): Promise<void> {
+  await deleteStorageImage(admin, imageUrl)
   if (postId) {
     const { error } = await admin.from("posts").delete().eq("id", postId)
     if (error) console.error("[moderate-image] 删帖失败:", error)
   }
+  await notifyUser(admin, userId, MSG_POST_REMOVED)
+}
 
-  // 3) 通知作者(post_id 置空，避免被删帖级联带走；类型 post_removed)
-  if (userId) {
-    const { error } = await admin.from("notifications").insert({
-      user_id: userId,
-      type: "post_removed",
-      post_id: null,
-      comment_id: null,
-      actor_id: null,
-      message: NOTIFY_MESSAGE,
-      is_read: false,
-    })
-    if (error) console.error("[moderate-image] 写通知失败:", error)
+// 只删图(把帖子 image_url 清空)+ 删图 + 通知作者(用于编辑换图违规，保留正文)。
+async function stripImage(admin: SupabaseClient, postId: string, userId: string, imageUrl: string): Promise<void> {
+  await deleteStorageImage(admin, imageUrl)
+  if (postId) {
+    const { error } = await admin.from("posts").update({ image_url: null }).eq("id", postId)
+    if (error) console.error("[moderate-image] 清空帖子图片失败:", error)
   }
+  await notifyUser(admin, userId, MSG_IMAGE_REMOVED)
+}
+
+// 删存储里的违规图(仅当确属本项目 post-images 桶；路径从 URL 反解，不接受外部任意路径)。
+async function deleteStorageImage(admin: SupabaseClient, imageUrl: string): Promise<void> {
+  if (!imageUrl.startsWith(POST_IMAGES_PREFIX)) return
+  try {
+    const path = decodeURIComponent(imageUrl.slice(POST_IMAGES_PREFIX.length).split("?")[0])
+    const { error } = await admin.storage.from("post-images").remove([path])
+    if (error) console.error("[moderate-image] 删图失败:", error)
+  } catch (e) {
+    console.error("[moderate-image] 删图异常:", e)
+  }
+}
+
+// 给作者写一条 post_removed 通知(post_id 置空，避免被删帖级联带走)。
+async function notifyUser(admin: SupabaseClient, userId: string, message: string): Promise<void> {
+  if (!userId) return
+  const { error } = await admin.from("notifications").insert({
+    user_id: userId,
+    type: "post_removed",
+    post_id: null,
+    comment_id: null,
+    actor_id: null,
+    message,
+    is_read: false,
+  })
+  if (error) console.error("[moderate-image] 写通知失败:", error)
 }
