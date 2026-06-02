@@ -6,7 +6,6 @@ import Image from "next/image"
 import { Pause, Play, SkipBack, SkipForward, History as HistoryIcon, Heart, Repeat1 } from "lucide-react"
 import { usePlayback } from "../_context/PlaybackContext"
 import { useDominantHue } from "../_lib/useDominantHue"
-import { useIsAndroidApp } from "../_lib/useIsAndroid"
 import type { Track } from "../_data/tracks"
 import type { ExpandRect } from "./ExpandedCard"
 
@@ -26,9 +25,6 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
   const { currentTrack, isPlaying, currentTime, duration, isFallback, togglePlay, seek, next, prev, isFavorite, toggleFavorite, repeatOne, toggleRepeatOne } =
     usePlayback()
   const fav = currentTrack ? isFavorite(currentTrack.id) : false
-  // 仅安卓 Capacitor app（System WebView）有 backdrop-filter × preserve-3d 鬼影 bug，
-  // 安卓 Chrome 浏览器 / iOS / 桌面均正常，故只在 app 里降级、浏览器保留毛玻璃。
-  const isAndroidApp = useIsAndroidApp()
 
   // Local scrub state — while user drags the progress bar we suppress the
   // external `currentTime` so the thumb doesn't jitter.
@@ -91,7 +87,16 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
 
   return (
     <div
-      className="pointer-events-none fixed bottom-5 left-1/2 z-[60] w-[min(640px,calc(100vw-32px))] -translate-x-1/2"
+      className="pointer-events-none fixed bottom-5 left-1/2 z-[60] w-[min(640px,calc(100vw-32px))]"
+      // 强制把播放器提升到独立 GPU 合成层 + 自建堆叠上下文，压在 MusicCanvas 的
+      // preserve-3d 3D 场景之上。这是安卓 WebView 下「fixed 元素被 3D 卡片穿透
+      // （鬼影）」的对症修法：translateZ(0) 让它成为真正的 3D 合成层，isolation
+      // 隔离堆叠上下文。translateX(-50%) 同时承担原 -translate-x-1/2 的水平居中。
+      style={{
+        transform: "translateX(-50%) translateZ(0)",
+        isolation: "isolate",
+        willChange: "transform",
+      }}
     >
       <AnimatePresence mode="popLayout">
       {currentTrack && (
@@ -105,22 +110,15 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
             (e.currentTarget as HTMLDivElement).getBoundingClientRect(),
           )
         }
-        // 安卓 app 走深色不透明背景规避鬼影，其余平台（含安卓 Chrome 浏览器）保留毛玻璃。
-        style={
-          isAndroidApp
-            ? {
-                background: "rgba(18,18,24,0.94)",
-                boxShadow:
-                  "0 20px 60px -10px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.12), inset 0 1px 0 rgba(255,255,255,0.08)",
-              }
-            : {
-                background: "rgba(255,255,255,0.05)",
-                backdropFilter: "blur(32px) saturate(140%)",
-                WebkitBackdropFilter: "blur(32px) saturate(140%)",
-                boxShadow:
-                  "0 20px 60px -10px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.12), inset 0 1px 0 rgba(255,255,255,0.08)",
-              }
-        }
+        // 全平台统一磨砂毛玻璃。鬼影靠外层独立合成层解决，与背景透明度无关，
+        // 故不再按平台切不透明背景（实测不透明对鬼影零收益）。
+        style={{
+          background: "rgba(255,255,255,0.05)",
+          backdropFilter: "blur(32px) saturate(140%)",
+          WebkitBackdropFilter: "blur(32px) saturate(140%)",
+          boxShadow:
+            "0 20px 60px -10px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.12), inset 0 1px 0 rgba(255,255,255,0.08)",
+        }}
         // Same Gaussian-blur condensation as ExpandedCard. Fires on initial
         // appearance AND on track change (because key={currentTrack.id} forces
         // an exit+enter cycle when the id changes).
