@@ -204,7 +204,7 @@ export default function CommentItem({
             <span className="text-xs text-gray-500">{formatDate(comment.created_at)}</span>
           </div>
 
-          <p className="mt-2 text-gray-300 break-words whitespace-pre-wrap">{comment.content}</p>
+          <p className="mt-2 text-gray-300 break-all whitespace-pre-wrap">{comment.content}</p>
 
           <div className="mt-2 flex items-center gap-4">
             <button 
