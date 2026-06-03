@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Pause, Play, SkipBack, SkipForward, History as HistoryIcon, Heart, Repeat1 } from "lucide-react"
+import { Pause, Play, SkipBack, SkipForward, History as HistoryIcon, Heart, Repeat, Repeat1, Square } from "lucide-react"
 import { usePlayback } from "../_context/PlaybackContext"
 import { useDominantHue } from "../_lib/useDominantHue"
 import { TrackCover } from "./TrackCover"
+import { PlayModeMenu } from "./PlayModeMenu"
 import type { Track } from "../_data/tracks"
 import type { ExpandRect } from "./ExpandedCard"
 
@@ -22,7 +23,7 @@ type Props = {
 }
 
 export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
-  const { currentTrack, isPlaying, currentTime, duration, isFallback, togglePlay, seek, next, prev, isFavorite, toggleFavorite, repeatOne, toggleRepeatOne } =
+  const { currentTrack, isPlaying, currentTime, duration, isFallback, togglePlay, seek, next, prev, isFavorite, toggleFavorite, playMode, setPlayMode } =
     usePlayback()
   const fav = currentTrack ? isFavorite(currentTrack.id) : false
 
@@ -30,6 +31,10 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
   // external `currentTime` so the thumb doesn't jitter.
   const [scrubT, setScrubT] = useState<number | null>(null)
   const barRef = useRef<HTMLDivElement | null>(null)
+
+  // 播放模式上拉菜单
+  const [modeMenuOpen, setModeMenuOpen] = useState(false)
+  const repeatBtnRef = useRef<HTMLButtonElement | null>(null)
 
   const visible = currentTrack !== null
 
@@ -212,21 +217,31 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
               <SkipForward size={16} />
             </button>
             <button
+              ref={repeatBtnRef}
               type="button"
-              aria-label={repeatOne ? "关闭单曲循环" : "开启单曲循环"}
-              aria-pressed={repeatOne}
-              title={repeatOne ? "单曲循环：开" : "单曲循环：关"}
+              aria-label="播放模式"
+              aria-haspopup="menu"
+              aria-expanded={modeMenuOpen}
+              title={
+                playMode === "one" ? "单曲循环" : playMode === "once" ? "播完就暂停" : "列表循环"
+              }
               className={`ml-1 h-8 w-8 grid place-items-center rounded-full hover:bg-white/10 transition-colors ${
-                repeatOne ? "" : "text-white/60 hover:text-white"
+                playMode === "list" ? "text-white/60 hover:text-white" : ""
               }`}
-              // 点亮时用与进度条一致的封面主色（进度条左端色 hsl(hue 75% 65%)）
-              style={repeatOne ? { color: `hsl(${hue} 75% 65%)` } : undefined}
+              // 非「列表循环」时点亮为封面主色（与进度条左端色一致）
+              style={playMode !== "list" ? { color: `hsl(${hue} 75% 65%)` } : undefined}
               onClick={(e) => {
                 e.stopPropagation()
-                toggleRepeatOne()
+                setModeMenuOpen((v) => !v)
               }}
             >
-              <Repeat1 size={15} />
+              {playMode === "one" ? (
+                <Repeat1 size={15} />
+              ) : playMode === "once" ? (
+                <Square size={13} />
+              ) : (
+                <Repeat size={15} />
+              )}
             </button>
             <button
               type="button"
@@ -257,6 +272,15 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
       </motion.div>
       )}
       </AnimatePresence>
+
+      {modeMenuOpen && currentTrack && (
+        <PlayModeMenu
+          anchor={repeatBtnRef.current}
+          mode={playMode}
+          onSelect={setPlayMode}
+          onClose={() => setModeMenuOpen(false)}
+        />
+      )}
     </div>
   )
 }
