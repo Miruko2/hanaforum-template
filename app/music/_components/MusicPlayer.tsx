@@ -45,11 +45,21 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
 
   const visible = currentTrack !== null
 
+  // trackIdRef 用于检测拖拽期间是否发生了切歌
+  const trackIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    trackIdRef.current = currentTrack?.id ?? null
+  }, [currentTrack?.id])
+
   const computeTimeAt = useCallback(
     (clientX: number): number => {
       const el = barRef.current
-      if (!el || !duration) return 0
+      if (!el || !duration || !isFinite(duration)) return 0
+      // 切歌后新 duration 未加载完，不要计算位置
+      if (duration <= 0) return 0
       const r = el.getBoundingClientRect()
+      // 极小宽高意味着元素不可见/未挂载，不计算
+      if (r.width < 1 || r.height < 1) return 0
       const pct = Math.max(0, Math.min(1, (clientX - r.left) / r.width))
       return pct * duration
     },
@@ -81,11 +91,17 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
     (e: React.PointerEvent<HTMLDivElement>) => {
       if (scrubRef.current === null) return
       ;(e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId)
+      // 如果在拖拽期间切歌了，丢弃这次 seek（避免 seek 到新歌的错误位置）
+      if (trackIdRef.current !== currentTrack?.id) {
+        scrubRef.current = null
+        setScrubTick(v => v + 1)
+        return
+      }
       seek(scrubRef.current)
       scrubRef.current = null
       setScrubTick(v => v + 1)
     },
-    [seek],
+    [seek, currentTrack?.id],
   )
 
   // Watch for ESC to dismiss focus styling on play button if needed
