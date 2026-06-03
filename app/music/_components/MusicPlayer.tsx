@@ -151,9 +151,21 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
   )
   const hue = extracted ?? currentTrack?.hue ?? 0
 
+  // Android WebView: reduce blur to avoid ghosting/compositor artifacts
+  const isAndroidWebView = typeof navigator !== "undefined" &&
+    /Android/.test(navigator.userAgent) &&
+    /wv|WebView/.test(navigator.userAgent)
+  const blurPx = isAndroidWebView ? 16 : 32
+
   return (
     <div
       className="pointer-events-none fixed bottom-5 left-1/2 z-[60] w-[min(640px,calc(100vw-32px))] -translate-x-1/2"
+      // Force isolated compositor layer to contain ghosting within this subtree
+      style={{
+        transform: "translateZ(0)",
+        contain: "layout",
+        WebkitTransform: "translateZ(0)",
+      }}
     >
       <AnimatePresence mode="popLayout">
       {currentTrack && (
@@ -168,15 +180,19 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
           )
         }
         style={{
-          background: "rgba(255,255,255,0.05)",
-          backdropFilter: "blur(32px) saturate(140%)",
-          WebkitBackdropFilter: "blur(32px) saturate(140%)",
+          background: isAndroidWebView
+            ? "rgba(40,40,40,0.85)" // Android: solid-ish fallback to avoid transparent ghost layers
+            : "rgba(255,255,255,0.05)",
+          backdropFilter: `blur(${blurPx}px) saturate(140%)`,
+          WebkitBackdropFilter: `blur(${blurPx}px) saturate(140%)`,
           boxShadow:
             "0 20px 60px -10px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.12), inset 0 1px 0 rgba(255,255,255,0.08)",
+          // Contain paint to prevent ghosting bleeding outside
+          contain: "layout paint",
         }}
-        initial={{ opacity: 0, scale: 0.96, filter: "blur(20px)" }}
-        animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
-        exit={{ opacity: 0, scale: 0.96, filter: "blur(20px)" }}
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: 20 }}
         transition={{ duration: 0.55, ease: [0.2, 0.8, 0.2, 1] }}
       >
         <div className="relative flex items-center gap-2 sm:gap-3">
