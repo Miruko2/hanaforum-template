@@ -51,10 +51,50 @@ export default function PostDetailModal({
   const [isPinning, setIsPinning] = useState(false)
   // 点击详情页图片后，原图在屏幕中心聚焦放大（灯箱）
   const [lightboxOpen, setLightboxOpen] = useState(false)
+  // 图片预加载状态：防止灯箱打开时图片未加载导致的闪烁
+  const [imagePreloaded, setImagePreloaded] = useState(false)
+  const [imageLoading, setImageLoading] = useState(false)
 
   // 是否使用横版布局：桌面端一律走横版
   // （有图 → 左侧图片；无图 → 左侧 TextualHero 文字大标题）
   const useHorizontalLayout = !isMobile
+
+  // 预加载图片后打开灯箱，避免安卓 WebView 图片闪烁
+  const handleOpenLightbox = useCallback(() => {
+    if (!post.image_url) return
+    
+    // 如果已经预加载过，直接打开
+    if (imagePreloaded) {
+      setLightboxOpen(true)
+      return
+    }
+    
+    // 开始加载
+    setImageLoading(true)
+    const img = new Image()
+    img.src = post.image_url
+    
+    img.onload = () => {
+      setImagePreloaded(true)
+      setImageLoading(false)
+      setLightboxOpen(true)
+    }
+    
+    img.onerror = () => {
+      setImageLoading(false)
+      // 即使加载失败也尝试打开
+      setLightboxOpen(true)
+    }
+  }, [post.image_url, imagePreloaded])
+
+  // 重置预加载状态（当详情页关闭时）
+  React.useEffect(() => {
+    if (!isOpen) {
+      setImagePreloaded(false)
+      setImageLoading(false)
+      setLightboxOpen(false)
+    }
+  }, [isOpen])
 
   // 置顶帖子处理
   const handlePinPost = async (e: React.MouseEvent) => {
@@ -324,7 +364,7 @@ export default function PostDetailModal({
                     {post.image_url ? (
                       <div
                         className="group relative h-full w-full overflow-hidden rounded-t-md md:rounded-l-[24px] md:rounded-tr-none"
-                        onClick={() => setLightboxOpen(true)}
+                        onClick={handleOpenLightbox}
                       >
                         <div className="h-full w-full transition-transform duration-500 ease-out group-hover:scale-[1.06]">
                           <PostCardImage
@@ -358,7 +398,7 @@ export default function PostDetailModal({
                     {post.image_url ? (
                       <div
                         className="group relative overflow-hidden rounded-t-md"
-                        onClick={() => setLightboxOpen(true)}
+                        onClick={handleOpenLightbox}
                       >
                         <div className="transition-transform duration-500 ease-out group-hover:scale-[1.06]">
                           <PostCardImage
