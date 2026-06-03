@@ -12,7 +12,7 @@ const OPTIONS: { mode: PlayMode; title: string; Icon: typeof Repeat }[] = [
   { mode: "once", title: "播完就暂停", Icon: Square },
 ]
 
-const MENU_W = 30
+const MENU_W = 44
 
 /**
  * 播放模式上拉菜单：从底部播放器的模式按钮上方弹出的磨砂毛玻璃菜单。
@@ -56,17 +56,17 @@ export function PlayModeMenu({
         onPointerDown={(e) => e.stopPropagation()}
       />
       <motion.div
-        className="fixed z-[69] flex flex-col gap-px overflow-hidden rounded-xl p-0.5 text-white"
+        className="fixed z-[69] flex flex-col gap-0.5 overflow-hidden rounded-2xl p-1 text-white"
         style={{
           bottom: pos.bottom,
           left: pos.left,
           width: MENU_W,
           transformOrigin: "bottom center",
-          background: "rgba(20,20,26,0.62)",
-          backdropFilter: "blur(28px) saturate(170%)",
-          WebkitBackdropFilter: "blur(28px) saturate(170%)",
+          background: "rgba(255,255,255,0.08)",
+          backdropFilter: "blur(32px) saturate(160%)",
+          WebkitBackdropFilter: "blur(32px) saturate(160%)",
           boxShadow:
-            "0 20px 60px -12px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.12), inset 0 1px 0 rgba(255,255,255,0.10)",
+            "0 16px 48px -8px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.14), inset 0 1px 0 rgba(255,255,255,0.12)",
         }}
         initial={{ opacity: 0, y: 8, scale: 0.95 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -85,13 +85,13 @@ export function PlayModeMenu({
                 onSelect(m)
                 onClose()
               }}
-              className={`grid h-[26px] w-[26px] place-items-center rounded-lg transition-colors ${
+              className={`grid h-9 w-9 place-items-center rounded-xl transition-colors ${
                 active
                   ? "bg-white/[0.15] text-white"
                   : "text-white/55 hover:bg-white/[0.08] hover:text-white"
               }`}
             >
-              <Icon size={12} />
+              <Icon size={16} />
             </button>
           )
         })}
