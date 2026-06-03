@@ -29,7 +29,9 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
 
   // Local scrub state — while user drags the progress bar we suppress the
   // external `currentTime` so the thumb doesn't jitter.
-  const [scrubT, setScrubT] = useState<number | null>(null)
+  // Use ref instead of state to avoid closure staleness in onBarUp/onBarMove.
+  const scrubRef = useRef<number | null>(null)
+  const [, setScrubTick] = useState(0) // dummy state to trigger re-render
   const barRef = useRef<HTMLDivElement | null>(null)
 
   // 播放模式上拉菜单。anchor 在点击时捕获（e.currentTarget），避免切歌时面板
@@ -59,27 +61,31 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
       e.stopPropagation()
       ;(e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId)
       const t = computeTimeAt(e.clientX)
-      setScrubT(t)
+      scrubRef.current = t
+      setScrubTick(v => v + 1) // trigger re-render to show scrub position
     },
     [computeTimeAt],
   )
 
   const onBarMove = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
-      if (scrubT === null) return
-      setScrubT(computeTimeAt(e.clientX))
+      if (scrubRef.current === null) return
+      const t = computeTimeAt(e.clientX)
+      scrubRef.current = t
+      setScrubTick(v => v + 1) // trigger re-render
     },
-    [scrubT, computeTimeAt],
+    [computeTimeAt],
   )
 
   const onBarUp = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
-      if (scrubT === null) return
+      if (scrubRef.current === null) return
       ;(e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId)
-      seek(scrubT)
-      setScrubT(null)
+      seek(scrubRef.current)
+      scrubRef.current = null
+      setScrubTick(v => v + 1)
     },
-    [scrubT, seek],
+    [seek],
   )
 
   // Watch for ESC to dismiss focus styling on play button if needed
@@ -87,7 +93,7 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
     /* placeholder — could add keybindings later */
   }, [])
 
-  const shownT = scrubT ?? currentTime
+  const shownT = scrubRef.current ?? currentTime
   const pct = duration ? (shownT / duration) * 100 : 0
   // 已缓冲（加载）进度，夹在 [当前播放, 100] 之间。
   const bufferedPct = duration ? Math.min(100, Math.max(pct, (buffered / duration) * 100)) : 0
@@ -179,7 +185,7 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
               />
               <div
                 className={`absolute inset-y-0 left-0 rounded-full ${
-                  scrubT === null ? "transition-[width] duration-300 ease-linear" : ""
+                  scrubRef.current === null ? "transition-[width] duration-300 ease-linear" : ""
                 }`}
                 style={{
                   width: `${pct}%`,
@@ -190,11 +196,11 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
               />
               <div
                 className={`absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-md ${
-                  scrubT === null
+                  scrubRef.current === null
                     ? "transition-[left,opacity] duration-300 ease-linear"
                     : "transition-opacity"
                 }`}
-                style={{ left: `${pct}%`, opacity: scrubT !== null ? 1 : 0.85 }}
+                style={{ left: `${pct}%`, opacity: scrubRef.current !== null ? 1 : 0.85 }}
               />
             </div>
           </div>
