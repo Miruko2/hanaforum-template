@@ -42,32 +42,35 @@ export default function NotificationBell({ mobileView = false }: NotificationBel
   const [modalIsLiking, setModalIsLiking] = useState(false)
 
   // 性能优化：动画期间禁用 backdrop-filter，动画结束再启用（避免掉帧）
-  const [glassReady, setGlassReady] = useState(false)
+  const [glassReady, setGlassReady] = useState(true)
 
   useEffect(() => {
     setMounted(true)
     return () => setMounted(false)
   }, [])
 
-  // 弹窗打开时锁滚 + 标记已读 + 延迟启用磨砂玻璃
+  // 弹窗打开时锁滚 + 标记已读 + 移动端延迟启用磨砂玻璃（避免掉帧）
   useEffect(() => {
     if (isOpen) {
       document.body.style.overflow = "hidden"
       if (unreadCount > 0) {
         markAllAsRead().catch(() => {})
       }
-      // 等卡片 spring 大致跑完（~220ms）再启用磨砂
-      const t = setTimeout(() => setGlassReady(true), 220)
-      return () => clearTimeout(t)
+      // 移动端：先关闭毛玻璃，等动画结束再开启，避免掉帧
+      if (isMobile) {
+        setGlassReady(false)
+        const t = setTimeout(() => setGlassReady(true), 300)
+        return () => clearTimeout(t)
+      }
     } else {
-      // 退场之前立刻关掉磨砂，让退出动画也顺
-      setGlassReady(false)
+      // 退场之前重置毛玻璃状态
+      setGlassReady(true)
       document.body.style.overflow = ""
     }
     return () => {
       document.body.style.overflow = ""
     }
-  }, [isOpen, unreadCount, markAllAsRead])
+  }, [isOpen, unreadCount, markAllAsRead, isMobile])
 
   // 点击通知卡片：弹出帖子详情
   const handleNotificationClick = useCallback(
