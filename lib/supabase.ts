@@ -1549,6 +1549,150 @@ export async function deleteComment(commentId: string) {
   return true;
 }
 
+// ============================================================
+// 每用户自定义音乐墙（user_music_tracks，只存外链，不托管字节）
+// 建表/RLS 见 scripts/2026-06-03-user-music-tracks.sql。
+// RLS 限定本人读写；客户端带会话，user_id 必须 = 当前登录用户。
+// ============================================================
+export type UserMusicTrackRow = {
+  id: string;
+  user_id: string;
+  title: string;
+  artist: string;
+  cover_url: string;
+  audio_url: string;
+  sort_index: number;
+  source: "link" | "netease";
+  created_at: string;
+};
+
+export type UserMusicTrackInput = {
+  title: string;
+  artist?: string;
+  cover_url?: string;
+  audio_url: string;
+  source?: "link" | "netease";
+};
+
+export async function getUserMusicTracks(userId: string): Promise<UserMusicTrackRow[]> {
+  const { data, error } = await supabase
+    .from("user_music_tracks")
+    .select("*")
+    .eq("user_id", userId)
+    .order("sort_index", { ascending: true })
+    .order("created_at", { ascending: true });
+  if (error) {
+    console.error("获取自定义音乐失败:", error);
+    throw error;
+  }
+  return (data ?? []) as UserMusicTrackRow[];
+}
+
+export async function addUserMusicTrack(
+  userId: string,
+  input: UserMusicTrackInput,
+  sortIndex: number,
+): Promise<UserMusicTrackRow> {
+  const { data, error } = await supabase
+    .from("user_music_tracks")
+    .insert({
+      user_id: userId,
+      title: input.title,
+      artist: input.artist ?? "",
+      cover_url: input.cover_url ?? "",
+      audio_url: input.audio_url,
+      source: input.source ?? "link",
+      sort_index: sortIndex,
+    })
+    .select("*")
+    .single();
+  if (error) {
+    console.error("添加自定义音乐失败:", error);
+    throw error;
+  }
+  return data as UserMusicTrackRow;
+}
+
+// 批量插入（网易歌单导入用）。调用方需自行把数量截断到每用户上限内。
+export async function addUserMusicTracks(
+  userId: string,
+  inputs: UserMusicTrackInput[],
+  startIndex: number,
+): Promise<UserMusicTrackRow[]> {
+  if (inputs.length === 0) return [];
+  const rows = inputs.map((input, i) => ({
+    user_id: userId,
+    title: input.title,
+    artist: input.artist ?? "",
+    cover_url: input.cover_url ?? "",
+    audio_url: input.audio_url,
+    source: input.source ?? "link",
+    sort_index: startIndex + i,
+  }));
+  const { data, error } = await supabase
+    .from("user_music_tracks")
+    .insert(rows)
+    .select("*");
+  if (error) {
+    console.error("批量添加自定义音乐失败:", error);
+    throw error;
+  }
+  return (data ?? []) as UserMusicTrackRow[];
+}
+
+export async function updateUserMusicTrack(
+  id: string,
+  patch: Partial<UserMusicTrackInput>,
+): Promise<void> {
+  const update: Record<string, unknown> = {};
+  if (patch.title !== undefined) update.title = patch.title;
+  if (patch.artist !== undefined) update.artist = patch.artist;
+  if (patch.cover_url !== undefined) update.cover_url = patch.cover_url;
+  if (patch.audio_url !== undefined) update.audio_url = patch.audio_url;
+  const { error } = await supabase
+    .from("user_music_tracks")
+    .update(update)
+    .eq("id", id);
+  if (error) {
+    console.error("更新自定义音乐失败:", error);
+    throw error;
+  }
+}
+
+export async function deleteUserMusicTrack(id: string): Promise<void> {
+  const { error } = await supabase.from("user_music_tracks").delete().eq("id", id);
+  if (error) {
+    console.error("删除自定义音乐失败:", error);
+    throw error;
+  }
+}
+
+// 清空本人全部自定义曲目（一条 delete，RLS 限定 user_id = auth.uid()）。
+export async function clearUserMusicTracks(userId: string): Promise<void> {
+  const { error } = await supabase
+    .from("user_music_tracks")
+    .delete()
+    .eq("user_id", userId);
+  if (error) {
+    console.error("清空自定义音乐失败:", error);
+    throw error;
+  }
+}
+
+// 拖拽重排：逐行更新 sort_index（量小，≤50；RLS 限定本人）。
+export async function reorderUserMusicTracks(orderedIds: string[]): Promise<void> {
+  const results = await Promise.all(
+    orderedIds.map((id, i) =>
+      supabase.from("user_music_tracks").update({ sort_index: i }).eq("id", id),
+    ),
+  );
+  const failed = results.find((r) => r.error);
+  if (failed?.error) {
+    console.error("重排自定义音乐失败:", failed.error);
+    throw failed.error;
+  }
+}
+
 // 实时订阅帖子更新
 export function subscribeToPostsUpdates(callback: (posts: any[]) => void) {
   // 初始加载帖子

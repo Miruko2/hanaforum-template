@@ -3,12 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { motion, AnimatePresence } from "framer-motion"
-import Image from "next/image"
 import { Pause, Play, SkipBack, SkipForward, Heart, X } from "lucide-react"
-import { TRACKS, type Track } from "../_data/tracks"
-import { usePlayback } from "../_context/PlaybackContext"
+import { type Track } from "../_data/tracks"
+import { usePlayback, useTracks } from "../_context/PlaybackContext"
 import { useDominantHue } from "../_lib/useDominantHue"
 import { useReducedMotion } from "../_lib/useReducedMotion"
+import { TrackCover } from "./TrackCover"
 
 /** Screen-space rect of the card that was clicked — used as flight start. */
 export type ExpandRect = { left: number; top: number; width: number; height: number }
@@ -66,6 +66,7 @@ function ExpandedInner({
 }) {
   const { currentTrack, isPlaying, currentTime, duration, isFallback, togglePlay, play, seek, isFavorite, toggleFavorite } =
     usePlayback()
+  const tracks = useTracks()
   const [shown, setShown] = useState<Track>(target.track)
   const isCurrent = currentTrack?.id === shown.id
   const playing = isCurrent && isPlaying
@@ -160,19 +161,21 @@ function ExpandedInner({
 
   const step = useCallback(
     (dir: 1 | -1) => {
-      const idx = TRACKS.findIndex((t) => t.id === shown.id)
+      if (tracks.length === 0) return
+      const idx = tracks.findIndex((t) => t.id === shown.id)
       if (idx < 0) return
-      const t = TRACKS[(idx + dir + TRACKS.length) % TRACKS.length]
+      const t = tracks[(idx + dir + tracks.length) % tracks.length]
       setShown(t)
       play(t.id)
     },
-    [shown.id, play],
+    [tracks, shown.id, play],
   )
 
   // Cover-derived hue overrides the seeded random hue from playlist.json.
   // While extracting (undefined) or on failure (null) we fall back to shown.hue
   // so the UI never goes monochrome.
-  const extracted = useDominantHue(shown.cover)
+  // 用户自定义曲目跳过 img-proxy 取色（避免服务端 fetch 任意 URL，SSRF 安全）。
+  const extracted = useDominantHue(shown.userProvided ? null : shown.cover)
   const hue = extracted ?? shown.hue
   // Thumb position (only shown while scrubbing).
   const thumbAngle = pct * 2 * Math.PI - Math.PI / 2
@@ -272,14 +275,7 @@ function ExpandedInner({
               willChange: "transform",
             }}
           >
-            <Image
-              src={shown.cover}
-              alt={shown.title}
-              fill
-              sizes="200px"
-              className="object-cover"
-              priority
-            />
+            <TrackCover track={shown} sizes="200px" priority />
           </div>
         </div>
 
@@ -308,9 +304,9 @@ function ExpandedInner({
             {isCurrent && isFallback && (
               <span
                 className="mt-1.5 inline-block rounded-full bg-white/12 px-1.5 py-0.5 text-[9px] font-medium tracking-wider text-white/65"
-                title="原音频不可用，播放占位音频"
+                title="音源暂不可用"
               >
-                占位
+                无音源
               </span>
             )}
           </div>

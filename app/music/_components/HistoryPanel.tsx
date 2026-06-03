@@ -2,10 +2,10 @@
 
 import { useMemo, useRef, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import Image from "next/image"
 import { Search, X, ChevronRight, History as HistoryIcon, Music2, Play, Pause, Trash2, Heart } from "lucide-react"
 import { usePlayback } from "../_context/PlaybackContext"
 import type { Track } from "../_data/tracks"
+import { TrackCover } from "./TrackCover"
 
 type Props = {
   open: boolean
@@ -401,13 +401,7 @@ function Row({
       }`}
     >
       <div className="relative h-10 w-10 shrink-0 rounded-md overflow-hidden">
-        <Image
-          src={track.cover}
-          alt={track.title}
-          fill
-          sizes="40px"
-          className="object-cover"
-        />
+        <TrackCover track={track} sizes="40px" />
         {active && (
           <div className="absolute inset-0 grid place-items-center bg-black/40">
             {isPlaying ? (

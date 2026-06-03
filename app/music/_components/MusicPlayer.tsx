@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import Image from "next/image"
 import { Pause, Play, SkipBack, SkipForward, History as HistoryIcon, Heart, Repeat1 } from "lucide-react"
 import { usePlayback } from "../_context/PlaybackContext"
 import { useDominantHue } from "../_lib/useDominantHue"
+import { TrackCover } from "./TrackCover"
 import type { Track } from "../_data/tracks"
 import type { ExpandRect } from "./ExpandedCard"
 
@@ -82,7 +82,11 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
   // Use the actual dominant cover color so the progress bar matches what the
   // expanded card shows. Falls back to the seeded random hue while extraction
   // is in flight or if it fails (e.g. CORS).
-  const extracted = useDominantHue(currentTrack?.cover ?? null)
+  // 用户自定义曲目：跳过 img-proxy 取色（避免服务端 fetch 任意 URL，SSRF 安全），
+  // 直接用 id 哈希出的 hue。
+  const extracted = useDominantHue(
+    currentTrack?.userProvided ? null : currentTrack?.cover ?? null,
+  )
   const hue = extracted ?? currentTrack?.hue ?? 0
 
   return (
@@ -121,13 +125,7 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
         <div className="relative flex items-center gap-2 sm:gap-3">
           {/* Cover */}
           <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-xl sm:h-14 sm:w-14">
-            <Image
-              src={currentTrack.cover}
-              alt={currentTrack.title}
-              fill
-              sizes="56px"
-              className="object-cover"
-            />
+            <TrackCover track={currentTrack} sizes="56px" />
           </div>
 
           {/* Info + progress */}
@@ -139,9 +137,9 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
                   {isFallback && (
                     <span
                       className="shrink-0 rounded-full bg-white/15 px-1.5 py-0.5 text-[9px] font-medium text-white/70 tracking-wider"
-                      title="原音频不可用，播放占位音频"
+                      title="音源暂不可用"
                     >
-                      占位
+                      无音源
                     </span>
                   )}
                 </div>

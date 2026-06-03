@@ -2,10 +2,10 @@
 
 import { forwardRef, memo, useRef } from "react"
 import { Pause, Play, Heart, MoreHorizontal, SkipBack, SkipForward } from "lucide-react"
-import Image from "next/image"
 import type { Track } from "../_data/tracks"
 import type { ExpandRect } from "./ExpandedCard"
 import { usePlayback } from "../_context/PlaybackContext"
+import { TrackCover } from "./TrackCover"
 
 type Props = {
   track: Track
@@ -84,14 +84,7 @@ function MusicCardBase(
     >
       {/* Cover image fills the entire card */}
       <div className="absolute inset-0">
-        <Image
-          src={track.cover}
-          alt={track.title}
-          fill
-          sizes="240px"
-          className="object-cover"
-          priority={false}
-        />
+        <TrackCover track={track} sizes="240px" />
         {/* Bottom fade so text underneath is readable */}
         <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/90 to-transparent" />
       </div>

@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { TRACKS, type Track } from "../_data/tracks"
+import { type Track } from "../_data/tracks"
 import {
   computeInstances,
   fisheye,
@@ -16,7 +16,7 @@ import { Grain } from "./Grain"
 import { useReducedMotion } from "../_lib/useReducedMotion"
 import { useIsMobile } from "../_lib/useIsMobile"
 import { useIsAndroid, useIsAndroidApp } from "../_lib/useIsAndroid"
-import { usePlayback } from "../_context/PlaybackContext"
+import { usePlayback, useTracks } from "../_context/PlaybackContext"
 // Toggle between cover-image backdrop (per track) and a single looping video.
 const USE_VIDEO_BACKDROP = true
 
@@ -119,9 +119,11 @@ export function MusicCanvas({ onExpand, overlayOpen = false }: Props) {
   const isMobile = viewSize.w < 768
   const unitWidth = isMobile ? UNIT_W_MOBILE : UNIT_W_DESKTOP
 
+  // 运行时曲目源（用户自定义 / 精选默认墙）。来自低频上下文，不会被播放进度高频刷新。
+  const tracks = useTracks()
   const pack = useMemo(
-    () => packTracks(TRACKS, COLS, unitWidth, GAP),
-    [unitWidth],
+    () => packTracks(tracks, COLS, unitWidth, GAP),
+    [tracks, unitWidth],
   )
 
   // Center the wall on first paint.

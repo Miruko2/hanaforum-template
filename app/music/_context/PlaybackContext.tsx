@@ -10,13 +10,28 @@ import {
   useState,
   type ReactNode,
 } from "react"
-import { TRACKS, type Track } from "../_data/tracks"
+import { DEFAULT_TRACKS, type Track } from "../_data/tracks"
+import { useSimpleAuth } from "@/contexts/auth-context-simple"
+import { useToast } from "@/hooks/use-toast"
+import { getUserMusicTracks, type UserMusicTrackRow } from "@/lib/supabase"
+import { userRowsToTracks } from "../_lib/userTracks"
 
 const HISTORY_KEY = "music-history-v1"
 const HISTORY_LIMIT = 50
 const FAVORITES_KEY = "music-favorites-v1"
 const REPEAT_ONE_KEY = "music-repeat-one-v1"
-const FALLBACK_AUDIO = "/cover.mp3" // local placeholder when remote audio fails (region/VIP/etc.)
+const SOURCE_KEY = "music-source-v1"
+
+// 墙的曲目源：「我的」自定义 vs「精选」默认墙。
+export type MusicSource = "mine" | "featured"
+
+// ---- 音频拉取冷却 / 复用（防 ban、防滥用）----
+// REUSE_TTL：同一首在此窗口内已拉取过 → 复用，不重置 src、不再打外部源。
+// MIN_GAP：两次"解析新音频"的最小间隔；更快的连点会被防抖合并成只解析最后一首。
+// MAX_RESOLVES_PER_MIN：每分钟解析上限，硬安全网，超了直接拒绝并提示。
+const REUSE_TTL = 5 * 60_000
+const MIN_GAP = 1500
+const MAX_RESOLVES_PER_MIN = 20
 
 export type HistoryEntry = {
   trackId: string
@@ -28,7 +43,7 @@ export type PlaybackState = {
   isPlaying: boolean
   currentTime: number
   duration: number
-  isFallback: boolean      // true when current track is using the placeholder audio
+  isFallback: boolean      // true when the current track's audio source is unavailable
   /** Single-track repeat: when on, the current track loops seamlessly. Persisted. */
   repeatOne: boolean
   history: HistoryEntry[]
@@ -58,6 +73,8 @@ export type PlaybackState = {
    * trigger React re-renders.
    */
   getAudioIntensity: () => number
+  /** 重新拉取当前用户的自定义曲目并刷新墙（编辑器增删改后调用）。 */
+  refreshTracks: () => Promise<void>
 }
 
 const PlaybackCtx = createContext<PlaybackState | null>(null)
@@ -68,10 +85,77 @@ export function usePlayback(): PlaybackState {
   return ctx
 }
 
+// 单独的低频上下文：只承载曲目列表（仅在用户曲目加载/切换时变化）。
+// 重量级的 MusicCanvas 用它、而非 usePlayback —— 避免被 timeupdate 引发的
+// 高频 value 重建波及到每帧渲染。
+type TrackSourceCtx = {
+  tracks: Track[]
+  source: MusicSource
+  setSource: (s: MusicSource) => void
+  hasUserTracks: boolean
+}
+const PlaybackTracksCtx = createContext<TrackSourceCtx>({
+  tracks: DEFAULT_TRACKS,
+  source: "mine",
+  setSource: () => {},
+  hasUserTracks: false,
+})
+// 只取曲目列表（MusicCanvas / ExpandedCard 用，避免被高频 value 波及）。
+export function useTracks(): Track[] {
+  return useContext(PlaybackTracksCtx).tracks
+}
+// 取「我的 / 精选」切换信息（SourceToggle 用）。
+export function useTrackSource(): TrackSourceCtx {
+  return useContext(PlaybackTracksCtx)
+}
+
 export function PlaybackProvider({ children }: { children: ReactNode }) {
+  const { user } = useSimpleAuth()
+  const { toast } = useToast()
+
+  // 运行时曲目源。userTracks = 当前用户的自定义曲目（空 = 没有 / 游客）。
+  // source = 墙当前显示「我的」还是「精选」，持久化；有自定义曲目时才有意义。
+  // 实际渲染的 tracks 由两者派生：选「我的」且有曲目 → 用户的，否则精选默认墙。
+  const [userTracks, setUserTracks] = useState<Track[]>([])
+  const [source, setSourceState] = useState<MusicSource>("mine")
+  const hasUserTracks = userTracks.length > 0
+  const tracks = useMemo<Track[]>(
+    () => (source === "mine" && userTracks.length > 0 ? userTracks : DEFAULT_TRACKS),
+    [source, userTracks],
+  )
+  const tracksRef = useRef<Track[]>(tracks)
+  useEffect(() => {
+    tracksRef.current = tracks
+  }, [tracks])
+
+  const setSource = useCallback((s: MusicSource) => {
+    setSourceState(s)
+    try {
+      localStorage.setItem(SOURCE_KEY, s)
+    } catch {
+      /* ignore */
+    }
+  }, [])
+  // 载入持久化的「我的/精选」偏好
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem(SOURCE_KEY)
+      if (v === "mine" || v === "featured") setSourceState(v)
+    } catch {
+      /* ignore */
+    }
+  }, [])
+
   // Audio element kept in a ref so a single instance lives for the lifetime
   // of the page (created in useEffect to keep SSR happy).
   const audioRef = useRef<HTMLAudioElement | null>(null)
+
+  // ---- 音频拉取冷却 / 复用状态（配合顶部 REUSE_TTL / MIN_GAP / MAX_RESOLVES_PER_MIN）----
+  const loadedIdRef = useRef<string | null>(null)            // 真正 load 进 <audio> 的曲目 id
+  const lastResolveAtRef = useRef<Map<string, number>>(new Map())
+  const lastAnyResolveAtRef = useRef(0)
+  const resolveTimesRef = useRef<number[]>([])               // 滚动窗口：近 1min 内的解析时刻
+  const pendingTimerRef = useRef<number | null>(null)        // 最小间隔防抖定时器
 
   const [currentTrackId, setCurrentTrackId] = useState<string | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
@@ -101,10 +185,54 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   const smoothedIntensityRef = useRef(0)
   const isPlayingRef = useRef(false)
 
-  const currentTrack = useMemo(
-    () => (currentTrackId ? TRACKS.find((t) => t.id === currentTrackId) ?? null : null),
-    [currentTrackId],
-  )
+  // 解析当前曲目：先在当前墙找，找不到再到用户库 / 精选库找 ——
+  // 这样切换「我的/精选」时，正在播放的那首仍能被解析、播放器不消失。
+  const currentTrack = useMemo(() => {
+    if (!currentTrackId) return null
+    return (
+      tracks.find((t) => t.id === currentTrackId) ??
+      userTracks.find((t) => t.id === currentTrackId) ??
+      DEFAULT_TRACKS.find((t) => t.id === currentTrackId) ??
+      null
+    )
+  }, [currentTrackId, tracks, userTracks])
+
+  // 把 DB 行套进用户库（是否显示由 source 派生决定）。
+  const applyUserTracks = useCallback((rows: UserMusicTrackRow[]) => {
+    setUserTracks(userRowsToTracks(rows))
+  }, [])
+
+  // 手动刷新：编辑器增删改后调用，让墙立即同步。
+  const refreshTracks = useCallback(async () => {
+    if (!user?.id) {
+      setUserTracks([])
+      return
+    }
+    try {
+      applyUserTracks(await getUserMusicTracks(user.id))
+    } catch {
+      /* 保持当前，不打断播放 */
+    }
+  }, [user?.id, applyUserTracks])
+
+  // 拉取当前用户的自定义曲目。按 user_id 一次性查询（单分区索引命中），不订阅 realtime。
+  useEffect(() => {
+    let cancelled = false
+    if (!user?.id) {
+      setUserTracks([])
+      return
+    }
+    getUserMusicTracks(user.id)
+      .then((rows) => {
+        if (!cancelled) applyUserTracks(rows)
+      })
+      .catch(() => {
+        if (!cancelled) setUserTracks([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [user?.id, applyUserTracks])
 
   // ---- Load history from localStorage on mount ----
   useEffect(() => {
@@ -184,16 +312,17 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       setIsPlaying(false)
       setCurrentTime(0)
     }
-    // When the remote URL fails (404 / CORS / region block / VIP wall),
-    // swap to the local placeholder ONCE per play() attempt.
+    // 音源解析失败（injahow 挂 / 404 / CORS / 区域 / VIP / 链接失效）：
+    // 不再播放本地占位音频，而是标记该曲"音源不可用"并提示一次，由用户换一首。
+    // 每个 play() 尝试只处理一次（按 playSeq 去重，避免重复弹提示）。
     const onError = () => {
       const seq = playSeqRef.current
       if (fallbackTriedRef.current.has(seq)) return
       fallbackTriedRef.current.add(seq)
       setIsFallback(true)
-      el.src = FALLBACK_AUDIO
-      el.currentTime = 0
-      el.play().catch(() => {})
+      setIsPlaying(false)
+      isPlayingRef.current = false
+      toast({ description: "音源暂不可用，换一首试试" })
     }
 
     el.addEventListener("timeupdate", onTime)
@@ -240,26 +369,75 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     })
   }, [])
 
-  const play = useCallback(
-    (id: string) => {
-      const track = TRACKS.find((t) => t.id === id)
+  // 真正把音频 load 进 <audio> 并播放 + 记账。仅在通过冷却闸门后调用。
+  const doResolve = useCallback(
+    (track: Track) => {
       const el = audioRef.current
-      if (!track || !el) return
+      if (!el) return
       // Bump sequence so the error handler treats this as a fresh attempt
       // (allows fallback to run again for this new track).
       playSeqRef.current += 1
       setIsFallback(false)
-      // Always reset src — even when re-playing the same track — because
-      // injahow proxy URLs may have expired tokens after a long pause.
       el.src = track.audio
       el.currentTime = 0
-      setCurrentTrackId(id)
-      pushHistory(id)
+      loadedIdRef.current = track.id
+      const t = Date.now()
+      lastResolveAtRef.current.set(track.id, t)
+      lastAnyResolveAtRef.current = t
+      resolveTimesRef.current.push(t)
+      pushHistory(track.id)
       el.play().catch(() => {
         // autoplay blocked or load error — error handler will deal with it.
       })
     },
     [pushHistory],
+  )
+
+  const play = useCallback(
+    (id: string) => {
+      const track = tracksRef.current.find((t) => t.id === id)
+      const el = audioRef.current
+      if (!track || !el) return
+
+      const now = Date.now()
+
+      // ① 复用窗口：当前已 load 的就是这首、且窗口内已拉过 → 直接续播，
+      //    不重置 src、不再打外部源（"多久前已拉过就先用着"）。
+      const lastResolve = lastResolveAtRef.current.get(id) ?? 0
+      if (loadedIdRef.current === id && el.src && now - lastResolve < REUSE_TTL) {
+        if (pendingTimerRef.current) {
+          clearTimeout(pendingTimerRef.current)
+          pendingTimerRef.current = null
+        }
+        setCurrentTrackId(id)
+        el.play().catch(() => {})
+        return
+      }
+
+      // ② 每分钟解析上限（滚动窗口）——硬安全网，防脚本刷。
+      const windowStart = now - 60_000
+      resolveTimesRef.current = resolveTimesRef.current.filter((x) => x > windowStart)
+      if (resolveTimesRef.current.length >= MAX_RESOLVES_PER_MIN) {
+        toast({ description: "操作太频繁，请稍候再切歌" })
+        return
+      }
+
+      // ③ 最小间隔：太快 → 防抖，把连点合并成"只解析最后落定的那一首"。
+      setCurrentTrackId(id) // 乐观更新 UI，音频随后跟上
+      const sinceLast = now - lastAnyResolveAtRef.current
+      if (sinceLast < MIN_GAP) {
+        if (pendingTimerRef.current) clearTimeout(pendingTimerRef.current)
+        pendingTimerRef.current = window.setTimeout(() => {
+          pendingTimerRef.current = null
+          const tk = tracksRef.current.find((t) => t.id === id)
+          if (tk) doResolve(tk)
+        }, MIN_GAP - sinceLast)
+        return
+      }
+
+      doResolve(track)
+    },
+    [doResolve, toast],
   )
 
   const pause = useCallback(() => {
@@ -295,19 +473,21 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const indexOfCurrent = useMemo(
-    () => (currentTrackId ? TRACKS.findIndex((t) => t.id === currentTrackId) : -1),
-    [currentTrackId],
+    () => (currentTrackId ? tracks.findIndex((t) => t.id === currentTrackId) : -1),
+    [currentTrackId, tracks],
   )
 
   const next = useCallback(() => {
-    if (indexOfCurrent < 0) return
-    const nextTrack = TRACKS[(indexOfCurrent + 1) % TRACKS.length]
+    const list = tracksRef.current
+    if (indexOfCurrent < 0 || list.length === 0) return
+    const nextTrack = list[(indexOfCurrent + 1) % list.length]
     play(nextTrack.id)
   }, [indexOfCurrent, play])
 
   const prev = useCallback(() => {
-    if (indexOfCurrent < 0) return
-    const prevTrack = TRACKS[(indexOfCurrent - 1 + TRACKS.length) % TRACKS.length]
+    const list = tracksRef.current
+    if (indexOfCurrent < 0 || list.length === 0) return
+    const prevTrack = list[(indexOfCurrent - 1 + list.length) % list.length]
     play(prevTrack.id)
   }, [indexOfCurrent, play])
 
@@ -361,6 +541,13 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
 
   const toggleRepeatOne = useCallback(() => setRepeatOne((v) => !v), [])
 
+  // 卸载时清掉未触发的防抖定时器
+  useEffect(() => {
+    return () => {
+      if (pendingTimerRef.current) clearTimeout(pendingTimerRef.current)
+    }
+  }, [])
+
   const getAudioIntensity = useCallback((): number => {
     // Steady "normal" when paused / no track — no pulse.
     if (!isPlayingRef.current) {
@@ -389,7 +576,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       repeatOne,
       history,
       favorites,
-      tracks: TRACKS,
+      tracks,
       play,
       pause,
       togglePlay,
@@ -401,9 +588,19 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       toggleFavorite,
       toggleRepeatOne,
       getAudioIntensity,
+      refreshTracks,
     }),
-    [currentTrack, isPlaying, currentTime, duration, isFallback, repeatOne, history, favorites, play, pause, togglePlay, seek, next, prev, clearHistory, isFavorite, toggleFavorite, toggleRepeatOne, getAudioIntensity],
+    [currentTrack, isPlaying, currentTime, duration, isFallback, repeatOne, history, favorites, tracks, play, pause, togglePlay, seek, next, prev, clearHistory, isFavorite, toggleFavorite, toggleRepeatOne, getAudioIntensity, refreshTracks],
   )
 
-  return <PlaybackCtx.Provider value={value}>{children}</PlaybackCtx.Provider>
+  const tracksCtxValue = useMemo<TrackSourceCtx>(
+    () => ({ tracks, source, setSource, hasUserTracks }),
+    [tracks, source, setSource, hasUserTracks],
+  )
+
+  return (
+    <PlaybackCtx.Provider value={value}>
+      <PlaybackTracksCtx.Provider value={tracksCtxValue}>{children}</PlaybackTracksCtx.Provider>
+    </PlaybackCtx.Provider>
+  )
 }
