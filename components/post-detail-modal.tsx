@@ -400,13 +400,13 @@ export default function PostDetailModal({
                   {post.image_url && (
                     <div
                       className="pointer-events-none absolute inset-x-0 z-30"
-                      style={{ top: "calc(300px - 64px)", height: "64px" }}
+                      style={{ top: "calc(300px - 88px)", height: "88px" }}
                     >
                       {[
-                        { blur: 2, mask: "linear-gradient(to bottom, #000 0%, #000 30%, transparent 60%)" },
-                        { blur: 5, mask: "linear-gradient(to bottom, transparent 10%, #000 40%, #000 70%, transparent 100%)" },
-                        { blur: 10, mask: "linear-gradient(to bottom, transparent 35%, #000 65%, #000 100%)" },
-                        { blur: 18, mask: "linear-gradient(to bottom, transparent 60%, #000 100%)" },
+                        { blur: 2, mask: "linear-gradient(to bottom, transparent 0%, #000 35%, #000 55%, transparent 80%)" },
+                        { blur: 5, mask: "linear-gradient(to bottom, transparent 25%, #000 50%, #000 72%, transparent 100%)" },
+                        { blur: 10, mask: "linear-gradient(to bottom, transparent 48%, #000 72%, #000 100%)" },
+                        { blur: 18, mask: "linear-gradient(to bottom, transparent 68%, #000 100%)" },
                       ].map((l, i) => (
                         <div
                           key={i}
@@ -419,12 +419,13 @@ export default function PostDetailModal({
                           }}
                         />
                       ))}
-                      {/* 向下压暗的暗影：把图片最底缘压到接近暗卡片，淡化接缝 */}
+                      {/* 向下压暗的暗影：顶部 30% 不压暗（保持清亮、不在顶端造第二条边），
+                          往下逐渐加深，把图片最底缘压到接近暗卡片，淡化接缝 */}
                       <div
                         className="absolute inset-0"
                         style={{
                           background:
-                            "linear-gradient(to bottom, rgba(0,0,0,0) 0%, rgba(0,0,0,0.6) 100%)",
+                            "linear-gradient(to bottom, rgba(0,0,0,0) 0%, rgba(0,0,0,0) 30%, rgba(0,0,0,0.6) 100%)",
                         }}
                       />
                     </div>
