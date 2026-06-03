@@ -41,36 +41,25 @@ export default function NotificationBell({ mobileView = false }: NotificationBel
   const [modalLikeCount, setModalLikeCount] = useState(0)
   const [modalIsLiking, setModalIsLiking] = useState(false)
 
-  // 性能优化：动画期间禁用 backdrop-filter，动画结束再启用（避免掉帧）
-  const [glassReady, setGlassReady] = useState(true)
-
   useEffect(() => {
     setMounted(true)
     return () => setMounted(false)
   }, [])
 
-  // 弹窗打开时锁滚 + 标记已读 + 移动端延迟启用磨砂玻璃（避免掉帧）
+  // 弹窗打开时锁滚 + 标记已读
   useEffect(() => {
     if (isOpen) {
       document.body.style.overflow = "hidden"
       if (unreadCount > 0) {
         markAllAsRead().catch(() => {})
       }
-      // 移动端：先关闭毛玻璃，等动画结束再开启，避免掉帧
-      if (isMobile) {
-        setGlassReady(false)
-        const t = setTimeout(() => setGlassReady(true), 300)
-        return () => clearTimeout(t)
-      }
     } else {
-      // 退场之前重置毛玻璃状态
-      setGlassReady(true)
       document.body.style.overflow = ""
     }
     return () => {
       document.body.style.overflow = ""
     }
-  }, [isOpen, unreadCount, markAllAsRead, isMobile])
+  }, [isOpen, unreadCount, markAllAsRead])
 
   // 点击通知卡片：弹出帖子详情
   const handleNotificationClick = useCallback(
@@ -190,14 +179,11 @@ export default function NotificationBell({ mobileView = false }: NotificationBel
           transition={{ duration: 0.2 }}
           style={{ willChange: "opacity" }}
         >
-          {/* 背景：动画期间不开 backdrop-filter，静止后才启用 blur */}
+          {/* 背景：半透明黑色遮罩 */}
           <motion.div
             className="absolute inset-0"
             style={{
-              // 静止后用 blur(10px) + 半透明黑；动画期间仅用更深的纯色填充近似
-              background: glassReady ? "rgba(0, 0, 0, 0.5)" : "rgba(0, 0, 0, 0.68)",
-              backdropFilter: glassReady ? "blur(10px)" : "none",
-              WebkitBackdropFilter: glassReady ? "blur(10px)" : "none",
+              background: "rgba(0, 0, 0, 0.6)",
             }}
             onClick={() => setIsOpen(false)}
           />
@@ -206,22 +192,11 @@ export default function NotificationBell({ mobileView = false }: NotificationBel
           <motion.div
             className="relative w-[95%] max-w-2xl max-h-[85vh] overflow-hidden flex flex-col rounded-2xl border border-white/15 shadow-2xl"
             style={{
-              // 动画时纯色实底（不带 backdrop-filter），动画结束切换到磨砂玻璃
-              // glassReady=false: 实底深蓝，完全不透明，无模糊
-              // glassReady=true: 半透明底 + 毛玻璃模糊
-              background: glassReady ? "rgba(20, 20, 28, 0.55)" : "rgba(30, 30, 45, 1)",
-              backdropFilter: glassReady ? "blur(24px) saturate(150%)" : "none",
-              WebkitBackdropFilter: glassReady ? "blur(24px) saturate(150%)" : "none",
-              // 添加过渡效果，让切换更平滑
-              transition: "background 0.3s ease, backdrop-filter 0.3s ease",
-              // 强制独立 GPU 合成层，spring 动画走 transform 通道
-              willChange: "transform, opacity",
-              transform: "translateZ(0)",
+              background: "rgba(30, 30, 40, 0.95)",
             }}
             initial={{ scale: 0.96, y: 8 }}
             animate={{ scale: 1, y: 0 }}
             exit={{ scale: 0.97, y: 4 }}
-            // 略柔的 spring：插值帧数少、形变小，手机端更稳
             transition={{ type: "spring", stiffness: 340, damping: 30, mass: 0.8 }}
             onClick={(e) => e.stopPropagation()}
           >
