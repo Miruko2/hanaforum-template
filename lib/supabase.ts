@@ -525,7 +525,7 @@ export async function getPost(postId: string) {
         // 1. profiles 表（anon 可读）
         supabase
           .from("profiles")
-          .select("username")
+          .select("username, avatar_url")
           .eq("id", data.user_id)
           .maybeSingle(),
         
@@ -569,9 +569,26 @@ export async function getPost(postId: string) {
       displayUsername = `用户_${data.user_id.substring(0, 6)}`;
     }
 
+    // 提取头像：优先 profiles.avatar_url，兜底 auth.users 元数据里的 avatar_url。
+    // 之前没取头像，导致从通知/铃铛打开的详情页作者头像始终空白。
+    let avatarUrl: string | undefined = undefined;
+    if (userResultArray[0].status === 'fulfilled' && userResultArray[0].value?.data?.avatar_url) {
+      avatarUrl = userResultArray[0].value.data.avatar_url;
+    } else if (userResultArray[1].status === 'fulfilled') {
+      const metaAvatar = userResultArray[1].value?.data?.user?.user_metadata?.avatar_url;
+      if (metaAvatar) avatarUrl = metaAvatar;
+    }
+
     const processedPost = {
       ...data,
       username: displayUsername,
+      avatar_url: avatarUrl,
+      // 与首页 getPostsOptimized 对齐的结构，详情页通过 post.users.avatar_url 读取头像
+      users: {
+        id: data.user_id,
+        username: displayUsername,
+        avatar_url: avatarUrl,
+      },
       image_ratio: imageRatio,
       likes_count: likesCount,
       comments_count: commentsCount,
