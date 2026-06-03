@@ -104,20 +104,30 @@ const PostCard = memo(function PostCard({
     }
   }, [])
 
+  // 保存打开模态框前的滚动位置
+  const savedScrollYRef = useRef(0);
+
   // 处理模态框打开时禁用页面滚动
   useEffect(() => {
     if (isActive) {
-      // 只处理滚动锁定，不处理恢复
+      // 保存当前滚动位置
+      savedScrollYRef.current = window.scrollY || document.documentElement.scrollTop || 0;
+      
       if (isMobile) {
         document.body.style.overflow = 'hidden';
         document.body.style.position = 'fixed';
         document.body.style.width = '100%';
-        document.body.style.top = `-${window.scrollY}px`;
+        document.body.style.top = `-${savedScrollYRef.current}px`;
       } else {
         document.body.style.overflow = 'hidden';
       }
     } else {
-      // 移除所有样式但不处理滚动位置恢复
+      // 恢复滚动位置（移动端需要）
+      if (isMobile && savedScrollYRef.current > 0) {
+        window.scrollTo({ top: savedScrollYRef.current, behavior: 'auto' });
+      }
+      
+      // 移除所有样式
       document.body.style.overflow = '';
       document.body.style.position = '';
       document.body.style.width = '';
@@ -125,7 +135,10 @@ const PostCard = memo(function PostCard({
     }
 
     return () => {
-      // 确保组件卸载时清理样式
+      // 确保组件卸载时清理样式并恢复滚动位置
+      if (savedScrollYRef.current > 0) {
+        window.scrollTo({ top: savedScrollYRef.current, behavior: 'auto' });
+      }
       document.body.style.overflow = '';
       document.body.style.position = '';
       document.body.style.width = '';

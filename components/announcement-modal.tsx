@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { createPortal } from "react-dom"
 import { AnimatePresence, motion } from "framer-motion"
 import { X, Loader2 } from "lucide-react"
@@ -39,6 +39,21 @@ export default function AnnouncementModal({
     }
   }, [isOpen])
 
+  // 性能优化：动画期间禁用 backdrop-filter，跑完再启用。
+  // 两层 backdrop-filter 在 spring 动画里每帧都要重采样模糊，是手机端 WebView
+  // 掉帧的主因。改成静止时才开启 blur，动画期间用纯色填充近似的视觉。
+  const [glassReady, setGlassReady] = useState(false)
+  useEffect(() => {
+    if (isOpen) {
+      // 等卡片 spring 大致跑完（~220ms）再启用磨砂
+      const t = window.setTimeout(() => setGlassReady(true), 220)
+      return () => window.clearTimeout(t)
+    } else {
+      // 退场之前立刻关掉磨砂，让退出动画也顺
+      setGlassReady(false)
+    }
+  }, [isOpen])
+
   if (typeof document === "undefined") return null
 
   return createPortal(
@@ -49,15 +64,17 @@ export default function AnnouncementModal({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.18 }}
+          transition={{ duration: 0.2 }}
+          style={{ willChange: "opacity" }}
         >
-          {/* 背景遮罩 */}
+          {/* 背景遮罩：动画期间不开 backdrop-filter，跑完才上磨砂，避免每帧重采样 */}
           <div
             className="absolute inset-0"
             style={{
-              background: "rgba(0, 0, 0, 0.55)",
-              backdropFilter: "blur(12px)",
-              WebkitBackdropFilter: "blur(12px)",
+              // 静止后用 blur(10px) + 半透明黑；动画期间仅用更深的纯色填充近似
+              background: glassReady ? "rgba(0, 0, 0, 0.5)" : "rgba(0, 0, 0, 0.68)",
+              backdropFilter: glassReady ? "blur(10px)" : "none",
+              WebkitBackdropFilter: glassReady ? "blur(10px)" : "none",
             }}
             onClick={onClose}
           />
@@ -66,14 +83,19 @@ export default function AnnouncementModal({
           <motion.div
             className="relative w-full max-w-lg max-h-[85vh] overflow-hidden flex flex-col rounded-2xl border border-white/15 shadow-2xl"
             style={{
-              background: "rgba(20, 20, 28, 0.7)",
-              backdropFilter: "blur(28px) saturate(150%)",
-              WebkitBackdropFilter: "blur(28px) saturate(150%)",
+              // 动画时纯色实底（不带 backdrop-filter），动画结束切换到磨砂玻璃
+              background: glassReady ? "rgba(20, 20, 28, 0.7)" : "rgba(20, 20, 28, 0.88)",
+              backdropFilter: glassReady ? "blur(28px) saturate(150%)" : "none",
+              WebkitBackdropFilter: glassReady ? "blur(28px) saturate(150%)" : "none",
+              // 强制独立 GPU 合成层，spring 动画走 transform 通道，不引发整页重绘
+              willChange: "transform, opacity",
+              transform: "translateZ(0)",
             }}
-            initial={{ scale: 0.94, y: 12 }}
+            initial={{ scale: 0.96, y: 8 }}
             animate={{ scale: 1, y: 0 }}
-            exit={{ scale: 0.96, y: 6 }}
-            transition={{ type: "spring", stiffness: 420, damping: 28 }}
+            exit={{ scale: 0.97, y: 4 }}
+            // 略柔的 spring：插值帧数少、形变小，手机端更稳
+            transition={{ type: "spring", stiffness: 340, damping: 30, mass: 0.8 }}
             onClick={(e) => e.stopPropagation()}
           >
             {/* 头部：logo + 标题 */}
