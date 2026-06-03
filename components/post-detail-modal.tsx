@@ -2,12 +2,13 @@
 
 import React, { useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { X, MessageSquare, Pin, PinOff } from "lucide-react"
+import { X, MessageSquare, Pin, PinOff, Maximize2 } from "lucide-react"
 import { createPortal } from "react-dom"
 import type { Post } from "@/lib/types"
 import { Button } from "@/components/ui/button"
 import GlassMorph from "./glass-morph"
 import PostCardImage from "./post-card-image"
+import ImageLightbox from "./image-lightbox"
 import TextualHero from "./textual-hero"
 import CommentList from "./comment/comment-list"
 import LikeButton from "./ui/like-button"
@@ -48,6 +49,8 @@ export default function PostDetailModal({
 }: PostDetailModalProps) {
   const { toast } = useToast()
   const [isPinning, setIsPinning] = useState(false)
+  // 点击详情页图片后，原图在屏幕中心聚焦放大（灯箱）
+  const [lightboxOpen, setLightboxOpen] = useState(false)
 
   // 是否使用横版布局：桌面端一律走横版
   // （有图 → 左侧图片；无图 → 左侧 TextualHero 文字大标题）
@@ -91,6 +94,24 @@ export default function PostDetailModal({
   }
 
   if (typeof window === "undefined") return null
+
+  // 图片 hover 覆盖层：暗角渐变 + 中心淡入的"放大"图标（磨砂圆）。
+  // pointer-events-none 让鼠标穿透到底层图片，hover 由外层 .group 触发；
+  // 它是缩放层的兄弟节点，所以图标本身不会跟着图片一起放大。
+  const imageHoverOverlay = (
+    <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center opacity-0 transition-opacity duration-300 group-hover:opacity-100">
+      <div
+        className="absolute inset-0"
+        style={{
+          background:
+            "radial-gradient(circle at center, rgba(0,0,0,0.12) 0%, rgba(0,0,0,0.5) 100%)",
+        }}
+      />
+      <div className="relative grid h-12 w-12 scale-75 place-items-center rounded-full bg-white/15 text-white ring-1 ring-white/30 backdrop-blur-md transition-transform duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] group-hover:scale-100">
+        <Maximize2 className="h-5 w-5" />
+      </div>
+    </div>
+  )
 
   // 右侧/下方的内容块：标题、作者、正文、点赞计数、评论
   const contentBody = (
@@ -301,17 +322,25 @@ export default function PostDetailModal({
                   {/* 左：图片区或文字 Hero，占 45% */}
                   <div className="relative w-[45%] shrink-0 bg-black/20">
                     {post.image_url ? (
-                      <PostCardImage
-                        post={post}
-                        isMobile={isMobile}
-                        inDetailView={true}
-                        fillParent={true}
-                        onImageLoad={(dimensions) => {
-                          console.log(
-                            `详情视图图片尺寸: ${dimensions.width}x${dimensions.height}, 比例: ${dimensions.ratio}`,
-                          )
-                        }}
-                      />
+                      <div
+                        className="group relative h-full w-full overflow-hidden rounded-t-md md:rounded-l-[24px] md:rounded-tr-none"
+                        onClick={() => setLightboxOpen(true)}
+                      >
+                        <div className="h-full w-full transition-transform duration-500 ease-out group-hover:scale-[1.06]">
+                          <PostCardImage
+                            post={post}
+                            isMobile={isMobile}
+                            inDetailView={true}
+                            fillParent={true}
+                            onImageLoad={(dimensions) => {
+                              console.log(
+                                `详情视图图片尺寸: ${dimensions.width}x${dimensions.height}, 比例: ${dimensions.ratio}`,
+                              )
+                            }}
+                          />
+                        </div>
+                        {imageHoverOverlay}
+                      </div>
                     ) : (
                       <TextualHero post={post} />
                     )}
@@ -324,19 +353,27 @@ export default function PostDetailModal({
                 </div>
               ) : (
                 /* 竖版：图/文字Hero 在上，文字评论在下（手机端） */
-                <div className="flex flex-col">
+                <div className="relative flex flex-col">
                   <div className="relative w-full overflow-hidden">
                     {post.image_url ? (
-                      <PostCardImage
-                        post={post}
-                        isMobile={isMobile}
-                        inDetailView={true}
-                        onImageLoad={(dimensions) => {
-                          console.log(
-                            `详情视图图片尺寸: ${dimensions.width}x${dimensions.height}, 比例: ${dimensions.ratio}`,
-                          )
-                        }}
-                      />
+                      <div
+                        className="group relative overflow-hidden rounded-t-md"
+                        onClick={() => setLightboxOpen(true)}
+                      >
+                        <div className="transition-transform duration-500 ease-out group-hover:scale-[1.06]">
+                          <PostCardImage
+                            post={post}
+                            isMobile={isMobile}
+                            inDetailView={true}
+                            onImageLoad={(dimensions) => {
+                              console.log(
+                                `详情视图图片尺寸: ${dimensions.width}x${dimensions.height}, 比例: ${dimensions.ratio}`,
+                              )
+                            }}
+                          />
+                        </div>
+                        {imageHoverOverlay}
+                      </div>
                     ) : (
                       // 无图帖子：跟 PC 端横版一样走 TextualHero，避免出现孤零零的三角占位
                       // 高度 280px：够展示标题 + 装饰，又不喧宾夺主挤压内容区
@@ -351,9 +388,58 @@ export default function PostDetailModal({
                   <div className="p-7 overflow-y-auto" style={{ maxHeight: "calc(82vh - 280px)" }}>
                     {contentBody}
                   </div>
+
+                  {/* 图片下缘「分层渐进模糊」带（仅手机竖版）：整条落在图片侧，底边压在
+                      「图片 ↔ 卡片」接缝上。放在 flex-col 上、绝对定位，不受图片容器
+                      overflow-hidden 裁切。
+                      用 4 层叠加（blur 2→5→10→18px），每层用 mask 只显示一段、自上而下错位，
+                      叠出真正「上清晰 → 下模糊」的渐进效果（单层 backdrop-filter + mask 在
+                      WebView 里只是均匀模糊按透明度淡入，发浑不顺，故拆成多层）。
+                      最后叠一层向下压暗的暗影，把图片底缘压到接近暗卡片，淡化接缝硬边。
+                      top 依赖详情页竖版图片固定高度 300px（见 PostCardImage 的 h-[300px]）。 */}
+                  {post.image_url && (
+                    <div
+                      className="pointer-events-none absolute inset-x-0 z-30"
+                      style={{ top: "calc(300px - 64px)", height: "64px" }}
+                    >
+                      {[
+                        { blur: 2, mask: "linear-gradient(to bottom, #000 0%, #000 30%, transparent 60%)" },
+                        { blur: 5, mask: "linear-gradient(to bottom, transparent 10%, #000 40%, #000 70%, transparent 100%)" },
+                        { blur: 10, mask: "linear-gradient(to bottom, transparent 35%, #000 65%, #000 100%)" },
+                        { blur: 18, mask: "linear-gradient(to bottom, transparent 60%, #000 100%)" },
+                      ].map((l, i) => (
+                        <div
+                          key={i}
+                          className="absolute inset-0"
+                          style={{
+                            backdropFilter: `blur(${l.blur}px)`,
+                            WebkitBackdropFilter: `blur(${l.blur}px)`,
+                            maskImage: l.mask,
+                            WebkitMaskImage: l.mask,
+                          }}
+                        />
+                      ))}
+                      {/* 向下压暗的暗影：把图片最底缘压到接近暗卡片，淡化接缝 */}
+                      <div
+                        className="absolute inset-0"
+                        style={{
+                          background:
+                            "linear-gradient(to bottom, rgba(0,0,0,0) 0%, rgba(0,0,0,0.6) 100%)",
+                        }}
+                      />
+                    </div>
+                  )}
                 </div>
               )}
             </GlassMorph>
+
+            {/* 图片灯箱：点击详情页图片后居中聚焦放大（弹跳进出）。
+                自带 portal 到 body，盖在详情框之上 */}
+            <ImageLightbox
+              src={lightboxOpen ? post.image_url ?? null : null}
+              alt={post.title}
+              onClose={() => setLightboxOpen(false)}
+            />
           </motion.div>
         </motion.div>
       )}
