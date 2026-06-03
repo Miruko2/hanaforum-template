@@ -12,7 +12,7 @@ const OPTIONS: { mode: PlayMode; title: string; Icon: typeof Repeat }[] = [
   { mode: "once", title: "播完就暂停", Icon: Square },
 ]
 
-const MENU_W = 44 // p-1(8) + 36 的图标按钮
+const MENU_W = 30
 
 /**
  * 播放模式上拉菜单：从底部播放器的模式按钮上方弹出的磨砂毛玻璃菜单。
@@ -56,7 +56,7 @@ export function PlayModeMenu({
         onPointerDown={(e) => e.stopPropagation()}
       />
       <motion.div
-        className="fixed z-[69] flex flex-col gap-0.5 overflow-hidden rounded-2xl p-1 text-white"
+        className="fixed z-[69] flex flex-col gap-px overflow-hidden rounded-xl p-0.5 text-white"
         style={{
           bottom: pos.bottom,
           left: pos.left,
@@ -85,13 +85,13 @@ export function PlayModeMenu({
                 onSelect(m)
                 onClose()
               }}
-              className={`grid h-9 w-9 place-items-center rounded-xl transition-colors ${
+              className={`grid h-[26px] w-[26px] place-items-center rounded-lg transition-colors ${
                 active
                   ? "bg-white/[0.15] text-white"
                   : "text-white/55 hover:bg-white/[0.08] hover:text-white"
               }`}
             >
-              <Icon size={16} />
+              <Icon size={12} />
             </button>
           )
         })}
