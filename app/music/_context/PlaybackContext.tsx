@@ -318,10 +318,20 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     audioRef.current = el
 
     const onTime = () => setCurrentTime(el.currentTime)
-    const onDuration = () => setDuration(el.duration || 0)
+    // 流媒体跨缓冲 seek 时，部分浏览器会让 duration 瞬间变 Infinity/NaN，
+    // 而进度条是 currentTime/duration —— 时长一塌成无效值进度条就归零。
+    // 故只接受有效时长，否则保留上一次的好值。
+    const onDuration = () => {
+      const d = el.duration
+      if (isFinite(d) && d > 0) setDuration(d)
+    }
     const onPlay = () => setIsPlaying(true)
     const onPause = () => setIsPlaying(false)
     const onEnded = () => {
+      // 防伪 ended：跨越缓冲区/末端的 seek 在部分浏览器会触发 ended，但此时并未真正
+      // 播到结尾 —— 仅当确实接近结尾才处理，避免进度条/播放被错误重置回开头。
+      const d = el.duration
+      if (isFinite(d) && d > 0 && el.currentTime < d - 1.5) return
       // 单曲循环走原生 el.loop，根本不触发 ended。
       if (playModeRef.current === "list") {
         // 列表循环：自动下一首（next 内部对末尾取模、回到开头）。
@@ -492,6 +502,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     if (!el) return
     if (!isFinite(t) || t < 0) return
     el.currentTime = t
+    // 乐观更新：进度条立刻到位，不等下一次 timeupdate（也避免松手瞬间闪回旧值）。
+    setCurrentTime(t)
   }, [])
 
   const indexOfCurrent = useMemo(
