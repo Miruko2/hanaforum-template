@@ -204,9 +204,13 @@ export default function NotificationBell({ mobileView = false }: NotificationBel
             className="relative w-[95%] max-w-2xl max-h-[85vh] overflow-hidden flex flex-col rounded-2xl border border-white/15 shadow-2xl"
             style={{
               // 动画时纯色实底（不带 backdrop-filter），动画结束切换到磨砂玻璃
-              background: glassReady ? "rgba(20, 20, 28, 0.55)" : "rgba(20, 20, 28, 0.88)",
+              // glassReady=false: 实底深蓝，完全不透明，无模糊
+              // glassReady=true: 半透明底 + 毛玻璃模糊
+              background: glassReady ? "rgba(20, 20, 28, 0.55)" : "rgba(30, 30, 45, 1)",
               backdropFilter: glassReady ? "blur(24px) saturate(150%)" : "none",
               WebkitBackdropFilter: glassReady ? "blur(24px) saturate(150%)" : "none",
+              // 添加过渡效果，让切换更平滑
+              transition: "background 0.3s ease, backdrop-filter 0.3s ease",
               // 强制独立 GPU 合成层，spring 动画走 transform 通道
               willChange: "transform, opacity",
               transform: "translateZ(0)",
