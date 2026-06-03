@@ -324,8 +324,21 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       const b = el.buffered
       setBuffered(b.length > 0 ? b.end(b.length - 1) : 0)
     }
+    // timeupdate 在浏览器里 4–66Hz 触发，每次 setCurrentTime 会让所有 usePlayback 消费者
+    // 重渲染（含 MusicPlayer 的 backdrop-filter 面板）。人眼看进度条 4Hz 已足够顺滑，
+    // 故节流到 ~240ms。但"大跳变"（>1s，代表切歌/seek/循环结束）必须立即同步，
+    // 否则会看到进度条停在旧值一瞬间再跳。
+    let lastSetAt = 0
+    let lastSetVal = 0
     const onTime = () => {
-      setCurrentTime(el.currentTime)
+      const now = performance.now()
+      const t = el.currentTime
+      const big = Math.abs(t - lastSetVal) > 1
+      if (big || now - lastSetAt >= 240) {
+        lastSetAt = now
+        lastSetVal = t
+        setCurrentTime(t)
+      }
       updateBuffered()
     }
     // 流媒体跨缓冲 seek 时，部分浏览器会让 duration 瞬间变 Infinity/NaN，

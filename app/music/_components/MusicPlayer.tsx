@@ -178,7 +178,9 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
                 style={{ width: `${bufferedPct}%` }}
               />
               <div
-                className="absolute inset-y-0 left-0 rounded-full"
+                className={`absolute inset-y-0 left-0 rounded-full ${
+                  scrubT === null ? "transition-[width] duration-300 ease-linear" : ""
+                }`}
                 style={{
                   width: `${pct}%`,
                   background: `linear-gradient(90deg, hsl(${hue} 75% 65%), hsl(${
@@ -187,7 +189,11 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
                 }}
               />
               <div
-                className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-md transition-opacity"
+                className={`absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-md ${
+                  scrubT === null
+                    ? "transition-[left,opacity] duration-300 ease-linear"
+                    : "transition-opacity"
+                }`}
                 style={{ left: `${pct}%`, opacity: scrubT !== null ? 1 : 0.85 }}
               />
             </div>
