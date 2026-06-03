@@ -32,9 +32,14 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
   const [scrubT, setScrubT] = useState<number | null>(null)
   const barRef = useRef<HTMLDivElement | null>(null)
 
-  // 播放模式上拉菜单
+  // 播放模式上拉菜单。anchor 在点击时捕获（e.currentTarget），避免切歌时面板
+  // 退场重挂导致 ref 被旧按钮卸载清空、菜单拿不到锚点的问题。
   const [modeMenuOpen, setModeMenuOpen] = useState(false)
-  const repeatBtnRef = useRef<HTMLButtonElement | null>(null)
+  const [modeMenuAnchor, setModeMenuAnchor] = useState<HTMLElement | null>(null)
+  // 切歌时关闭菜单，避免锚定到正在退场的旧按钮
+  useEffect(() => {
+    setModeMenuOpen(false)
+  }, [currentTrack?.id])
 
   const visible = currentTrack !== null
 
@@ -217,7 +222,6 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
               <SkipForward size={16} />
             </button>
             <button
-              ref={repeatBtnRef}
               type="button"
               aria-label="播放模式"
               aria-haspopup="menu"
@@ -232,6 +236,7 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
               style={playMode !== "list" ? { color: `hsl(${hue} 75% 65%)` } : undefined}
               onClick={(e) => {
                 e.stopPropagation()
+                setModeMenuAnchor(e.currentTarget)
                 setModeMenuOpen((v) => !v)
               }}
             >
@@ -273,9 +278,9 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
       )}
       </AnimatePresence>
 
-      {modeMenuOpen && currentTrack && (
+      {modeMenuOpen && currentTrack && modeMenuAnchor && (
         <PlayModeMenu
-          anchor={repeatBtnRef.current}
+          anchor={modeMenuAnchor}
           mode={playMode}
           onSelect={setPlayMode}
           onClose={() => setModeMenuOpen(false)}
