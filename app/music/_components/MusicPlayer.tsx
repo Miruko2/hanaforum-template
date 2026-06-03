@@ -54,14 +54,24 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
   const computeTimeAt = useCallback(
     (clientX: number): number => {
       const el = barRef.current
-      if (!el || !duration || !isFinite(duration)) return 0
-      // 切歌后新 duration 未加载完，不要计算位置
-      if (duration <= 0) return 0
+      console.log('[MusicPlayer] computeTimeAt:', { hasEl: !!el, duration, elWidth: el?.getBoundingClientRect().width })
+      if (!el || !duration || !isFinite(duration)) {
+        console.log('[MusicPlayer] computeTimeAt early return: missing el or invalid duration')
+        return 0
+      }
+      if (duration <= 0) {
+        console.log('[MusicPlayer] computeTimeAt early return: duration <= 0')
+        return 0
+      }
       const r = el.getBoundingClientRect()
-      // 极小宽高意味着元素不可见/未挂载，不计算
-      if (r.width < 1 || r.height < 1) return 0
+      if (r.width < 1 || r.height < 1) {
+        console.log('[MusicPlayer] computeTimeAt early return: element too small', r)
+        return 0
+      }
       const pct = Math.max(0, Math.min(1, (clientX - r.left) / r.width))
-      return pct * duration
+      const result = pct * duration
+      console.log('[MusicPlayer] computeTimeAt result:', { clientX, rLeft: r.left, rWidth: r.width, pct, duration, result })
+      return result
     },
     [duration],
   )
@@ -89,14 +99,17 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
 
   const onBarUp = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
+      console.log('[MusicPlayer] onBarUp:', { scrubVal: scrubRef.current, trackIdRef: trackIdRef.current, currentTrackId: currentTrack?.id })
       if (scrubRef.current === null) return
       ;(e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId)
       // 如果在拖拽期间切歌了，丢弃这次 seek（避免 seek 到新歌的错误位置）
       if (trackIdRef.current !== currentTrack?.id) {
+        console.log('[MusicPlayer] onBarUp cancelled: track changed during drag')
         scrubRef.current = null
         setScrubTick(v => v + 1)
         return
       }
+      console.log('[MusicPlayer] seeking to:', scrubRef.current)
       seek(scrubRef.current)
       scrubRef.current = null
       setScrubTick(v => v + 1)
