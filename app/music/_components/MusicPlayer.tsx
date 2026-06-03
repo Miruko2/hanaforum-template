@@ -229,11 +229,9 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
               title={
                 playMode === "one" ? "单曲循环" : playMode === "once" ? "播完就暂停" : "列表循环"
               }
-              className={`ml-1 h-8 w-8 grid place-items-center rounded-full hover:bg-white/10 transition-colors ${
-                playMode === "list" ? "text-white/60 hover:text-white" : ""
-              }`}
-              // 非「列表循环」时点亮为封面主色（与进度条左端色一致）
-              style={playMode !== "list" ? { color: `hsl(${hue} 75% 65%)` } : undefined}
+              className="ml-1 h-8 w-8 grid place-items-center rounded-full hover:bg-white/10 transition-colors"
+              // 三种模式都点亮为封面主色（与进度条左端色一致），用图标区分模式
+              style={{ color: `hsl(${hue} 75% 65%)` }}
               onClick={(e) => {
                 e.stopPropagation()
                 setModeMenuAnchor(e.currentTarget)
