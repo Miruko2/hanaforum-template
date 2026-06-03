@@ -160,12 +160,6 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
   return (
     <div
       className="pointer-events-none fixed bottom-5 left-1/2 z-[60] w-[min(640px,calc(100vw-32px))] -translate-x-1/2"
-      // Force isolated compositor layer to contain ghosting within this subtree
-      style={{
-        transform: "translateZ(0)",
-        contain: "layout",
-        WebkitTransform: "translateZ(0)",
-      }}
     >
       <AnimatePresence mode="popLayout">
       {currentTrack && (
@@ -187,8 +181,11 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
           WebkitBackdropFilter: `blur(${blurPx}px) saturate(140%)`,
           boxShadow:
             "0 20px 60px -10px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.12), inset 0 1px 0 rgba(255,255,255,0.08)",
+          // GPU layer for Android to isolate rendering (avoid ghosting)
+          transform: isAndroidWebView ? "translateZ(0)" : undefined,
+          WebkitTransform: isAndroidWebView ? "translateZ(0)" : undefined,
           // Contain paint to prevent ghosting bleeding outside
-          contain: "layout paint",
+          contain: isAndroidWebView ? "layout paint" : undefined,
         }}
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
