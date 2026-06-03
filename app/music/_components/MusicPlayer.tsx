@@ -23,7 +23,7 @@ type Props = {
 }
 
 export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
-  const { currentTrack, isPlaying, currentTime, duration, isFallback, togglePlay, seek, next, prev, isFavorite, toggleFavorite, playMode, setPlayMode } =
+  const { currentTrack, isPlaying, currentTime, duration, buffered, isFallback, togglePlay, seek, next, prev, isFavorite, toggleFavorite, playMode, setPlayMode } =
     usePlayback()
   const fav = currentTrack ? isFavorite(currentTrack.id) : false
 
@@ -89,6 +89,8 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
 
   const shownT = scrubT ?? currentTime
   const pct = duration ? (shownT / duration) * 100 : 0
+  // 已缓冲（加载）进度，夹在 [当前播放, 100] 之间。
+  const bufferedPct = duration ? Math.min(100, Math.max(pct, (buffered / duration) * 100)) : 0
   // Use the actual dominant cover color so the progress bar matches what the
   // expanded card shows. Falls back to the seeded random hue while extraction
   // is in flight or if it fails (e.g. CORS).
@@ -170,6 +172,11 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
               onPointerUp={onBarUp}
               onPointerCancel={onBarUp}
             >
+              {/* 已缓冲（加载）层：比底色亮、比播放进度暗，垫在播放进度之下 */}
+              <div
+                className="absolute inset-y-0 left-0 rounded-full bg-white/25 transition-[width] duration-300 ease-out"
+                style={{ width: `${bufferedPct}%` }}
+              />
               <div
                 className="absolute inset-y-0 left-0 rounded-full"
                 style={{

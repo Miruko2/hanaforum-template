@@ -46,6 +46,7 @@ export type PlaybackState = {
   isPlaying: boolean
   currentTime: number
   duration: number
+  buffered: number         // 已缓冲（加载）到的时长，秒
   isFallback: boolean      // true when the current track's audio source is unavailable
   /** 播放模式：列表循环 / 单曲循环 / 播完就暂停。持久化。 */
   playMode: PlayMode
@@ -164,6 +165,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
+  const [buffered, setBuffered] = useState(0) // 已缓冲（加载）到的时长（秒）
   const [isFallback, setIsFallback] = useState(false)
   const [playMode, setPlayModeState] = useState<PlayMode>("list")
   // playModeRef / nextRef：供 [] 依赖的音频初始化 effect 里的 onEnded 读到最新值。
@@ -317,7 +319,15 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     el.preload = "metadata"
     audioRef.current = el
 
-    const onTime = () => setCurrentTime(el.currentTime)
+    // 已缓冲时长 = 最后一段 buffered 区间的末端（顺序下载时即"从头加载到哪"）。
+    const updateBuffered = () => {
+      const b = el.buffered
+      setBuffered(b.length > 0 ? b.end(b.length - 1) : 0)
+    }
+    const onTime = () => {
+      setCurrentTime(el.currentTime)
+      updateBuffered()
+    }
     // 流媒体跨缓冲 seek 时，部分浏览器会让 duration 瞬间变 Infinity/NaN，
     // 而进度条是 currentTime/duration —— 时长一塌成无效值进度条就归零。
     // 故只接受有效时长，否则保留上一次的好值。
@@ -358,6 +368,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     }
 
     el.addEventListener("timeupdate", onTime)
+    el.addEventListener("progress", updateBuffered)
     el.addEventListener("loadedmetadata", onDuration)
     el.addEventListener("durationchange", onDuration)
     el.addEventListener("play", onPlay)
@@ -376,6 +387,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     return () => {
       el.pause()
       el.removeEventListener("timeupdate", onTime)
+      el.removeEventListener("progress", updateBuffered)
       el.removeEventListener("loadedmetadata", onDuration)
       el.removeEventListener("durationchange", onDuration)
       el.removeEventListener("play", onPlay)
@@ -412,6 +424,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       setIsFallback(false)
       el.src = track.audio
       el.currentTime = 0
+      setBuffered(0) // 换曲：缓冲条清零
       loadedIdRef.current = track.id
       const t = Date.now()
       lastResolveAtRef.current.set(track.id, t)
@@ -609,6 +622,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       isPlaying,
       currentTime,
       duration,
+      buffered,
       isFallback,
       playMode,
       history,
@@ -627,7 +641,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       getAudioIntensity,
       refreshTracks,
     }),
-    [currentTrack, isPlaying, currentTime, duration, isFallback, playMode, history, favorites, tracks, play, pause, togglePlay, seek, next, prev, clearHistory, isFavorite, toggleFavorite, setPlayMode, getAudioIntensity, refreshTracks],
+    [currentTrack, isPlaying, currentTime, duration, buffered, isFallback, playMode, history, favorites, tracks, play, pause, togglePlay, seek, next, prev, clearHistory, isFavorite, toggleFavorite, setPlayMode, getAudioIntensity, refreshTracks],
   )
 
   const tracksCtxValue = useMemo<TrackSourceCtx>(
