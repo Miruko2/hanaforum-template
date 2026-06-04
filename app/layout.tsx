@@ -46,17 +46,35 @@ export default function RootLayout({
       <head>
         {/* 高优先级预加载背景图，让浏览器一开始就把它加入下载队列 */}
         <link rel="preload" href={BG_IMAGE} as="image" fetchPriority="high" />
+        {/* 安卓设备性能降级开关：在 body 渲染前同步给 <html> 打 android-lite 标记，
+            供 globals.css 关闭实时毛玻璃模糊等高开销特效（iOS / iPadOS / 桌面不受影响）。
+            必须内联同步执行，避免「先渲染毛玻璃再变纯色」的闪烁。 */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{if(/Android|Harmony/i.test(navigator.userAgent)){document.documentElement.classList.add('android-lite')}}catch(e){}`,
+          }}
+        />
       </head>
-      <body
-        className={`${inter.className} relative bg-transparent`}
-        style={{
-          backgroundImage: `url('${BG_IMAGE}')`,
-          backgroundSize: "cover",
-          backgroundPosition: "center center",
-          backgroundRepeat: "no-repeat",
-          backgroundAttachment: "fixed",
-        }}
-      >
+      <body className={`${inter.className} relative bg-transparent`}>
+        {/* 背景图独立成固定层：视觉等效于 background-attachment:fixed（固定不随内容滚动），
+            但作为单独的 position:fixed 合成层，滚动时浏览器只合成、不重绘整张图，
+            消除低端安卓「每滚一帧重绘 1.1MB 背景」的卡顿。视觉零变化，全平台受益。
+            用 width/height:100% 而非 inset，兼容老安卓 WebView。 */}
+        <div
+          aria-hidden="true"
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            zIndex: -1,
+            backgroundImage: `url('${BG_IMAGE}')`,
+            backgroundSize: "cover",
+            backgroundPosition: "center center",
+            backgroundRepeat: "no-repeat",
+          }}
+        />
         <Providers>{children}</Providers>
       </body>
     </html>

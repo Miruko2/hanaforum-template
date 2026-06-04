@@ -48,7 +48,6 @@ function HomeContent() {
     )`,
     pointerEvents: 'none' as const,
     zIndex: 0,
-    backdropFilter: 'blur(0.7px)',
   }
 
   return (
