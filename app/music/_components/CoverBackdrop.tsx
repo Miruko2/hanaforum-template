@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { usePlayback } from "../_context/PlaybackContext"
+import { neteaseDirectCover } from "../_lib/neteasePic"
 import type { Track } from "../_data/tracks"
 
 /**
@@ -56,7 +57,10 @@ export function CoverBackdrop({ lite = false }: Props = {}) {
     else setLayerB(currentTrack)
 
     const img = new window.Image()
-    img.src = currentTrack.cover
+    // 与显示用的 <img> 一致：网易 CDN 防盗链，带 referer 会 403；去掉 referer + 转直链，
+    // 让预加载成功命中缓存，显示层秒显、crossfade 不闪。
+    img.referrerPolicy = "no-referrer"
+    img.src = neteaseDirectCover(currentTrack.cover)
     const flip = () => setActive(inactive)
     if (img.complete && img.naturalWidth > 0) flip()
     else {
@@ -146,8 +150,11 @@ function Layer({
         // eslint-disable-next-line @next/next/no-img-element
         <img
           ref={imgRef}
-          src={track.cover}
+          src={neteaseDirectCover(track.cover)}
           alt=""
+          // 网易 CDN 防盗链：带 referer 会 403 → 背景大图空白黑屏。去掉 referer 修复。
+          // （TrackCover 早有此处理，背景层之前漏了，才有"小封面正常、大背景黑"。）
+          referrerPolicy="no-referrer"
           className={`absolute inset-0 h-full w-full object-cover ${kbClass}`}
           style={{
             // Lite tier: drop the 20px blur entirely. We compensate visually with
