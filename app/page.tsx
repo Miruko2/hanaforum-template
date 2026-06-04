@@ -6,17 +6,14 @@ import { AnimatePresence } from "framer-motion"
 import PostGrid from "@/components/post-grid"
 import CinemaMode from "@/components/cinema-mode"
 import FloatingActionButton from "@/components/floating-action-button"
-import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { usePosts } from "@/contexts/posts-context"
 import { useCinemaMode } from "@/contexts/cinema-mode-context"
 import { isValidCategory, CATEGORY_LABELS } from "@/lib/categories"
-import { Loader2 } from "lucide-react"
 import { motion } from "framer-motion"
 
 // HomePage 内部使用了 useSearchParams()，在 Next.js `output:'export'`
 // 静态构建（Capacitor APK）模式下必须包 Suspense，否则 build 阶段 prerender 失败。
 function HomeContent() {
-  const { loading } = useSimpleAuth()
   const { setCategory, state } = usePosts()
   const searchParams = useSearchParams()
   // 影院模式状态由 CinemaModeProvider 统一管理（localStorage / URL ?cinema=1 也在那里）
@@ -52,19 +49,6 @@ function HomeContent() {
     pointerEvents: 'none' as const,
     zIndex: 0,
     backdropFilter: 'blur(0.7px)',
-  }
-
-  if (loading) {
-    return (
-      <div className="min-h-screen relative flex items-center justify-center">
-        {/* 百叶窗效果 */}
-        <div style={blindsOverlayStyle}></div>
-        <div className="text-center space-y-4 relative z-10">
-          <Loader2 className="h-8 w-8 animate-spin text-lime-400 mx-auto" />
-          <p className="text-gray-400">正在加载...</p>
-        </div>
-      </div>
-    )
   }
 
   return (

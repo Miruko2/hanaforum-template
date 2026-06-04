@@ -16,7 +16,7 @@ const PAGE_SIZE = 30
 
 export default function PostGrid() {
   const [activePostId, setActivePostId] = useState<string | null>(null)
-  const { user } = useSimpleAuth()
+  const { user, loading: authLoading } = useSimpleAuth()
   const { state, loadMorePosts, updatePost, deletePost, retryLoading } = usePosts()
   
   // 从context中获取状态
@@ -50,16 +50,31 @@ export default function PostGrid() {
     };
   }, [retryLoading]);
   
+  // 认证"基线"是否已建立。首次认证解析完成时只记录当前用户、不重拉，
+  // 因为 PostsProvider 挂载时已经 loadPosts() 过一次了。只有之后真正的
+  // 登入/登出切换才需要重拉，避免登录用户白跑一整条加载链路。
+  const authBaselineSetRef = useRef(false);
+
   // 当登录状态"真正"改变时重新加载帖子
   useEffect(() => {
+    // 认证还没解析完，先别动（此刻 user 必为 null，并不代表"已登出"）
+    if (authLoading) return;
+
     const currentUserId = user?.id || null;
-    
+
+    // 首次解析完成：建立基线，不触发重拉
+    if (!authBaselineSetRef.current) {
+      authBaselineSetRef.current = true;
+      lastUserIdRef.current = currentUserId;
+      return;
+    }
+
     if (currentUserId !== lastUserIdRef.current) {
       console.debug('👤 PostGrid: 用户ID变化，重新获取帖子数据');
       lastUserIdRef.current = currentUserId;
       retryLoading();
     }
-  }, [user?.id, retryLoading]);
+  }, [user?.id, authLoading, retryLoading]);
   
   // 处理加载更多帖子 - 包装loadMorePosts以适配新API
   const handleLoadMorePosts = useCallback(

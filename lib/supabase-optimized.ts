@@ -737,14 +737,18 @@ export const getPostsWithPinned = withCache(
         console.error("❌ 获取普通帖子失败:", regularPostsResult.error);
       }
       
-      // 处理置顶帖子数据
+      // 一次性拉取「置顶帖 + 普通帖」两批的全部作者 profile，避免两次串行往返
       const pinnedPosts = pinnedPostsResult.data || [];
-      const processedPinnedPosts = await processPostsData(pinnedPosts, true);
-      
-      // 处理普通帖子数据
       const regularPosts = regularPostsResult.data || [];
-      const processedRegularPosts = await processPostsData(regularPosts);
-      
+      const { usernameMap, avatarMap } = await fetchProfileMaps([
+        ...pinnedPosts.map((p: any) => p.user_id),
+        ...regularPosts.map((p: any) => p.user_id),
+      ]);
+
+      // 用同一份 profile 映射把两批数据各自转成客户端格式（纯内存，无网络请求）
+      const processedPinnedPosts = mapPostsWithProfiles(pinnedPosts, usernameMap, avatarMap, true);
+      const processedRegularPosts = mapPostsWithProfiles(regularPosts, usernameMap, avatarMap, false);
+
       // 合并结果：置顶帖子在前，普通帖子在后
       return [...processedPinnedPosts, ...processedRegularPosts];
     } catch (error) {
@@ -756,51 +760,58 @@ export const getPostsWithPinned = withCache(
   30 // 缓存30秒
 );
 
-// 辅助函数：处理帖子数据，提取用户名和计数
-async function processPostsData(posts: any[], isPinned: boolean = false): Promise<Post[]> {
-  if (!posts || !posts.length) return [];
-  
-  // 获取所有用户ID
-  const userIds = posts
-    .map(post => post.user_id)
-    .filter((id, index, self) => id && self.indexOf(id) === index); // 去重
-    
-  // 用户名和头像映射表
+// 批量拉取 profiles，返回 用户名/头像 映射。
+// 单独拆出网络查询，方便首页把「置顶帖 + 普通帖」的作者合并成一次往返。
+async function fetchProfileMaps(
+  userIds: string[],
+): Promise<{ usernameMap: Map<string, string>; avatarMap: Map<string, string> }> {
   const usernameMap = new Map<string, string>();
   const avatarMap = new Map<string, string>();
-  
+
+  // 去重，过滤空值
+  const uniqueIds = userIds.filter((id, index, self) => id && self.indexOf(id) === index);
+  if (uniqueIds.length === 0) return { usernameMap, avatarMap };
+
   // 批量获取用户名 - 使用 profiles 表（user_profiles 表 RLS 限制无法读取）
-  if (userIds.length > 0) {
-    try {
-      const { data: profiles } = await supabase
-        .from("profiles")
-        .select("id, username, avatar_url")
-        .in("id", userIds);
-        
-      if (profiles && profiles.length > 0) {
-        profiles.forEach(profile => {
-          if (profile.id && profile.username) {
-            // 如果是邮箱格式，提取用户名部分
-            if (profile.username.includes('@')) {
-              const emailUsername = profile.username.split('@')[0];
-              if (emailUsername) {
-                usernameMap.set(profile.id, emailUsername);
-              }
-            } else {
-              // 非邮箱格式直接使用
-              usernameMap.set(profile.id, profile.username);
+  try {
+    const { data: profiles } = await supabase
+      .from("profiles")
+      .select("id, username, avatar_url")
+      .in("id", uniqueIds);
+
+    if (profiles && profiles.length > 0) {
+      profiles.forEach(profile => {
+        if (profile.id && profile.username) {
+          // 如果是邮箱格式，提取用户名部分
+          if (profile.username.includes('@')) {
+            const emailUsername = profile.username.split('@')[0];
+            if (emailUsername) {
+              usernameMap.set(profile.id, emailUsername);
             }
+          } else {
+            // 非邮箱格式直接使用
+            usernameMap.set(profile.id, profile.username);
           }
-          if (profile.id && profile.avatar_url) {
-            avatarMap.set(profile.id, profile.avatar_url);
-          }
-        });
-      }
-    } catch (err) {
-      console.warn("获取profiles失败:", err);
+        }
+        if (profile.id && profile.avatar_url) {
+          avatarMap.set(profile.id, profile.avatar_url);
+        }
+      });
     }
+  } catch (err) {
+    console.warn("获取profiles失败:", err);
   }
-  
+
+  return { usernameMap, avatarMap };
+}
+
+// 纯映射：用预取的 profile 映射，把原始 posts 转成客户端 Post 格式，不发任何网络请求。
+function mapPostsWithProfiles(
+  posts: any[],
+  usernameMap: Map<string, string>,
+  avatarMap: Map<string, string>,
+  isPinned: boolean = false,
+): Post[] {
   // 处理数据，转换为客户端格式
   return posts.map(post => {
     try {
@@ -883,6 +894,13 @@ async function processPostsData(posts: any[], isPinned: boolean = false): Promis
       } as Post;
     }
   });
+}
+
+// 辅助函数：处理帖子数据（拉取 profile + 映射）。用于「非首页 / 无置顶」分支的单批数据。
+async function processPostsData(posts: any[], isPinned: boolean = false): Promise<Post[]> {
+  if (!posts || !posts.length) return [];
+  const { usernameMap, avatarMap } = await fetchProfileMaps(posts.map(post => post.user_id));
+  return mapPostsWithProfiles(posts, usernameMap, avatarMap, isPinned);
 }
 
 // 置顶帖子
