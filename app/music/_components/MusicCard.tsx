@@ -19,6 +19,12 @@ type Props = {
    * the priciest things in this component on weak GPUs.
    */
   lite?: boolean
+  /**
+   * Android-only perf tier: on top of `lite`, Android shrinks the card shadow
+   * (the 60px-blur shadow is costly to over-draw / re-rasterize on weak Android
+   * GPUs while the wall is dragged in 3D). iOS / desktop keep the full shadow.
+   */
+  android?: boolean
 }
 
 /**
@@ -32,7 +38,7 @@ type Props = {
  * hits meant for the (z<0) cards behind it in the preserve-3d space.
  */
 function MusicCardBase(
-  { track, width, height, onExpand, lite = false }: Props,
+  { track, width, height, onExpand, lite = false, android = false }: Props,
   ref: React.ForwardedRef<HTMLDivElement>,
 ) {
   const { currentTrack, isPlaying: globalPlaying, togglePlay, prev, next, isFavorite, toggleFavorite } = usePlayback()
@@ -77,8 +83,11 @@ function MusicCardBase(
           (track.hue + 40) % 360
         } 65% 10%))`,
         borderRadius: 18,
-        boxShadow:
-          "0 20px 60px -20px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.06)",
+        // 安卓：缩小阴影模糊半径(60→22px)，减少大阴影的 overdraw 与栅格化面积
+        //（低端 GPU 拖动 3D 墙时的零碎成本）。保留 1px 边框 + 一点投影维持立体感。
+        boxShadow: android
+          ? "0 8px 22px -10px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.06)"
+          : "0 20px 60px -20px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.06)",
         overflow: "hidden",
       }}
     >

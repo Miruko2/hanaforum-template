@@ -369,10 +369,11 @@ export function MusicCanvas({ onExpand, overlayOpen = false }: Props) {
             `scale(${f.scale.toFixed(3)})`
           const opacity = f.opacity.toFixed(3)
           // 模糊量化 → 字符串跨帧稳定 → 合成器复用已糊图层、不必每帧重栅格化。
-          // B1：手机(lite)粗量化到 0/1/2px（仅 3 个取值，缓存命中率最高、最省 GPU，
-          //     小屏上景深差异肉眼难辨）；桌面保持 0.5px 步进的细腻模糊。
+          // 安卓：完全关闭 fisheye 景深模糊 —— filter:blur 在低端安卓 GPU 上是拖动时
+          //   每卡每帧重栅格化的主要成本，小屏景深虚化肉眼难辨；3D 缩放/旋转/透视保留。
+          // B1 iPhone(lite 非安卓)：0/1/2px 粗量化；桌面/iPad：0.5px 细腻模糊。
           let filter = ""
-          if (f.blur > 0.15) {
+          if (!isAndroid && f.blur > 0.15) {
             if (lite) {
               const lb = Math.min(2, Math.round(f.blur))
               filter = lb > 0 ? `blur(${lb}px)` : ""
@@ -444,7 +445,7 @@ export function MusicCanvas({ onExpand, overlayOpen = false }: Props) {
       mounted = false
       cancelAnimationFrame(rafId)
     }
-  }, [viewSize.w, viewSize.h, pack, lite])
+  }, [viewSize.w, viewSize.h, pack, lite, isAndroid])
 
   return (
     <div
@@ -536,6 +537,7 @@ export function MusicCanvas({ onExpand, overlayOpen = false }: Props) {
             height={inst.card.height}
             onExpand={onExpand}
             lite={lite}
+            android={isAndroid}
           />
         ))}
       </div>
