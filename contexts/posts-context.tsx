@@ -28,6 +28,40 @@ const MAX_RETRIES = 3; // 最大重试次数
 // 定义页面大小常量
 const PAGE_SIZE = 30;
 
+// localStorage 持久化：跨 app 冷启动保留上次的帖子，实现「秒显旧内容 + 后台刷新」(stale-while-revalidate)。
+// 内存缓存 postCacheByCategory 一关 app 就没；localStorage 能扛过冷启动，
+// 让手机首次打开就立即看到上次的帖子，而不是干等网络。
+const LS_PREFIX = "hana_posts_v1_";
+const LS_MAX = PAGE_SIZE;             // 最多持久化条数，避免 localStorage 过大
+const LS_TTL = 24 * 60 * 60 * 1000;   // 持久化有效期 24h；过旧则不用（但仍会后台刷新）
+
+function loadPostsFromLS(category: string | null): Post[] | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(LS_PREFIX + catKey(category));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { posts: Post[]; time: number };
+    if (!parsed?.posts?.length) return null;
+    if (Date.now() - parsed.time > LS_TTL) return null;
+    return parsed.posts;
+  } catch {
+    return null;
+  }
+}
+
+function savePostsToLS(category: string | null, posts: Post[]) {
+  if (typeof window === "undefined") return;
+  try {
+    const slim = posts.slice(0, LS_MAX);
+    window.localStorage.setItem(
+      LS_PREFIX + catKey(category),
+      JSON.stringify({ posts: slim, time: Date.now() }),
+    );
+  } catch {
+    // localStorage 满了或被禁用 → 静默降级，不影响功能
+  }
+}
+
 // 定义状态和操作类型
 export type PostsState = {
   posts: Post[]
@@ -194,9 +228,10 @@ export function PostsProvider({ children }: { children: ReactNode }) {
       if (fetchedPosts.length > 0) {
         loadingFailed = false;
         retryCount = 0;
-        
-        // 更新缓存
+
+        // 更新内存缓存 + 持久化到 localStorage（供下次冷启动秒显）
         postCacheByCategory.set(cacheKey, { posts: fetchedPosts, time: now });
+        savePostsToLS(currentCategory, fetchedPosts);
       }
       
       console.debug('✅ PostsContext: 成功加载帖子', {
@@ -381,6 +416,14 @@ export function PostsProvider({ children }: { children: ReactNode }) {
   
   // 初始加载
   useEffect(() => {
+    // 冷启动先用 localStorage 里上次的帖子秒显（stale-while-revalidate），
+    // 紧接着 loadPosts() 后台拉最新覆盖。posts 非空时 PostGrid 不显示转圈，体验是「立刻有内容」。
+    const persisted = loadPostsFromLS(state.category);
+    if (persisted && persisted.length > 0) {
+      dispatch({ type: 'LOAD_POSTS', payload: persisted });
+      dispatch({ type: 'SET_HAS_MORE', payload: persisted.length >= PAGE_SIZE });
+    }
+
     loadPosts();
     
     // 添加窗口焦点事件监听器，用户返回页面时刷新
