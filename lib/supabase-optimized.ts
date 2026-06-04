@@ -619,134 +619,118 @@ if (typeof window !== 'undefined') {
   window.clearSupabaseCache = clearOptimizedCache;
 }
 
+// posts 表标准查询字段（含点赞/评论计数）。多处查询复用，避免重复字符串。
+const POST_SELECT = `
+  id,
+  title,
+  content,
+  description,
+  category,
+  image_url,
+  image_ratio,
+  created_at,
+  user_id,
+  likes:likes(count),
+  comments:comments(count)
+`;
+
 // 分页获取帖子，包含置顶帖子。可选 category 过滤器。
 export const getPostsWithPinned = withCache(
   async (page: number = 0, limit: number = 30, category: string | null = null): Promise<Post[]> => {
     try {
-      // 1. 获取所有置顶帖子ID (置顶帖子通常不会太多，所以可以全部获取)
-      //    注意：如果传了 category 过滤，置顶帖子也要符合该分类才显示
-      const { data: pinnedPostIds, error: pinnedError } = await supabase
+      // ---- 非首页（加载更多）：无置顶逻辑，直接按 offset 取最新帖 ----
+      if (page > 0) {
+        let moreQuery = supabase
+          .from("posts")
+          .select(POST_SELECT)
+          .order("created_at", { ascending: false })
+          .range(page * limit, page * limit + limit - 1);
+        if (category) moreQuery = moreQuery.eq("category", category);
+
+        const { data: morePosts, error: moreError } = await moreQuery;
+        if (moreError) {
+          console.error("❌ 获取普通帖子失败:", moreError);
+          return [];
+        }
+        return await processPostsData(morePosts);
+      }
+
+      // ---- 首页 page 0 ----
+      // 第一批并行：置顶ID列表 + 最新 limit 条帖子（不排除置顶）。
+      // 置顶帖几乎都落在最新帖子里，所以这一批通常就把首页要的帖子全拿到了，
+      // 不必再走「先查置顶ID、再串行查置顶详情」的链路 → 省一趟往返。
+      let topQuery = supabase
+        .from("posts")
+        .select(POST_SELECT)
+        .order("created_at", { ascending: false })
+        .limit(limit);
+      if (category) topQuery = topQuery.eq("category", category);
+
+      const pinnedIdsPromise = supabase
         .from("pinned_posts")
         .select("post_id")
         .order("pinned_at", { ascending: false });
-      
-      if (pinnedError) {
-        console.error("❌ 获取置顶帖子ID失败:", pinnedError);
-        // 如果获取置顶帖子失败，继续获取普通帖子
+
+      const [pinnedIdsRes, topRes] = await Promise.all([pinnedIdsPromise, topQuery]);
+
+      if (pinnedIdsRes.error) {
+        console.error("❌ 获取置顶帖子ID失败:", pinnedIdsRes.error);
+        // 置顶查询失败不致命：降级为「只显示最新帖子」
       }
-      
-      // 2. 计算需要获取的普通帖子数量
-      // 如果是第一页，需要减去置顶帖子数量，确保总数不超过限制
-      const pinnedCount = (page === 0 && pinnedPostIds?.length) || 0;
-      const regularLimit = Math.max(0, limit - pinnedCount);
-      const regularOffset = page * limit - (page > 0 ? pinnedCount : 0);
-      
-      // 如果不是第一页，或者没有置顶帖子，直接获取普通帖子
-      if (page > 0 || !pinnedPostIds?.length) {
-        let regularQuery = supabase
+      if (topRes.error) {
+        console.error("❌ 获取帖子失败:", topRes.error);
+        return [];
+      }
+
+      const pinnedIds: string[] = (pinnedIdsRes.data || []).map((p: any) => p.post_id);
+      const topPosts: any[] = topRes.data || [];
+
+      // 没有置顶帖：最新 limit 条就是首页，直接查作者即可（共 2 趟往返）
+      if (pinnedIds.length === 0) {
+        return await processPostsData(topPosts);
+      }
+
+      // 有置顶帖：先看最新 limit 条里已经包含了哪些置顶帖
+      const pinnedIdSet = new Set(pinnedIds);
+      const presentPinned = topPosts.filter((p: any) => pinnedIdSet.has(p.id));
+      const presentPinnedIds = new Set(presentPinned.map((p: any) => p.id));
+
+      // 不在最新 limit 条里的「老置顶帖」才需要补查详情（通常为空 → 省掉这一趟）
+      const missingPinnedIds = pinnedIds.filter(id => !presentPinnedIds.has(id));
+      let missingPinnedPosts: any[] = [];
+      if (missingPinnedIds.length > 0) {
+        let missQuery = supabase
           .from("posts")
-          .select(`
-            id,
-            title,
-            content,
-            description,
-            category,
-            image_url,
-            image_ratio,
-            created_at,
-            user_id,
-            likes:likes(count),
-            comments:comments(count)
-          `)
-          .order("created_at", { ascending: false })
-          .range(regularOffset, regularOffset + regularLimit - 1);
-
-        if (category) {
-          regularQuery = regularQuery.eq("category", category);
+          .select(POST_SELECT)
+          .in("id", missingPinnedIds);
+        if (category) missQuery = missQuery.eq("category", category);
+        const missRes = await missQuery;
+        if (missRes.error) {
+          console.error("❌ 获取置顶帖子详情失败:", missRes.error);
         }
-
-        const { data: regularPosts, error } = await regularQuery;
-        
-        if (error) {
-          console.error("❌ 获取普通帖子失败:", error);
-          return [];
-        }
-        
-        // 将帖子转换为客户端格式
-        const processedPosts = await processPostsData(regularPosts);
-        return processedPosts;
-      }
-      
-      // 3. 第一页：获取置顶帖子 + 普通帖子
-      const pinnedIds = pinnedPostIds.map(p => p.post_id);
-
-      // 置顶查询
-      let pinnedQuery = supabase
-        .from("posts")
-        .select(`
-          id,
-          title,
-          content,
-          description,
-          category,
-          image_url,
-          image_ratio,
-          created_at,
-          user_id,
-          likes:likes(count),
-          comments:comments(count)
-        `)
-        .in("id", pinnedIds);
-
-      // 普通帖子查询（排除置顶）
-      let regularQuery = supabase
-        .from("posts")
-        .select(`
-          id,
-          title,
-          content,
-          description,
-          category,
-          image_url,
-          image_ratio,
-          created_at,
-          user_id,
-          likes:likes(count),
-          comments:comments(count)
-        `)
-        .not("id", "in", `(${pinnedIds.join(",")})`)
-        .order("created_at", { ascending: false })
-        .limit(regularLimit);
-
-      if (category) {
-        pinnedQuery = pinnedQuery.eq("category", category);
-        regularQuery = regularQuery.eq("category", category);
+        missingPinnedPosts = missRes.data || [];
       }
 
-      const [pinnedPostsResult, regularPostsResult] = await Promise.all([
-        pinnedQuery,
-        regularQuery,
-      ]);
-      
-      // 检查错误
-      if (pinnedPostsResult.error) {
-        console.error("❌ 获取置顶帖子详情失败:", pinnedPostsResult.error);
-      }
-      
-      if (regularPostsResult.error) {
-        console.error("❌ 获取普通帖子失败:", regularPostsResult.error);
-      }
-      
-      // 一次性拉取「置顶帖 + 普通帖」两批的全部作者 profile，避免两次串行往返
-      const pinnedPosts = pinnedPostsResult.data || [];
-      const regularPosts = regularPostsResult.data || [];
+      // 置顶帖全集，按 pinned_at 顺序还原（pinnedIds 已按 pinned_at desc 排好）
+      const pinnedById = new Map<string, any>();
+      [...presentPinned, ...missingPinnedPosts].forEach((p: any) => pinnedById.set(p.id, p));
+      const orderedPinnedPosts = pinnedIds
+        .map(id => pinnedById.get(id))
+        .filter(Boolean);
+
+      // 普通帖 = 最新 limit 条去掉置顶帖，取前 (limit - 置顶数) 条
+      const regularLimit = Math.max(0, limit - orderedPinnedPosts.length);
+      const regularPosts = topPosts
+        .filter((p: any) => !pinnedIdSet.has(p.id))
+        .slice(0, regularLimit);
+
+      // 一次性拉取「置顶帖 + 普通帖」的全部作者 profile（共用一次往返）
       const { usernameMap, avatarMap } = await fetchProfileMaps([
-        ...pinnedPosts.map((p: any) => p.user_id),
+        ...orderedPinnedPosts.map((p: any) => p.user_id),
         ...regularPosts.map((p: any) => p.user_id),
       ]);
 
-      // 用同一份 profile 映射把两批数据各自转成客户端格式（纯内存，无网络请求）
-      const processedPinnedPosts = mapPostsWithProfiles(pinnedPosts, usernameMap, avatarMap, true);
+      const processedPinnedPosts = mapPostsWithProfiles(orderedPinnedPosts, usernameMap, avatarMap, true);
       const processedRegularPosts = mapPostsWithProfiles(regularPosts, usernameMap, avatarMap, false);
 
       // 合并结果：置顶帖子在前，普通帖子在后
