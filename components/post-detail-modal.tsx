@@ -269,14 +269,22 @@ export default function PostDetailModal({
           exit={{ opacity: 0, pointerEvents: "none" }}
           transition={{ duration: 0.2 }}
         >
-          {/* Backdrop with blur */}
+          {/* 背景遮罩：固定模糊半径，只用 opacity 淡入。
+              原来用 framer-motion 把 backdrop-filter 从 blur(0)→blur(15) 逐帧插值，
+              等于每帧把整个全屏背景重做一次高斯模糊 —— 移动端打开卡顿的头号原因。
+              改为半径恒定（移动端 10px / 桌面 15px）、整层 opacity 0→1 淡入，
+              GPU 只需合成一个已缓存的模糊层，视觉几乎一致、全平台受益。 */}
           <motion.div
-            className="absolute inset-0 backdrop-blur-[15px] bg-black/40"
-            initial={{ backdropFilter: "blur(0px)", backgroundColor: "rgba(0,0,0,0)" }}
-            animate={{ backdropFilter: "blur(15px)", backgroundColor: "rgba(0,0,0,0.4)" }}
-            exit={{ backdropFilter: "blur(0px)", backgroundColor: "rgba(0,0,0,0)" }}
+            className="absolute inset-0 bg-black/40"
+            style={{
+              pointerEvents: "none",
+              backdropFilter: isMobile ? "blur(10px)" : "blur(15px)",
+              WebkitBackdropFilter: isMobile ? "blur(10px)" : "blur(15px)",
+            }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
-            style={{ pointerEvents: "none" }}
           />
 
           <motion.div
@@ -312,6 +320,7 @@ export default function PostDetailModal({
               animate={true}
               borderGlow={true}
               imageRatio={post.image_ratio}
+              reduceBlur={isMobile}
             >
               {/* 管理员置顶控制按钮 */}
               {isAdmin && (
@@ -372,11 +381,6 @@ export default function PostDetailModal({
                             isMobile={isMobile}
                             inDetailView={true}
                             fillParent={true}
-                            onImageLoad={(dimensions) => {
-                              console.log(
-                                `详情视图图片尺寸: ${dimensions.width}x${dimensions.height}, 比例: ${dimensions.ratio}`,
-                              )
-                            }}
                           />
                         </div>
                         {imageHoverOverlay}
@@ -405,11 +409,6 @@ export default function PostDetailModal({
                             post={post}
                             isMobile={isMobile}
                             inDetailView={true}
-                            onImageLoad={(dimensions) => {
-                              console.log(
-                                `详情视图图片尺寸: ${dimensions.width}x${dimensions.height}, 比例: ${dimensions.ratio}`,
-                              )
-                            }}
                           />
                         </div>
                         {imageHoverOverlay}
@@ -442,23 +441,20 @@ export default function PostDetailModal({
                       className="pointer-events-none absolute inset-x-0 z-30"
                       style={{ top: "calc(300px - 88px)", height: "88px" }}
                     >
-                      {[
-                        { blur: 2, mask: "linear-gradient(to bottom, transparent 0%, #000 35%, #000 55%, transparent 80%)" },
-                        { blur: 5, mask: "linear-gradient(to bottom, transparent 25%, #000 50%, #000 72%, transparent 100%)" },
-                        { blur: 10, mask: "linear-gradient(to bottom, transparent 48%, #000 72%, #000 100%)" },
-                        { blur: 18, mask: "linear-gradient(to bottom, transparent 68%, #000 100%)" },
-                      ].map((l, i) => (
-                        <div
-                          key={i}
-                          className="absolute inset-0"
-                          style={{
-                            backdropFilter: `blur(${l.blur}px)`,
-                            WebkitBackdropFilter: `blur(${l.blur}px)`,
-                            maskImage: l.mask,
-                            WebkitMaskImage: l.mask,
-                          }}
-                        />
-                      ))}
+                      {/* 移动端降级：原 4 层 backdrop-filter 渐进模糊并为 1 层，省 3 层全宽
+                          实时高斯模糊。单层用 mask 让模糊自上而下淡入，配合下方暗影过渡
+                          「图片 ↔ 卡片」接缝。代价：渐进感略弱，但打开时 GPU 开销大降。 */}
+                      <div
+                        className="absolute inset-0"
+                        style={{
+                          backdropFilter: "blur(8px)",
+                          WebkitBackdropFilter: "blur(8px)",
+                          maskImage:
+                            "linear-gradient(to bottom, transparent 0%, #000 55%, #000 100%)",
+                          WebkitMaskImage:
+                            "linear-gradient(to bottom, transparent 0%, #000 55%, #000 100%)",
+                        }}
+                      />
                       {/* 向下压暗的暗影：顶部 30% 不压暗（保持清亮、不在顶端造第二条边），
                           往下逐渐加深，把图片最底缘压到接近暗卡片，淡化接缝 */}
                       <div

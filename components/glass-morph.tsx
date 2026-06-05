@@ -15,6 +15,8 @@ interface GlassMorphProps {
   imageRatio?: number
   adaptiveHeight?: boolean
   wideTemplate?: boolean
+  /** 移动端降模糊：把毛玻璃 blur 半径整体调低，省 GPU 重采样 */
+  reduceBlur?: boolean
 }
 
 export function GlassMorph({
@@ -28,6 +30,7 @@ export function GlassMorph({
   imageRatio,
   adaptiveHeight = false,
   wideTemplate = false,
+  reduceBlur = false,
 }: GlassMorphProps) {
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 })
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 })
@@ -126,8 +129,9 @@ export function GlassMorph({
   const baseOpacity = dark ? 0.15 : 0.08
   const hoverOpacity = dark ? 0.2 : 0.12
   
-  const baseBlur = dark ? "30px" : "20px"
-  const hoverBlur = dark ? "40px" : "25px"
+  // reduceBlur（移动端）：毛玻璃模糊半径整体调低，省 GPU 重采样；视觉仍是毛玻璃、强度略减、肉眼基本无差。
+  const baseBlur = dark ? (reduceBlur ? "16px" : "30px") : (reduceBlur ? "12px" : "20px")
+  const hoverBlur = dark ? (reduceBlur ? "20px" : "40px") : (reduceBlur ? "16px" : "25px")
   
   const baseBorderOpacity = dark ? 0.15 : 0.08
   const hoverBorderOpacity = dark ? 0.25 : 0.15
