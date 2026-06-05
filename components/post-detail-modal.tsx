@@ -49,49 +49,26 @@ export default function PostDetailModal({
 }: PostDetailModalProps) {
   const { toast } = useToast()
   const [isPinning, setIsPinning] = useState(false)
-  // 点击详情页图片后，原图在屏幕中心聚焦放大（灯箱）
+  // 点击详情页图片后，原图在屏幕中心聚焦放大（灯箱）。加载与弹入时序交给
+  // ImageLightbox 自己处理：点击立即打开、先显 loading、原图就绪后再弹入，
+  // 故这里不再做阻塞式预加载。
   const [lightboxOpen, setLightboxOpen] = useState(false)
-  // 图片预加载状态：防止灯箱打开时图片未加载导致的闪烁
-  const [imagePreloaded, setImagePreloaded] = useState(false)
-  const [imageLoading, setImageLoading] = useState(false)
 
   // 是否使用横版布局：桌面端一律走横版
   // （有图 → 左侧图片；无图 → 左侧 TextualHero 文字大标题）
   const useHorizontalLayout = !isMobile
 
-  // 预加载图片后打开灯箱，避免安卓 WebView 图片闪烁
+  // 点击图片：立即打开灯箱，不再阻塞等待原图下载完。原图的加载/解码与弹入时序
+  // 由 ImageLightbox 内部处理（先 loading 后弹入），既消除「点了要等一会才出现」，
+  // 也避免一边解码大图一边做弹跳动画的卡顿。
   const handleOpenLightbox = useCallback(() => {
     if (!post.image_url) return
-    
-    // 如果已经预加载过，直接打开
-    if (imagePreloaded) {
-      setLightboxOpen(true)
-      return
-    }
-    
-    // 开始加载
-    setImageLoading(true)
-    const img = new Image()
-    img.src = post.image_url
-    
-    img.onload = () => {
-      setImagePreloaded(true)
-      setImageLoading(false)
-      setLightboxOpen(true)
-    }
-    
-    img.onerror = () => {
-      setImageLoading(false)
-      // 即使加载失败也尝试打开
-      setLightboxOpen(true)
-    }
-  }, [post.image_url, imagePreloaded])
+    setLightboxOpen(true)
+  }, [post.image_url])
 
-  // 重置预加载状态（当详情页关闭时）
+  // 详情页关闭时收起灯箱
   React.useEffect(() => {
     if (!isOpen) {
-      setImagePreloaded(false)
-      setImageLoading(false)
       setLightboxOpen(false)
     }
   }, [isOpen])
