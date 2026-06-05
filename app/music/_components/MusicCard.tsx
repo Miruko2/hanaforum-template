@@ -71,7 +71,13 @@ function MusicCardBase(
         if (Math.hypot(dx, dy) > 5 || dt > 500) return
         onExpand(track, (e.currentTarget as HTMLDivElement).getBoundingClientRect())
       }}
-      className="absolute top-0 left-0 cursor-pointer will-change-transform pointer-events-auto"
+      // 初始 opacity-0：新卡挂载瞬间先隐身。canvas 的 rAF 循环首帧会写入内联 opacity
+      //（真实鱼眼值）并永久覆盖此类，卡片随即在正确位置显形 —— 规避低端机上「新卡先在
+      // (0,0) 角落按默认 opacity:1 画一帧、下一帧才被 rAF 摆正」造成的「消失再出现」闪烁。
+      // 必须用 class 而非 style.opacity：MusicCard 订阅播放状态会 re-render，若把 opacity:0
+      // 写进 style prop，每次 re-render 都会被 React 重置回 0 → 反而新增闪烁；class 不会被
+      // re-render 触碰，且内联 opacity 优先级恒高于 class，一经 rAF 写入此类即永久失效。
+      className="absolute top-0 left-0 cursor-pointer will-change-transform pointer-events-auto opacity-0"
       style={{
         width,
         height,
