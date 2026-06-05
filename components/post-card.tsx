@@ -73,6 +73,10 @@ const PostCard = memo(function PostCard({
   const [isDeleting, setIsDeleting] = useState(false)
   const [showDeleteAlert, setShowDeleteAlert] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
+  // hero 转场：点击瞬间量出本卡图片的屏幕矩形，传给详情页作为放大起点
+  const [sourceRect, setSourceRect] = useState<DOMRect | null>(null)
+  // hero 转场：列表图已加载的实际 URL（飞行图用它即时显示、不闪）
+  const [sourceSrc, setSourceSrc] = useState<string | null>(null)
   
   const cardRef = useRef<HTMLDivElement>(null)
   const mountedRef = useRef(true) // 跟踪组件是否已挂载
@@ -224,6 +228,12 @@ const PostCard = memo(function PostCard({
   // 处理卡片点击
   const handleCardClick = useCallback((e: React.MouseEvent) => {
     if (!isActive && onClick) {
+      // hero 转场：量出整张卡片的屏幕矩形（起点）+ 卡片图已加载的 URL（飞行图图源）。
+      // 用整卡矩形而非只图片，让「整个帖子元素」一起飞、底部信息再淡出。
+      const cardEl = cardRef.current
+      const imgEl = cardEl?.querySelector(".image-container img") as HTMLImageElement | null
+      setSourceRect(cardEl ? cardEl.getBoundingClientRect() : null)
+      setSourceSrc(imgEl ? imgEl.currentSrc || imgEl.src : null)
       onClick()
     }
   }, [isActive, onClick])
@@ -303,6 +313,9 @@ const PostCard = memo(function PostCard({
         style={{
           position: 'relative',
           zIndex: 1,
+          // hero 转场期间（桌面 + 本卡打开 + 本卡有图 → 才会走飞行转场）隐藏本卡，视觉上
+          // 「整个帖子被拿起来飞到详情中间」，避免列表残留原卡。无图帖子不隐藏（不走 hero）。
+          opacity: !isMobile && isActive && sourceSrc ? 0 : 1,
           ...(useWideTemplate && isMobile ? {
             marginLeft: '-2%',
             width: '104%'
@@ -417,6 +430,8 @@ const PostCard = memo(function PostCard({
         isMobile={isMobile}
         isAdmin={isAdmin}
         onPostUpdated={onPostUpdated}
+        sourceRect={sourceRect}
+        sourceSrc={sourceSrc}
       />
     )
   }

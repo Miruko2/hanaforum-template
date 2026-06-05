@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useCallback } from "react"
+import React, { useState, useCallback, useLayoutEffect, useRef } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { X, MessageSquare, Pin, PinOff, Maximize2 } from "lucide-react"
 import { createPortal } from "react-dom"
@@ -30,6 +30,10 @@ interface PostDetailModalProps {
   isMobile: boolean
   isAdmin?: boolean
   onPostUpdated?: (postId: string, updates: Partial<Post>) => void
+  /** hero 转场：点击的卡片图片在屏幕上的矩形，详情图据此从该位置 FLIP 飞入 */
+  sourceRect?: DOMRect | null
+  /** hero 转场：列表卡片图已加载的实际 URL（img.currentSrc），飞行图用它即时显示、不闪 */
+  sourceSrc?: string | null
 }
 
 export default function PostDetailModal({
@@ -46,6 +50,8 @@ export default function PostDetailModal({
   isMobile,
   isAdmin = false,
   onPostUpdated,
+  sourceRect = null,
+  sourceSrc = null,
 }: PostDetailModalProps) {
   const { toast } = useToast()
   const [isPinning, setIsPinning] = useState(false)
@@ -57,6 +63,32 @@ export default function PostDetailModal({
   // 是否使用横版布局：桌面端一律走横版
   // （有图 → 左侧图片；无图 → 左侧 TextualHero 文字大标题）
   const useHorizontalLayout = !isMobile
+
+  // hero 转场（飞行克隆）：用一张独立的、全程不透明的飞行图，从点击卡片图的屏幕矩形
+  // （sourceRect）飞到详情图位置（heroRef 测量），到位后交接给详情里的真实图。飞行图在
+  // 会淡入的容器之外、全程 opacity:1，所以图是「实体平移放大」而非淡入。纯 transform，
+  // 合成器友好、安卓也顺。POC 仅桌面横版启用；竖版（手机）暂走淡入。
+  const heroRef = useRef<HTMLDivElement>(null)
+  // 这次打开是否走 hero：桌面横版 + 有图 + 拿到了源矩形与源图 URL
+  const heroActive = useHorizontalLayout && !!post.image_url && !!sourceRect && !!sourceSrc
+  // 飞行图飞到目标后置 true → 显示详情真实图、移除飞行图
+  const [flyDone, setFlyDone] = useState(false)
+  // 飞行目标矩形（详情图位置），由 useLayoutEffect 在 paint 前测量
+  const [flyTarget, setFlyTarget] = useState<{ left: number; top: number; width: number; height: number } | null>(null)
+  useLayoutEffect(() => {
+    if (!isOpen) {
+      // 关闭时复位，供下次打开重新计算
+      setFlyDone(false)
+      setFlyTarget(null)
+      return
+    }
+    if (!heroActive) return
+    const el = heroRef.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    if (!r.width || !r.height) return
+    setFlyTarget({ left: r.left, top: r.top, width: r.width, height: r.height })
+  }, [isOpen, heroActive])
 
   // 点击图片：立即打开灯箱，不再阻塞等待原图下载完。原图的加载/解码与弹入时序
   // 由 ImageLightbox 内部处理（先 loading 后弹入），既消除「点了要等一会才出现」，
@@ -236,6 +268,7 @@ export default function PostDetailModal({
   )
 
   return createPortal(
+    <>
     <AnimatePresence>
       {isOpen && (
         <motion.div
@@ -271,10 +304,12 @@ export default function PostDetailModal({
                 : "relative w-full max-w-4xl mx-4 flex flex-col"
             }
             onClick={(e) => e.stopPropagation()}
-            initial={{ scale: 0.9, opacity: 0, y: 20 }}
-            animate={{ scale: 1, opacity: 1, y: 0 }}
-            exit={{ scale: 0.95, opacity: 0, y: 10, transition: { duration: 0.18, ease: "easeOut" } }}
-            transition={{ type: "spring", stiffness: 300, damping: 30 }}
+            // 模态框本身只做 opacity 淡入（不再 scale 弹入）——让「图片从卡片飞入」
+            // 的 hero 转场唱主角；模态若也缩放会和 hero 叠加、显得乱。
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0, transition: { duration: 0.18, ease: "easeOut" } }}
+            transition={{ duration: 0.28, ease: "easeOut" }}
             // 手机端缩到 82vh，让模态框周围露出一圈背景（不再"贴满全屏"），
             // 视觉上更像浮起来的卡片；PC 横版维持 90vh 不变
             style={{ maxHeight: isMobile ? "82vh" : "90vh", zIndex: 41 }}
@@ -345,14 +380,18 @@ export default function PostDetailModal({
               {useHorizontalLayout ? (
                 /* 横版：左图/文字Hero + 右滚动内容，整体高度由外层 maxHeight 控制 */
                 <div className="flex flex-row" style={{ height: "min(90vh, 840px)" }}>
-                  {/* 左：图片区或文字 Hero，占 45% */}
-                  <div className="relative w-[45%] shrink-0 bg-black/20">
+                  {/* 左：图片区或文字 Hero，占 45%。ref 供 hero 转场测量目标矩形。 */}
+                  <div ref={heroRef} className="relative w-[45%] shrink-0 bg-black/20">
                     {post.image_url ? (
                       <div
                         className="group relative h-full w-full overflow-hidden rounded-t-md md:rounded-l-[24px] md:rounded-tr-none"
                         onClick={handleOpenLightbox}
                       >
-                        <div className="h-full w-full transition-transform duration-500 ease-out group-hover:scale-[1.06]">
+                        <div
+                          className="h-full w-full transition-transform duration-500 ease-out group-hover:scale-[1.06]"
+                          // hero 飞行期间隐藏真实图，避免和飞行图重叠；飞到位（flyDone）后显示
+                          style={{ opacity: heroActive && !flyDone ? 0 : 1 }}
+                        >
                           <PostCardImage
                             post={post}
                             isMobile={isMobile}
@@ -457,7 +496,55 @@ export default function PostDetailModal({
           </motion.div>
         </motion.div>
       )}
-    </AnimatePresence>,
+    </AnimatePresence>
+
+      {/* hero 飞行图：独立于上面会淡入的容器，全程 opacity:1 实体飞入；飞到位后交接给真实图 */}
+      <AnimatePresence>
+        {isOpen && heroActive && !flyDone && flyTarget && sourceRect && sourceSrc && (
+          <motion.div
+            key="hero-fly"
+            className="fixed z-[50] overflow-hidden pointer-events-none select-none bg-black/20"
+            // 用 left/top/width/height 动画（而非 transform scale），让图始终 object-cover
+            // 正确填充每一帧的容器尺寸 —— 容器变形时图按比例重新裁剪、不拉伸；底部信息条也
+            // 跟着 reflow，文字不变形。代价：单个 fixed 元素每帧 layout，0.42s 一次性、可接受。
+            style={{ borderRadius: 14 }}
+            initial={{
+              left: sourceRect.left,
+              top: sourceRect.top,
+              width: sourceRect.width,
+              height: sourceRect.height,
+            }}
+            animate={{
+              left: flyTarget.left,
+              top: flyTarget.top,
+              width: flyTarget.width,
+              height: flyTarget.height,
+            }}
+            exit={{ opacity: 0, transition: { duration: 0.12 } }}
+            transition={{ duration: 0.42, ease: [0.22, 0.7, 0.18, 1] }}
+            onAnimationComplete={() => setFlyDone(true)}
+          >
+            {/* 整个帖子元素一起飞：图填满 */}
+            <img
+              src={sourceSrc}
+              alt=""
+              draggable={false}
+              className="absolute inset-0 h-full w-full object-cover"
+            />
+            {/* 底部信息条：飞行中淡出 → 呼应「整卡移动后底部组件消失、主要放大图片」 */}
+            <motion.div
+              className="absolute inset-x-0 bottom-0 p-3 bg-gradient-to-t from-black/90 via-black/50 to-transparent"
+              initial={{ opacity: 1 }}
+              animate={{ opacity: 0 }}
+              transition={{ duration: 0.22, ease: "easeOut" }}
+            >
+              <div className="text-white text-[13px] font-semibold truncate">{post.title}</div>
+              <div className="text-white/60 text-[11px] truncate">{username}</div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>,
     document.body,
   )
 }

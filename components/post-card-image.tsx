@@ -40,11 +40,9 @@ export default function PostCardImage({
   // 检查是否有图片内容或imageContent
   const hasImageContent = !!post.imageContent
   
-  // 根据设备类型和是否在详情页设置图片质量
-  // 详情页使用更高质量
-  const imageQuality = inDetailView 
-    ? (isOnMobile ? 85 : 95)  // 详情页使用更高质量
-    : (isOnMobile ? 40 : 65)  // 列表页使用低质量
+  // 图片质量：详情页与列表页保持同一档，确保「列表图 = 详情图」是同一个 next/image URL，
+  // 详情页直接命中列表已加载的缓存 → hero 飞入即时有图、不闪。高清留给点击后的灯箱原图。
+  const imageQuality = isOnMobile ? 40 : 65
   
   // 计算图片高度 - 基于图片比例
   const getImageHeight = () => {
@@ -196,11 +194,9 @@ export default function PostCardImage({
         onError={handleError}
         quality={imageQuality}
         sizes={
-          fillParent
-            ? "(max-width: 768px) 100vw, 45vw"
-            : inDetailView
-              ? "(max-width: 768px) 100vw, 70vw"
-              : "(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+          // 详情页（fillParent / inDetailView）与列表页用同一 sizes，配合同一 quality，
+          // 让 next/image 生成同一个 URL，hero 转场复用列表缓存、飞入不闪。
+          "(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
         }
         fill
         priority={inDetailView} // 详情页图片设为优先加载
