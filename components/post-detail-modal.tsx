@@ -544,7 +544,9 @@ export default function PostDetailModal({
               height: flyTarget.height,
             }}
             exit={{ opacity: 0, transition: { duration: 0.12 } }}
-            transition={{ duration: 0.42, ease: [0.22, 0.7, 0.18, 1] }}
+            // 飞入用强缓出（近 easeOutExpo）：开头快速冲出、尾部长缓减速到位，放大展开
+            // 既有冲击力又丝滑，尾速趋近 0 → 与详情真实图交接更稳。时长 0.6s 增加从容感。
+            transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
             onAnimationComplete={() => setFlyDone(true)}
           >
             {/* 整个帖子元素一起飞：图填满 */}
@@ -585,7 +587,9 @@ export default function PostDetailModal({
               width: flyBackTarget.width,
               height: flyBackTarget.height,
             }}
-            transition={{ duration: 0.4, ease: [0.4, 0, 0.2, 1] }}
+            // 飞回用缓入缓出（easeInOutCubic）：轻起 → 加速 → 轻落，收拢有重量感、不会
+            // 开头猛缩，尾速趋近 0 → 落回图片区更稳。时长 0.6s 与飞入呼应。
+            transition={{ duration: 0.6, ease: [0.65, 0, 0.35, 1] }}
             // 落点 = 源卡图片区（flyBackTarget）：图片在那里 object-cover 的裁剪与源卡图片
             // 完全一致 → 像素级无缝。落地即真正关闭：onClose 让父级 isActive=false（源卡整卡
             // 显形 —— 图片区被回飞图无缝接管、不跳变，下方内容区由 PostCard 做浮现入场）、
