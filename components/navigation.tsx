@@ -1,13 +1,15 @@
 "use client"
 
-import { Suspense, useEffect, useMemo, useRef, useState } from "react"
+import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
-import { LogOut, User, Settings, Menu, X, PlusCircle } from "lucide-react"
+import { LogOut, User, Settings, Menu, X, PlusCircle, Home, Layers, LogIn, UserPlus, ChevronDown } from "lucide-react"
 import Link from "next/link"
+import { createPortal } from "react-dom"
+import { AnimatePresence, motion } from "framer-motion"
 import { supabase } from "@/lib/supabaseClient"
 import {
   DropdownMenu,
@@ -20,7 +22,7 @@ import {
 import NotificationBell from "@/components/notification-bell"
 import CategoryMenu from "@/components/category-menu"
 import { useCinemaMode } from "@/contexts/cinema-mode-context"
-import { isValidCategory } from "@/lib/categories"
+import { isValidCategory, CATEGORIES } from "@/lib/categories"
 import { Clapperboard, Zap, Music } from "lucide-react"
 
 // Navigation 内用 useSearchParams 读 ?category=xxx 高亮分类；
@@ -31,8 +33,8 @@ function NavigationContent() {
   const searchParams = useSearchParams()
   const { user, signOut, isAdmin } = useSimpleAuth()
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
-  // 退场动画需要在关闭后短暂保留挂载，由 onAnimationEnd 真正卸载
-  const [mobileMenuRender, setMobileMenuRender] = useState(false)
+  // 分类卡片在浮层内展开二级分类
+  const [catExpanded, setCatExpanded] = useState(false)
   const [mounted, setMounted] = useState(false)
   const [isNavVisible, setIsNavVisible] = useState(true)
   // lastScrollY 只在滚动 handler 内做比较，不参与渲染，用 ref 避免 set 触发
@@ -48,16 +50,11 @@ function NavigationContent() {
   const { cinemaMode, toggleCinemaMode: ctxToggleCinemaMode } = useCinemaMode()
   // 用户头像
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
-  
+
   // 确保组件在客户端渲染
   useEffect(() => {
     setMounted(true)
   }, [])
-
-  // 开菜单即挂载；关菜单时保持挂载，等退场动画结束后再卸载（见 onAnimationEnd）
-  useEffect(() => {
-    if (isMobileMenuOpen) setMobileMenuRender(true)
-  }, [isMobileMenuOpen])
 
   // 获取用户头像
   useEffect(() => {
@@ -103,11 +100,26 @@ function NavigationContent() {
     ctxToggleCinemaMode()
   }
 
+  // 关闭移动端浮层菜单（同时收起二级分类）
+  const closeMobileMenu = () => {
+    setIsMobileMenuOpen(false)
+    setCatExpanded(false)
+  }
+
+  // 选择分类：更新 URL query 后关闭菜单（逻辑与桌面端 CategoryMenu 保持一致）
+  const selectCategory = (value: string | null) => {
+    const url = new URL(window.location.href)
+    if (value) url.searchParams.set("category", value)
+    else url.searchParams.delete("category")
+    router.push(`/${url.search}${url.hash}`)
+    closeMobileMenu()
+  }
+
   // 处理登出
   const handleSignOut = async () => {
     try {
       console.log('Navigation: 开始登出流程')
-      
+
       // 先清除本地存储数据
       if (typeof window !== 'undefined') {
         const authKeys = [
@@ -124,20 +136,20 @@ function NavigationContent() {
           }
         })
       }
-      
+
       // 执行Supabase登出
       await signOut()
-      
+
       // 延迟一下确保状态更新
       await new Promise(resolve => setTimeout(resolve, 500))
-      
+
       console.log('Navigation: 登出成功，刷新页面')
-      
+
       // 强制刷新页面，确保状态完全重置
       window.location.href = '/?logout=' + Date.now()
     } catch (error) {
       console.error('Navigation: 登出失败:', error)
-      
+
       // 出错时也强制刷新页面
       window.location.href = '/?logout_error=true'
     }
@@ -196,6 +208,33 @@ function NavigationContent() {
         </div>
       </header>
     )
+  }
+
+  // 移动端浮层菜单的卡片配置（galgame 卡片网格）。
+  // 绿卡=站内导航，粉卡=ACG 功能（弹幕墙/影院/音乐）。
+  const actionCards: {
+    key: string
+    icon: ReactNode
+    zh: string
+    en: string
+    tone: "lime" | "pink"
+    active: boolean
+    onClick: () => void
+  }[] = [
+    { key: "home", icon: <Home className="h-5 w-5" />, zh: "首页", en: "HOME", tone: "lime", active: pathname === "/", onClick: () => { router.push("/"); closeMobileMenu() } },
+    { key: "live", icon: <Zap className="h-5 w-5" />, zh: "弹幕墙", en: "DANMAKU", tone: "pink", active: pathname === "/live", onClick: () => { router.push("/live"); closeMobileMenu() } },
+    { key: "cinema", icon: <Clapperboard className="h-5 w-5" />, zh: cinemaMode ? "退出影院" : "影院模式", en: "CINEMA", tone: "pink", active: cinemaMode, onClick: () => { toggleCinemaMode(); closeMobileMenu() } },
+    { key: "music", icon: <Music className="h-5 w-5" />, zh: "音乐", en: "MUSIC", tone: "pink", active: pathname === "/music", onClick: () => { router.push("/music"); closeMobileMenu() } },
+  ]
+  if (user) {
+    actionCards.push({ key: "profile", icon: <User className="h-5 w-5" />, zh: "个人中心", en: "PROFILE", tone: "lime", active: pathname === "/profile", onClick: () => { router.push("/profile"); closeMobileMenu() } })
+  }
+  if (isAdmin) {
+    actionCards.push({ key: "admin", icon: <Settings className="h-5 w-5" />, zh: "管理", en: "ADMIN", tone: "lime", active: pathname === "/admin", onClick: () => { router.push("/admin"); closeMobileMenu() } })
+  }
+  if (!user) {
+    actionCards.push({ key: "login", icon: <LogIn className="h-5 w-5" />, zh: "登录", en: "LOGIN", tone: "lime", active: false, onClick: () => { router.push("/login"); closeMobileMenu() } })
+    actionCards.push({ key: "register", icon: <UserPlus className="h-5 w-5" />, zh: "注册", en: "REGISTER", tone: "lime", active: false, onClick: () => { router.push("/register"); closeMobileMenu() } })
   }
 
   return (
@@ -368,7 +407,7 @@ function NavigationContent() {
               variant="ghost"
               size="icon"
               className="md:hidden ml-2"
-              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+              onClick={() => (isMobileMenuOpen ? closeMobileMenu() : setIsMobileMenuOpen(true))}
             >
               {isMobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
             </Button>
@@ -376,141 +415,203 @@ function NavigationContent() {
         </div>
       </div>
 
-      {/* 移动端菜单 */}
-      {mobileMenuRender && (
-        <div className="absolute top-full left-0 right-0 mt-2 md:hidden">
-          <div
-            className="mobile-nav-bounce bg-black/30 backdrop-blur-lg border border-white/10 rounded-2xl mx-0 shadow-lg"
-            data-state={isMobileMenuOpen ? "open" : "closed"}
-            // 退场动画播完再卸载；用 target===currentTarget 过滤子元素冒泡上来的 animationend
-            onAnimationEnd={(e) => {
-              if (e.target === e.currentTarget && !isMobileMenuOpen) {
-                setMobileMenuRender(false)
-              }
-            }}
-          >
-            <div className="px-6 py-4">
-              <nav className="flex flex-col space-y-2">
-                <Link
-                  href="/"
-                  className={cn(
-                    "px-4 py-3 text-sm font-medium rounded-xl transition-all duration-200",
-                    pathname === "/"
-                      ? "bg-lime-400/20 text-lime-400 shadow-lg"
-                      : "text-gray-300 hover:text-lime-400 hover:bg-white/10",
-                  )}
-                  onClick={() => setIsMobileMenuOpen(false)}
-                >
-                  首页
-                </Link>
+      {/* 移动端菜单：全屏居中霓虹卡片浮层（galgame CG 鉴赏室风格）。
+          通过 portal 渲染到 body，避免被导航栏 backdrop-filter 祖先容器限制采样范围。
+          只有 scrim 做背景模糊，卡片自身不再叠加 backdrop-filter，降低低端机渲染压力。 */}
+      {createPortal(
+        <AnimatePresence>
+          {isMobileMenuOpen && (
+            <motion.div
+              className="fixed inset-0 z-[55] md:hidden"
+              initial={{ opacity: 1 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.25 }}
+            >
+              {/* 暗化 + 模糊背景，点击关闭。纯 CSS 淡入，退场随整体淡出。 */}
+              <div
+                className="menu-scrim-in absolute inset-0 bg-black/55 backdrop-blur-md"
+                onClick={closeMobileMenu}
+              />
 
-                {/* 分类（移动端） */}
-                <div className="px-1">
-                  <CategoryMenu activeCategory={activeCategory} compact />
+              {/* 居中卡片面板：可滚动容器，点空白处（容器本身）关闭；内容用 m-auto 居中，
+                  内容超高时也能滚动、顶部不会被 flex 裁切。 */}
+              <div
+                className="absolute inset-0 flex overflow-y-auto px-5 py-16"
+                onClick={(e) => {
+                  if (e.target === e.currentTarget) closeMobileMenu()
+                }}
+              >
+                <div className="m-auto w-full">
+                <div className="menu-title-in mb-5 text-center text-[11px] tracking-[0.4em] text-white/40">
+                  夜幕渐暗 · 萤火微光
                 </div>
 
-                {/* 弹幕墙（移动端） */}
-                <Link
-                  href="/live"
-                  className={cn(
-                    "flex items-center px-4 py-3 text-sm font-medium rounded-xl transition-all duration-200",
-                    pathname === "/live"
-                      ? "bg-pink-400/20 text-pink-300 shadow-lg"
-                      : "text-gray-300 hover:text-pink-300 hover:bg-white/10",
-                  )}
-                  onClick={() => setIsMobileMenuOpen(false)}
-                >
-                  <Zap className="mr-2 h-4 w-4" />
-                  弹幕墙
-                </Link>
+                <div className="grid grid-cols-2 gap-3">
+                  {actionCards.map((c, i) => (
+                    <MenuCard
+                      key={c.key}
+                      icon={c.icon}
+                      zh={c.zh}
+                      en={c.en}
+                      tone={c.tone}
+                      active={c.active}
+                      // 数量为奇数时最后一张横跨整行，避免末尾落单留白
+                      wide={actionCards.length % 2 === 1 && i === actionCards.length - 1}
+                      delay={0.08 + i * 0.05}
+                      onClick={c.onClick}
+                    />
+                  ))}
 
-                {/* 影院模式（移动端） — 复用桌面端的 toggleCinemaMode：
-                    不在首页则跳 /?cinema=1，在首页则切换 context */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    toggleCinemaMode()
-                    setIsMobileMenuOpen(false)
-                  }}
-                  className={cn(
-                    "flex items-center px-4 py-3 text-sm font-medium rounded-xl transition-all duration-200 text-left",
-                    cinemaMode
-                      ? "bg-pink-400/20 text-pink-400 shadow-lg"
-                      : "text-gray-300 hover:text-pink-400 hover:bg-white/10",
-                  )}
-                >
-                  <Clapperboard className="mr-2 h-4 w-4" />
-                  {cinemaMode ? "退出影院模式" : "影院模式"}
-                </button>
+                  {/* 分类：整行宽卡，点开在下方内联展开二级分类 */}
+                  <MenuCard
+                    icon={<Layers className="h-5 w-5" />}
+                    zh="分类"
+                    en="CATEGORY"
+                    tone="lime"
+                    active={!!activeCategory}
+                    wide
+                    showChevron
+                    chevronOpen={catExpanded}
+                    delay={0.08 + actionCards.length * 0.05}
+                    onClick={() => setCatExpanded((v) => !v)}
+                  />
 
-                {/* 音乐（移动端） */}
-                <Link
-                  href="/music"
-                  className={cn(
-                    "flex items-center px-4 py-3 text-sm font-medium rounded-xl transition-all duration-200",
-                    pathname === "/music"
-                      ? "bg-pink-400/20 text-pink-300 shadow-lg"
-                      : "text-gray-300 hover:text-pink-300 hover:bg-white/10",
-                  )}
-                  onClick={() => setIsMobileMenuOpen(false)}
-                >
-                  <Music className="mr-2 h-4 w-4" />
-                  音乐
-                </Link>
-
-                {isAdmin && (
-                  <Link
-                    href="/admin"
-                    className={cn(
-                      "px-4 py-3 text-sm font-medium rounded-xl transition-all duration-200",
-                      pathname === "/admin"
-                        ? "bg-lime-400/20 text-lime-400 shadow-lg"
-                        : "text-gray-300 hover:text-lime-400 hover:bg-white/10",
+                  <AnimatePresence initial={false}>
+                    {catExpanded && (
+                      <motion.div
+                        className="pointer-events-auto col-span-2 overflow-hidden"
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: "auto" }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.28, ease: [0.22, 0.7, 0.18, 1] }}
+                      >
+                        <div className="grid grid-cols-4 gap-2 pt-1">
+                          <CatChip glyph="✱" label="全部" active={!activeCategory} onClick={() => selectCategory(null)} />
+                          {CATEGORIES.map((cat) => (
+                            <CatChip
+                              key={cat.value}
+                              glyph={cat.glyph}
+                              label={cat.label}
+                              active={activeCategory === cat.value}
+                              onClick={() => selectCategory(cat.value)}
+                            />
+                          ))}
+                        </div>
+                      </motion.div>
                     )}
-                    onClick={() => setIsMobileMenuOpen(false)}
-                  >
-                    管理
-                  </Link>
-                )}
-                {user && (
-                  <Link
-                    href="/profile"
-                    className={cn(
-                      "px-4 py-3 text-sm font-medium rounded-xl transition-all duration-200",
-                      pathname === "/profile"
-                        ? "bg-lime-400/20 text-lime-400 shadow-lg"
-                        : "text-gray-300 hover:text-lime-400 hover:bg-white/10",
-                    )}
-                    onClick={() => setIsMobileMenuOpen(false)}
-                  >
-                    个人中心
-                  </Link>
-                )}
-                
-                {!user && (
-                  <>
-                    <Link
-                      href="/login"
-                      className="px-4 py-3 text-sm font-medium rounded-xl text-gray-300 hover:text-lime-400 hover:bg-white/10 transition-all duration-200"
-                      onClick={() => setIsMobileMenuOpen(false)}
-                    >
-                      登录
-                    </Link>
-                    <Link
-                      href="/register"
-                      className="px-4 py-3 text-sm font-medium rounded-xl text-lime-400 bg-lime-400/20 hover:bg-lime-400/30 shadow-lg transition-all duration-200"
-                      onClick={() => setIsMobileMenuOpen(false)}
-                    >
-                      注册
-                    </Link>
-                  </>
-                )}
-              </nav>
-            </div>
-          </div>
-        </div>
+                  </AnimatePresence>
+                </div>
+                </div>
+              </div>
+
+              {/* 关闭按钮：放在面板容器之后，确保始终在最上层可点 */}
+              <button
+                onClick={closeMobileMenu}
+                aria-label="关闭菜单"
+                className="menu-scrim-in absolute top-6 right-6 z-10 flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/[0.06] text-white/70 transition-transform active:scale-90"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>,
+        document.body
       )}
     </header>
+  )
+}
+
+function MenuCard({
+  icon,
+  zh,
+  en,
+  tone,
+  active,
+  wide = false,
+  showChevron = false,
+  chevronOpen = false,
+  delay = 0,
+  onClick,
+}: {
+  icon: ReactNode
+  zh: string
+  en: string
+  tone: "lime" | "pink"
+  active: boolean
+  wide?: boolean
+  showChevron?: boolean
+  chevronOpen?: boolean
+  delay?: number
+  onClick: () => void
+}) {
+  // 外层 wrapper 负责入场动画（纯 CSS transform/opacity，走合成器、丝滑）；
+  // 内层 button 负责样式与按下缩放。二者分离，避免 animation 的 fill 值覆盖 :active 的 transform。
+  return (
+    <div className={cn("menu-card-pop", wide && "col-span-2")} style={{ animationDelay: `${delay}s` }}>
+      <button
+        onClick={onClick}
+        className={cn(
+          "relative flex h-full min-h-[100px] w-full flex-col gap-2 overflow-hidden rounded-2xl border p-4 text-left transition-transform active:scale-[0.97]",
+          wide && "min-h-0 flex-row items-center gap-3",
+          active
+            ? tone === "pink"
+              ? "border-pink-400/50 bg-pink-400/[0.08] shadow-[0_0_30px_rgba(244,114,182,0.18)]"
+              : "border-lime-400/50 bg-lime-400/[0.08] shadow-[0_0_30px_rgba(163,230,53,0.18)]"
+            : "border-white/10 bg-white/[0.05]",
+        )}
+      >
+        <span
+          className={cn(
+            "flex h-6 w-6 items-center justify-center",
+            tone === "pink" ? (active ? "text-pink-400" : "text-pink-300") : "text-lime-400",
+          )}
+        >
+          {icon}
+        </span>
+        <div className={cn("flex flex-col", wide ? "flex-1" : "mt-auto")}>
+          <span
+            className={cn(
+              "text-base font-semibold",
+              active ? (tone === "pink" ? "text-pink-300" : "text-lime-400") : "text-white/90",
+            )}
+          >
+            {zh}
+          </span>
+          <span className="text-[9px] tracking-[0.22em] text-white/40">{en}</span>
+        </div>
+        {showChevron && (
+          <ChevronDown
+            className={cn("h-4 w-4 text-white/50 transition-transform duration-200", chevronOpen && "rotate-180")}
+          />
+        )}
+      </button>
+    </div>
+  )
+}
+
+function CatChip({
+  glyph,
+  label,
+  active,
+  onClick,
+}: {
+  glyph: string
+  label: string
+  active: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "pointer-events-auto flex flex-col items-center gap-1 rounded-xl border px-2 py-2.5 transition-colors active:scale-95",
+        active ? "border-lime-400/40 bg-lime-400/[0.12] text-lime-400" : "border-white/10 bg-white/[0.04] text-white/70",
+      )}
+    >
+      <span className="text-sm">{glyph}</span>
+      <span className="text-[11px]">{label}</span>
+    </button>
   )
 }
 

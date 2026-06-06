@@ -2226,6 +2226,33 @@ body.modal-open {
   animation: glassDropdownOut 0.15s ease-out both;
 }
 
+/* ===== 手机端 galgame 卡片菜单（方案 B）=====
+   卡片入场用纯 CSS animation（仅 transform/opacity），交给合成器/GPU，
+   避免 framer-motion 的 JS spring 在 Android WebView 里主线程逐帧计算掉帧、发涩。
+   曲线与挑选用的 demo 完全一致：cubic-bezier(0.34,1.56,0.64,1) 带回弹。 */
+@keyframes menuCardPop {
+  0% { opacity: 0; transform: scale(0.8) translateY(10px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+.menu-card-pop {
+  animation: menuCardPop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  will-change: transform, opacity;
+}
+@keyframes menuFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.menu-scrim-in {
+  animation: menuFadeIn 0.3s ease both;
+}
+@keyframes menuTitleIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.menu-title-in {
+  animation: menuTitleIn 0.45s ease both;
+}
+
 /* 菜单项高亮态：和整体粉/绿色调协调，不使用 popover 默认色 */
 .glass-dropdown [role="menuitem"],
 .glass-dropdown [role="menuitemcheckbox"],
