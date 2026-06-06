@@ -170,7 +170,7 @@ async function enforce(
   }
 }
 
-// 删整帖：先删子内容(评论/点赞/置顶记录)再删帖本体，避免外键无级联时报错；
+// 删整帖：先删子内容(评论/点赞)再删帖本体，避免外键无级联时报错；
 // 有图则顺带删存储图。最后通知作者。
 async function removePost(
   admin: SupabaseClient,
@@ -182,7 +182,6 @@ async function removePost(
   if (imageUrl) await deleteStorageImage(admin, imageUrl)
   await admin.from("comments").delete().eq("post_id", postId)
   await admin.from("likes").delete().eq("post_id", postId)
-  await admin.from("pinned_posts").delete().eq("post_id", postId)
   const { error } = await admin.from("posts").delete().eq("id", postId)
   if (error) console.error("[moderate-text] 删帖失败:", error)
   if (NOTIFY_POST) await notifyUser(admin, userId, MSG_POST_REMOVED)

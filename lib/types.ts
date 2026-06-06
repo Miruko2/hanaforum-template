@@ -16,7 +16,6 @@ export interface Post {
   username?: string // 用于显示，从关联查询中获取
   imageContent?: string // 用于UI显示，当没有图片时
   users?: UserRecord; // 添加 users 属性，匹配 join 返回的结构
-  isPinned?: boolean // 标记是否为置顶帖子
 }
 
 // 用户记录接口

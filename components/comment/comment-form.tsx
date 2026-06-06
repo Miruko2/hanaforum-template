@@ -18,8 +18,6 @@ interface CommentFormProps {
   isReply?: boolean
   replyingTo?: string
   optimized?: boolean // 是否使用优化模式
-  isPinned?: boolean  // 是否是置顶帖子
-  isAdmin?: boolean   // 当前用户是否是管理员
 }
 
 export default function CommentForm({
@@ -30,16 +28,11 @@ export default function CommentForm({
   isReply = false,
   replyingTo,
   optimized = false,
-  isPinned = false,
-  isAdmin = false,
 }: CommentFormProps) {
   const [content, setContent] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const { user } = useSimpleAuth()
   const { toast } = useToast()
-
-  // 判断是否可以评论
-  const canComment = !isPinned || isAdmin
 
   // 处理评论提交 - 静态导出环境优化版本
   const handleSubmit = useCallback(
@@ -55,16 +48,6 @@ export default function CommentForm({
         return
       }
       
-      // 检查是否有权限在置顶帖子中评论
-      if (isPinned && !isAdmin) {
-        toast({
-          title: "无权限评论",
-          description: "置顶帖子仅管理员可评论",
-          variant: "destructive",
-        })
-        return
-      }
-
       if (!content.trim()) {
         toast({
           title: "评论内容不能为空",
@@ -161,7 +144,7 @@ export default function CommentForm({
         setIsSubmitting(false)
       }
     },
-    [user, content, postId, parentId, isReply, onCommentAdded, onCancel, toast, optimized, isPinned, isAdmin],
+    [user, content, postId, parentId, isReply, onCommentAdded, onCancel, toast, optimized],
   )
 
   return (

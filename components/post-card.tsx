@@ -53,7 +53,6 @@ interface PostCardProps {
   userLiked?: boolean
   useWideTemplate?: boolean
   className?: string
-  showPinnedBadge?: boolean
 }
 
 // 使用memo包装整个组件以减少不必要的重渲染
@@ -67,7 +66,6 @@ const PostCard = memo(function PostCard({
   userLiked,
   useWideTemplate = false,
   className = "",
-  showPinnedBadge = true
 }: PostCardProps) {
   const [isHovered, setIsHovered] = useState(false)
   const [liked, setLiked] = useState(userLiked || false)
@@ -325,14 +323,11 @@ const PostCard = memo(function PostCard({
     
     // 根据模板类型选择不同的样式
     const templateClass = useWideTemplate ? 'wide-template' : 'tall-template';
-    
-    // 添加置顶帖子特殊样式
-    const pinnedClass = post.isPinned ? 'pinned-post' : '';
-    
+
     return (
       <div
         ref={cardRef}
-        className={`post-card glass-card will-change-transform ${marginBottomClass} ${templateClass} ${pinnedClass} ${className}`}
+        className={`post-card glass-card will-change-transform ${marginBottomClass} ${templateClass} ${className}`}
         onClick={handleCardClick}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
@@ -351,13 +346,6 @@ const PostCard = memo(function PostCard({
           } : {})
         }}
       >
-        {/* 置顶标记 - 如果帖子被置顶且需要显示标记 */}
-        {post.isPinned && showPinnedBadge && (
-          <div className="absolute top-2 left-0 z-20 bg-red-500 text-white px-2 py-0.5 rounded-r-md text-xs font-medium shadow-md flex items-center">
-            <PinIcon className="h-3 w-3 mr-1" /> 置顶
-          </div>
-        )}
-        
         {/* 管理员标识和菜单 */}
         {isAdmin && (
           <div className="absolute top-2 left-2 z-10 bg-red-500/30 backdrop-blur-md text-white text-xs px-2 py-1 rounded-md flex items-center gap-1">
@@ -517,26 +505,5 @@ const PostCard = memo(function PostCard({
     </>
   )
 })
-
-// 小型Pin图标组件
-function PinIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg
-      {...props}
-      xmlns="http://www.w3.org/2000/svg"
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <line x1="12" y1="17" x2="12" y2="22" />
-      <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z" />
-    </svg>
-  );
-}
 
 export default PostCard

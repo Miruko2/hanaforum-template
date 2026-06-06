@@ -1660,29 +1660,6 @@ body.modal-open {
   }
 }
 
-/* 置顶帖子特殊样式 */
-.pinned-post {
-  box-shadow: 0 0 0 1px rgba(255, 59, 48, 0.2), 0 8px 20px rgba(0, 0, 0, 0.2) !important;
-  border: 1px solid rgba(255, 59, 48, 0.3) !important;
-  /* 背景由内部 .glass-card 控制，此处不覆盖 */
-  z-index: 10 !important;
-}
-
-.pinned-post .image-container::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background: linear-gradient(to right, rgba(255, 59, 48, 0.7), rgba(255, 59, 48, 0.3));
-  z-index: 20;
-}
-
-.pinned-post .card-title {
-  color: rgba(255, 255, 255, 0.95) !important;
-}
-
 /* 帖子卡片在虚拟列表中的容器样式 */
 .post-card-container {
   width: 100%;

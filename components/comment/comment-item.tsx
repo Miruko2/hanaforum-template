@@ -29,7 +29,6 @@ export interface CommentItemProps {
   onCommentDeleted?: (commentId: string) => void
   level?: number
   isOptimistic?: boolean
-  isPinned?: boolean  // 是否是置顶帖子
   isAdmin?: boolean   // 当前用户是否是管理员
 }
 
@@ -40,7 +39,6 @@ export default function CommentItem({
   onCommentDeleted,
   level = 0,
   isOptimistic = false,
-  isPinned = false,
   isAdmin = false
 }: CommentItemProps) {
   const [showReplyForm, setShowReplyForm] = useState(false)
@@ -59,8 +57,8 @@ export default function CommentItem({
   // 最大嵌套层级
   const MAX_NESTING_LEVEL = 3
 
-  // 限制嵌套回复层级并检查置顶帖子权限
-  const canReply = level < MAX_NESTING_LEVEL && (!isPinned || isAdmin)
+  // 限制嵌套回复层级
+  const canReply = level < MAX_NESTING_LEVEL
 
   // 获取用户名首字母作为头像备用显示
   const getInitial = (username?: string) => {
@@ -253,8 +251,6 @@ export default function CommentItem({
                   if (onCommentAdded) onCommentAdded(newReply)
                 }}
                 onCancel={() => setShowReplyForm(false)}
-                isPinned={isPinned}
-                isAdmin={isAdmin}
               />
             </div>
           )}
@@ -270,7 +266,6 @@ export default function CommentItem({
                   onCommentAdded={onCommentAdded}
                   onCommentDeleted={onCommentDeleted}
                   level={level + 1}
-                  isPinned={isPinned}
                   isAdmin={isAdmin}
                 />
               ))}

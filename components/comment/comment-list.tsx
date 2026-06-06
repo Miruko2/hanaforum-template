@@ -14,7 +14,6 @@ import { useRouter } from "next/navigation"
 interface CommentListProps {
   postId: string
   onCommentAdded?: () => void
-  isPinned?: boolean  // 是否是置顶帖子
   isAdmin?: boolean   // 当前用户是否是管理员
 }
 
@@ -36,11 +35,10 @@ function removeCommentById(list: Comment[], commentId: string): Comment[] {
     )
 }
 
-export default function CommentList({ 
-  postId, 
+export default function CommentList({
+  postId,
   onCommentAdded,
-  isPinned = false,
-  isAdmin = false 
+  isAdmin = false
 }: CommentListProps) {
   const [comments, setComments] = useState<Comment[]>([])
   const [optimisticComments, setOptimisticComments] = useState<OptimisticComment[]>([])
@@ -53,9 +51,6 @@ export default function CommentList({
   const fetchIdRef = useRef(0)
   const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   
-  // 判断当前用户是否可以评论
-  const canComment = !isPinned || isAdmin
-
   // 获取评论数据
   const fetchComments = useCallback(async (showLoading = true) => {
     const fetchId = ++fetchIdRef.current
@@ -383,23 +378,12 @@ export default function CommentList({
       </div>
 
       {/* 评论表单 */}
-      {canComment && user ? (
-        <CommentForm 
-          postId={postId} 
-          onCommentAdded={handleCommentAdded} 
+      {user ? (
+        <CommentForm
+          postId={postId}
+          onCommentAdded={handleCommentAdded}
           optimized={true}
-          isPinned={isPinned}
-          isAdmin={isAdmin}
         />
-      ) : user ? (
-        // 用户已登录但不能评论（置顶帖子且非管理员）
-        isPinned && !isAdmin ? (
-          <div className="bg-black/30 p-4 rounded-md mt-4 border border-red-500/30">
-            <p className="text-center text-sm text-gray-300">
-              <span className="text-red-400">置顶帖子仅管理员可评论</span>
-            </p>
-          </div>
-        ) : null
       ) : (
         <div className="flex flex-col items-center justify-center py-4 space-y-2">
           <p className="text-sm text-gray-400">登录后才能发表评论</p>
@@ -447,7 +431,6 @@ export default function CommentList({
                 onCommentAdded={handleCommentAdded}
                 onCommentDeleted={handleCommentDeleted}
                 isOptimistic={true}
-                isPinned={isPinned}
                 isAdmin={isAdmin}
               />
             ))}
@@ -460,7 +443,6 @@ export default function CommentList({
                 postId={postId}
                 onCommentAdded={handleCommentAdded}
                 onCommentDeleted={handleCommentDeleted}
-                isPinned={isPinned}
                 isAdmin={isAdmin}
               />
             ))}

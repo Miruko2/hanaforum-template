@@ -57,8 +57,7 @@ const PostItem = memo(function PostItem({
     rootMargin: "100px 0px",
   })
 
-  // 置顶帖子永远保持可见态，不随滚动重播
-  const visible = post.isPinned || inView
+  const visible = inView
 
   return (
     <div
@@ -188,7 +187,7 @@ export default function VirtualPostList({
           if (!post || !post.id) return null
           return (
             <PostItem
-              key={post.isPinned ? `pinned-${post.id}` : post.id}
+              key={post.id}
               post={post}
               isActive={currentActivePostId === post.id}
               onClick={() => handlePostClick(post.id)}

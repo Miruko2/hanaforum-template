@@ -2,7 +2,7 @@
 
 import { createContext, useReducer, useContext, ReactNode, useEffect, useState } from 'react'
 import type { Post } from '@/lib/types'
-import { getPostsWithPinned } from '@/lib/supabase-optimized'
+import { getPostsPaginated } from '@/lib/supabase-optimized'
 import { supabase } from '@/lib/supabaseClient'
 import { useSimpleAuth } from '@/contexts/auth-context-simple'
 
@@ -193,8 +193,8 @@ export function PostsProvider({ children }: { children: ReactNode }) {
         return;
       }
       
-      // 获取新数据，包含置顶帖子（按分类过滤）
-      const fetchedPosts = await getPostsWithPinned(0, PAGE_SIZE, currentCategory);
+      // 获取新数据（按分类过滤）
+      const fetchedPosts = await getPostsPaginated(0, PAGE_SIZE, currentCategory);
       
       // 检查是否获取到了帖子
       if (fetchedPosts.length === 0 && !loadingFailed && retryCount < MAX_RETRIES) {
@@ -287,7 +287,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
     await loadPosts();
   }
   
-  // 加载更多帖子 - 支持分页，包含置顶帖子处理
+  // 加载更多帖子 - 支持分页
   const loadMorePosts = async (page: number, limit: number) => {
     if (state.isLoading || !state.hasMore) return;
     
@@ -302,7 +302,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
       const cacheKey = catKey(currentCategory);
       
       console.debug(`📄 加载第${pageToLoad}页帖子，每页${pageSize}条，分类=${currentCategory ?? '全部'}`);
-      const morePosts = await getPostsWithPinned(pageToLoad, pageSize, currentCategory);
+      const morePosts = await getPostsPaginated(pageToLoad, pageSize, currentCategory);
       if (morePosts.length === 0) {
         dispatch({ type: 'SET_HAS_MORE', payload: false });
         return;
