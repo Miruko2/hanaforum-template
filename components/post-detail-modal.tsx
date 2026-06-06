@@ -72,8 +72,9 @@ export default function PostDetailModal({
   // 会淡入的容器之外、全程 opacity:1，所以图是「实体平移放大」而非淡入。纯 transform，
   // 合成器友好、安卓也顺。POC 仅桌面横版启用；竖版（手机）暂走淡入。
   const heroRef = useRef<HTMLDivElement>(null)
-  // 这次打开是否走 hero：桌面横版 + 有图 + 拿到了源矩形与源图 URL
-  const heroActive = useHorizontalLayout && !!post.image_url && !!sourceRect && !!sourceSrc
+  // 这次打开是否走 hero（桌面横版 + 手机竖版都走）：有图 + 拿到源矩形与源图 URL。
+  // flyTarget（详情图区）由 heroRef 测量：横版 = 左侧图片列，竖版 = 顶部图片区（同一 ref）。
+  const heroActive = !!post.image_url && !!sourceRect && !!sourceSrc
   // 关闭回飞的落点：优先图片区矩形（与源卡图片像素重合、不跳变），回退整卡矩形
   const flyBackTarget = sourceImgRect ?? sourceRect
   // 飞行图飞到目标后置 true → 显示详情真实图、移除飞行图
@@ -84,6 +85,7 @@ export default function PostDetailModal({
   const [closing, setClosing] = useState(false)
   // 回飞落地只触发一次真正 onClose；exit（淡出揭幕）阶段的 onAnimationComplete 不重复触发
   const closedRef = useRef(false)
+
   useLayoutEffect(() => {
     if (!isOpen) {
       // 关闭时复位，供下次打开重新计算
@@ -104,13 +106,18 @@ export default function PostDetailModal({
   // 回飞条件：本次走 hero、已飞到位（flyDone）、且拿到起止矩形与图源。
   // 飞到位后由回飞元素的 onAnimationComplete 调用真正的 onClose。
   const handleClose = useCallback(() => {
-    if (heroActive && flyDone && flyTarget && sourceRect && sourceSrc) {
+    // 桌面：飞入克隆已飞到位（flyDone）才回飞；手机：飞入是普通淡入（无 flyDone），
+    // 只要量到了起止矩形与图源就回飞（飞回动效手机也保留）。
+    const canFlyBack = isMobile
+      ? !!(heroActive && flyTarget && flyBackTarget && sourceSrc)
+      : !!(heroActive && flyDone && flyTarget && sourceRect && sourceSrc)
+    if (canFlyBack) {
       closedRef.current = false
       setClosing(true)
     } else {
       onClose()
     }
-  }, [heroActive, flyDone, flyTarget, sourceRect, sourceSrc, onClose])
+  }, [isMobile, heroActive, flyDone, flyTarget, flyBackTarget, sourceRect, sourceSrc, onClose])
 
   // 点击图片：立即打开灯箱，不再阻塞等待原图下载完。原图的加载/解码与弹入时序
   // 由 ImageLightbox 内部处理（先 loading 后弹入），既消除「点了要等一会才出现」，
@@ -272,20 +279,24 @@ export default function PostDetailModal({
         </div>
       </motion.div>
 
-      {/* Comments */}
-      <motion.div
-        className="mt-6"
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, delay: 0.7 }}
-      >
-        <CommentList
-          postId={post.id}
-          onCommentAdded={onCommentAdded}
-          isPinned={post.isPinned}
-          isAdmin={isAdmin}
-        />
-      </motion.div>
+      {/* Comments：仅桌面 hero 飞入期间先不挂载 —— CommentList 会拉取评论 + 建实时订阅，是开场
+          最重的主线程活儿，会和飞入克隆抢主线程；等飞入到位（flyDone）再挂载。
+          手机飞入是普通淡入、无克隆，正常挂载；无 hero 时也正常挂载。 */}
+      {(isMobile || !heroActive || flyDone) && (
+        <motion.div
+          className="mt-6"
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4 }}
+        >
+          <CommentList
+            postId={post.id}
+            onCommentAdded={onCommentAdded}
+            isPinned={post.isPinned}
+            isAdmin={isAdmin}
+          />
+        </motion.div>
+      )}
     </>
   )
 
@@ -331,7 +342,9 @@ export default function PostDetailModal({
             initial={{ opacity: 0 }}
             animate={{ opacity: closing ? 0 : 1 }}
             exit={{ opacity: 0, transition: { duration: 0.18, ease: "easeOut" } }}
-            transition={{ duration: 0.28, ease: "easeOut" }}
+            // 关闭回飞时整框（含底部内容区）用更长的 0.7s 明显「逐渐淡出」，跟飞回节奏走，
+            // 避免内容区一下子消失；打开仍 0.28s 淡入。
+            transition={closing ? { duration: 0.7, ease: "easeOut" } : { duration: 0.28, ease: "easeOut" }}
             // 手机端缩到 82vh，让模态框周围露出一圈背景（不再"贴满全屏"），
             // 视觉上更像浮起来的卡片；PC 横版维持 90vh 不变
             style={{ maxHeight: isMobile ? "82vh" : "90vh", zIndex: 41 }}
@@ -413,7 +426,8 @@ export default function PostDetailModal({
                           className="h-full w-full transition-transform duration-500 ease-out group-hover:scale-[1.06]"
                           // hero 飞行期间隐藏真实图，避免和飞行图重叠；飞到位（flyDone）后显示。
                           // 回飞（closing）时同样隐藏，交给回飞图，避免详情图与回飞图重叠。
-                          style={{ opacity: heroActive && (!flyDone || closing) ? 0 : 1 }}
+                          // flyTarget 没量到时不隐藏 → 兜底直接显示真实图，避免「空框先出现」。
+                          style={{ opacity: heroActive && flyTarget && (!flyDone || closing) ? 0 : 1 }}
                         >
                           <PostCardImage
                             post={post}
@@ -437,13 +451,19 @@ export default function PostDetailModal({
               ) : (
                 /* 竖版：图/文字Hero 在上，文字评论在下（手机端） */
                 <div className="relative flex flex-col">
-                  <div className="relative w-full overflow-hidden">
+                  <div ref={heroRef} className="relative w-full overflow-hidden">
                     {post.image_url ? (
                       <div
                         className="group relative overflow-hidden rounded-t-md"
                         onClick={handleOpenLightbox}
                       >
-                        <div className="transition-transform duration-500 ease-out group-hover:scale-[1.06]">
+                        <div
+                          className="transition-transform duration-500 ease-out group-hover:scale-[1.06]"
+                          // 竖版（手机）：飞入期间「不」隐藏真实图 —— 详情图是缓存、秒出，作为「目的地兜底」
+                          // 始终有图，即便飞行图在手机上偶尔来不及绘制，目的地也绝不空白；飞行图在其上飞入、
+                          // 到位即交接。仅在「回飞（closing）」时隐藏真实图，让回飞图独自飞走、不留重影。
+                          style={{ opacity: heroActive && closing ? 0 : 1 }}
+                        >
                           <PostCardImage
                             post={post}
                             isMobile={isMobile}
@@ -523,7 +543,7 @@ export default function PostDetailModal({
 
       {/* hero 飞行图：独立于上面会淡入的容器，全程 opacity:1 实体飞入；飞到位后交接给真实图 */}
       <AnimatePresence>
-        {isOpen && heroActive && !flyDone && flyTarget && sourceRect && sourceSrc && (
+        {isOpen && !isMobile && heroActive && !flyDone && flyTarget && sourceRect && sourceSrc && (
           <motion.div
             key="hero-fly"
             className="fixed z-[50] overflow-hidden pointer-events-none select-none bg-black/20"
@@ -549,11 +569,13 @@ export default function PostDetailModal({
             transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
             onAnimationComplete={() => setFlyDone(true)}
           >
-            {/* 整个帖子元素一起飞：图填满 */}
+            {/* 整个帖子元素一起飞：图填满。decoding=sync：缓存图同步解码，确保飞行
+                第一帧就有图，避免开场主线程繁忙时「空框飞入」。 */}
             <img
               src={sourceSrc}
               alt=""
               draggable={false}
+              decoding="sync"
               className="absolute inset-0 h-full w-full object-cover"
             />
             {/* 底部信息条：飞行中淡出 → 呼应「整卡移动后底部组件消失、主要放大图片」 */}
@@ -589,7 +611,8 @@ export default function PostDetailModal({
             }}
             // 飞回用缓入缓出（easeInOutCubic）：轻起 → 加速 → 轻落，收拢有重量感、不会
             // 开头猛缩，尾速趋近 0 → 落回图片区更稳。时长 0.6s 与飞入呼应。
-            transition={{ duration: 0.6, ease: [0.65, 0, 0.35, 1] }}
+            // delay 0.12s：让底部内容区先开始渐隐，图片再起飞 → 呼应「飞回之前底部逐渐消失」。
+            transition={{ duration: 0.6, ease: [0.65, 0, 0.35, 1], delay: 0.12 }}
             // 落点 = 源卡图片区（flyBackTarget）：图片在那里 object-cover 的裁剪与源卡图片
             // 完全一致 → 像素级无缝。落地即真正关闭：onClose 让父级 isActive=false（源卡整卡
             // 显形 —— 图片区被回飞图无缝接管、不跳变，下方内容区由 PostCard 做浮现入场）、

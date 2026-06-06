@@ -126,10 +126,10 @@ const PostCard = memo(function PostCard({
   useIsomorphicLayoutEffect(() => {
     const wasActive = prevActiveRef.current
     prevActiveRef.current = isActive
-    if (wasActive && !isActive && !isMobile && sourceSrc) {
+    if (wasActive && !isActive && sourceSrc) {
       setHeroReturn(true)
     }
-  }, [isActive, isMobile, sourceSrc])
+  }, [isActive, sourceSrc])
 
   // 保存打开模态框前的滚动位置
   const savedScrollYRef = useRef(0);
@@ -339,12 +339,12 @@ const PostCard = memo(function PostCard({
         style={{
           position: 'relative',
           zIndex: 1,
-          // hero 转场期间（桌面 + 本卡打开 + 本卡有图 → 才会走飞行转场）隐藏本卡，视觉上
-          // 「整个帖子被拿起来飞到详情中间」，避免列表残留原卡。无图帖子不隐藏（不走 hero）。
+          // hero 转场期间（本卡打开 + 本卡有图 → 才会走飞行转场，桌面/平板/手机都走）隐藏本卡，
+          // 视觉上「整个帖子被拿起来飞到详情中间」，避免列表残留原卡。无图帖子不隐藏（不走 hero）。
           // 用 visibility 而非 opacity：inline opacity 会覆盖 .post-enter 入场动画的 opacity:0
           // 「雾态」，使未进视口的缓冲区卡片提前以模糊态显形（先空玻璃卡、后加载成帖子）；
           // visibility 不参与入场动画，hero 隐藏与「雾中浮现」互不干扰。
-          visibility: !isMobile && isActive && sourceSrc ? 'hidden' : undefined,
+          visibility: isActive && sourceSrc ? 'hidden' : undefined,
           ...(useWideTemplate && isMobile ? {
             marginLeft: '-2%',
             width: '104%'
