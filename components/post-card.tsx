@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useEffect, useCallback, useRef, memo } from "react"
+import React, { useState, useEffect, useLayoutEffect, useCallback, useRef, memo } from "react"
 import { MoreVertical, MessageSquare, ThumbsUp, Trash2, X, AlertCircle, Pin } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { createPortal } from "react-dom"
@@ -39,6 +39,10 @@ import {
 import { usePosts } from "@/contexts/posts-context"
 import { Card } from "@/components/ui/card"
 
+// useLayoutEffect 在 paint 前同步执行，避免「内容区先以正常态闪现一帧、再开始入场动画」；
+// SSR 无 DOM，退回 useEffect 以消除 React 告警。
+const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect
+
 interface PostCardProps {
   post: Post
   isActive?: boolean
@@ -75,11 +79,17 @@ const PostCard = memo(function PostCard({
   const [showEditModal, setShowEditModal] = useState(false)
   // hero 转场：点击瞬间量出本卡图片的屏幕矩形，传给详情页作为放大起点
   const [sourceRect, setSourceRect] = useState<DOMRect | null>(null)
+  // hero 关闭回飞：图片区（image-container）的屏幕矩形 —— 回飞图精准落回这里，
+  // 与源卡图片像素级重合，避免「整卡全图」落到「上图下文卡」时的高度跳变。
+  const [sourceImgRect, setSourceImgRect] = useState<DOMRect | null>(null)
   // hero 转场：列表图已加载的实际 URL（飞行图用它即时显示、不闪）
   const [sourceSrc, setSourceSrc] = useState<string | null>(null)
+  // hero 关闭回飞落地后，源卡内容区（图片下方）做一次浮现入场，柔化「内容突现」
+  const [heroReturn, setHeroReturn] = useState(false)
   
   const cardRef = useRef<HTMLDivElement>(null)
   const mountedRef = useRef(true) // 跟踪组件是否已挂载
+  const prevActiveRef = useRef(isActive) // 跟踪上一次激活态，用于检测 hero 关闭返回
   const { user, isAdmin } = useSimpleAuth()
   const { toast } = useToast()
   const { deletePost } = usePosts()
@@ -107,6 +117,19 @@ const PostCard = memo(function PostCard({
       mountedRef.current = false
     }
   }, [])
+
+  // hero 关闭返回检测：isActive 由「开 → 关」、且本次走过桌面 hero（量到源图）时，
+  // 触发源卡内容区登场动画。时机正好落在回飞图落地、源卡整卡显形的那一刻。
+  // 必须用 layout effect：普通 useEffect 在 paint 之后才置 heroReturn，会先把内容区以正常态
+  // 画出来一帧（用户看到的「瞬间突兀出现」），动画形同虚设；layout effect 在 paint 前同步置位，
+  // 内容区首帧就是动画起点（opacity 0），从头渐入。
+  useIsomorphicLayoutEffect(() => {
+    const wasActive = prevActiveRef.current
+    prevActiveRef.current = isActive
+    if (wasActive && !isActive && !isMobile && sourceSrc) {
+      setHeroReturn(true)
+    }
+  }, [isActive, isMobile, sourceSrc])
 
   // 保存打开模态框前的滚动位置
   const savedScrollYRef = useRef(0);
@@ -231,8 +254,11 @@ const PostCard = memo(function PostCard({
       // hero 转场：量出整张卡片的屏幕矩形（起点）+ 卡片图已加载的 URL（飞行图图源）。
       // 用整卡矩形而非只图片，让「整个帖子元素」一起飞、底部信息再淡出。
       const cardEl = cardRef.current
+      const imgWrapEl = cardEl?.querySelector(".image-container") as HTMLElement | null
       const imgEl = cardEl?.querySelector(".image-container img") as HTMLImageElement | null
       setSourceRect(cardEl ? cardEl.getBoundingClientRect() : null)
+      // 图片区矩形：关闭回飞图据此精准落回源卡图片槽（与源卡图片像素重合、不跳变）
+      setSourceImgRect(imgWrapEl ? imgWrapEl.getBoundingClientRect() : null)
       setSourceSrc(imgEl ? imgEl.currentSrc || imgEl.src : null)
       onClick()
     }
@@ -397,7 +423,13 @@ const PostCard = memo(function PostCard({
         )}
 
         {/* 内容区域 */}
-        <div className="p-4">
+        <div
+          className={cn("p-4", heroReturn && "hero-return-content")}
+          onAnimationEnd={(e) => {
+            // 只认本元素的浮现动画结束，避免子元素动画冒泡误清状态
+            if (e.target === e.currentTarget) setHeroReturn(false)
+          }}
+        >
           <PostCardContent
             post={post}
             username={username}
@@ -434,6 +466,7 @@ const PostCard = memo(function PostCard({
         isAdmin={isAdmin}
         onPostUpdated={onPostUpdated}
         sourceRect={sourceRect}
+        sourceImgRect={sourceImgRect}
         sourceSrc={sourceSrc}
       />
     )

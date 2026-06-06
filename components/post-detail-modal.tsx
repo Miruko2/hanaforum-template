@@ -30,8 +30,10 @@ interface PostDetailModalProps {
   isMobile: boolean
   isAdmin?: boolean
   onPostUpdated?: (postId: string, updates: Partial<Post>) => void
-  /** hero 转场：点击的卡片图片在屏幕上的矩形，详情图据此从该位置 FLIP 飞入 */
+  /** hero 转场：点击的卡片整卡矩形，开场飞入的放大起点 */
   sourceRect?: DOMRect | null
+  /** hero 关闭回飞：卡片图片区矩形，回飞图精准落回这里（与源卡图片像素重合、不跳变） */
+  sourceImgRect?: DOMRect | null
   /** hero 转场：列表卡片图已加载的实际 URL（img.currentSrc），飞行图用它即时显示、不闪 */
   sourceSrc?: string | null
 }
@@ -51,6 +53,7 @@ export default function PostDetailModal({
   isAdmin = false,
   onPostUpdated,
   sourceRect = null,
+  sourceImgRect = null,
   sourceSrc = null,
 }: PostDetailModalProps) {
   const { toast } = useToast()
@@ -71,15 +74,22 @@ export default function PostDetailModal({
   const heroRef = useRef<HTMLDivElement>(null)
   // 这次打开是否走 hero：桌面横版 + 有图 + 拿到了源矩形与源图 URL
   const heroActive = useHorizontalLayout && !!post.image_url && !!sourceRect && !!sourceSrc
+  // 关闭回飞的落点：优先图片区矩形（与源卡图片像素重合、不跳变），回退整卡矩形
+  const flyBackTarget = sourceImgRect ?? sourceRect
   // 飞行图飞到目标后置 true → 显示详情真实图、移除飞行图
   const [flyDone, setFlyDone] = useState(false)
   // 飞行目标矩形（详情图位置），由 useLayoutEffect 在 paint 前测量
   const [flyTarget, setFlyTarget] = useState<{ left: number; top: number; width: number; height: number } | null>(null)
+  // 关闭回飞中：点关闭后先不卸载，让详情图飞回卡片位置，飞到位再真正 onClose
+  const [closing, setClosing] = useState(false)
+  // 回飞落地只触发一次真正 onClose；exit（淡出揭幕）阶段的 onAnimationComplete 不重复触发
+  const closedRef = useRef(false)
   useLayoutEffect(() => {
     if (!isOpen) {
       // 关闭时复位，供下次打开重新计算
       setFlyDone(false)
       setFlyTarget(null)
+      setClosing(false)
       return
     }
     if (!heroActive) return
@@ -89,6 +99,18 @@ export default function PostDetailModal({
     if (!r.width || !r.height) return
     setFlyTarget({ left: r.left, top: r.top, width: r.width, height: r.height })
   }, [isOpen, heroActive])
+
+  // 关闭：hero 模式下先回飞（详情图飞回卡片）再真正关闭；否则直接关闭。
+  // 回飞条件：本次走 hero、已飞到位（flyDone）、且拿到起止矩形与图源。
+  // 飞到位后由回飞元素的 onAnimationComplete 调用真正的 onClose。
+  const handleClose = useCallback(() => {
+    if (heroActive && flyDone && flyTarget && sourceRect && sourceSrc) {
+      closedRef.current = false
+      setClosing(true)
+    } else {
+      onClose()
+    }
+  }, [heroActive, flyDone, flyTarget, sourceRect, sourceSrc, onClose])
 
   // 点击图片：立即打开灯箱，不再阻塞等待原图下载完。原图的加载/解码与弹入时序
   // 由 ImageLightbox 内部处理（先 loading 后弹入），既消除「点了要等一会才出现」，
@@ -273,7 +295,7 @@ export default function PostDetailModal({
       {isOpen && (
         <motion.div
           className="fixed inset-0 z-40 flex items-center justify-center"
-          onClick={onClose}
+          onClick={handleClose}
           initial={{ opacity: 0, pointerEvents: "none" }}
           animate={{ opacity: 1, pointerEvents: "auto" }}
           exit={{ opacity: 0, pointerEvents: "none" }}
@@ -292,7 +314,7 @@ export default function PostDetailModal({
               WebkitBackdropFilter: isMobile ? "blur(10px)" : "blur(15px)",
             }}
             initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
+            animate={{ opacity: closing ? 0 : 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
           />
@@ -307,7 +329,7 @@ export default function PostDetailModal({
             // 模态框本身只做 opacity 淡入（不再 scale 弹入）——让「图片从卡片飞入」
             // 的 hero 转场唱主角；模态若也缩放会和 hero 叠加、显得乱。
             initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
+            animate={{ opacity: closing ? 0 : 1 }}
             exit={{ opacity: 0, transition: { duration: 0.18, ease: "easeOut" } }}
             transition={{ duration: 0.28, ease: "easeOut" }}
             // 手机端缩到 82vh，让模态框周围露出一圈背景（不再"贴满全屏"），
@@ -316,7 +338,7 @@ export default function PostDetailModal({
           >
             {/* Close button */}
             <motion.button
-              onClick={onClose}
+              onClick={handleClose}
               className="absolute -top-12 right-0 z-10 p-2 text-white hover:text-white/80 transition-colors"
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.95 }}
@@ -389,8 +411,9 @@ export default function PostDetailModal({
                       >
                         <div
                           className="h-full w-full transition-transform duration-500 ease-out group-hover:scale-[1.06]"
-                          // hero 飞行期间隐藏真实图，避免和飞行图重叠；飞到位（flyDone）后显示
-                          style={{ opacity: heroActive && !flyDone ? 0 : 1 }}
+                          // hero 飞行期间隐藏真实图，避免和飞行图重叠；飞到位（flyDone）后显示。
+                          // 回飞（closing）时同样隐藏，交给回飞图，避免详情图与回飞图重叠。
+                          style={{ opacity: heroActive && (!flyDone || closing) ? 0 : 1 }}
                         >
                           <PostCardImage
                             post={post}
@@ -537,6 +560,55 @@ export default function PostDetailModal({
               initial={{ opacity: 1 }}
               animate={{ opacity: 0 }}
               transition={{ duration: 0.22, ease: "easeOut" }}
+            >
+              <div className="text-white text-[13px] font-semibold truncate">{post.title}</div>
+              <div className="text-white/60 text-[11px] truncate">{username}</div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* hero 回飞图：关闭时详情图从详情位置飞回卡片位置，飞到位后真正 onClose */}
+        {closing && flyTarget && flyBackTarget && sourceSrc && (
+          <motion.div
+            key="hero-fly-back"
+            className="fixed z-[50] overflow-hidden pointer-events-none select-none bg-black/20"
+            style={{ borderRadius: 14 }}
+            initial={{
+              left: flyTarget.left,
+              top: flyTarget.top,
+              width: flyTarget.width,
+              height: flyTarget.height,
+            }}
+            animate={{
+              left: flyBackTarget.left,
+              top: flyBackTarget.top,
+              width: flyBackTarget.width,
+              height: flyBackTarget.height,
+            }}
+            transition={{ duration: 0.4, ease: [0.4, 0, 0.2, 1] }}
+            // 落点 = 源卡图片区（flyBackTarget）：图片在那里 object-cover 的裁剪与源卡图片
+            // 完全一致 → 像素级无缝。落地即真正关闭：onClose 让父级 isActive=false（源卡整卡
+            // 显形 —— 图片区被回飞图无缝接管、不跳变，下方内容区由 PostCard 做浮现入场）、
+            // isOpen=false（useLayoutEffect 复位 closing/flyTarget → 回飞图卸载）。
+            // closedRef 保证只触发一次 onClose。
+            onAnimationComplete={() => {
+              if (closedRef.current) return
+              closedRef.current = true
+              onClose()
+            }}
+          >
+            <img
+              src={sourceSrc}
+              alt=""
+              draggable={false}
+              className="absolute inset-0 h-full w-full object-cover"
+            />
+            {/* 底部信息条：回飞中淡出 → 落点是图片区（无信息条），与源卡图片严丝合缝对齐 */}
+            <motion.div
+              className="absolute inset-x-0 bottom-0 p-3 bg-gradient-to-t from-black/90 via-black/50 to-transparent"
+              initial={{ opacity: 1 }}
+              animate={{ opacity: 0 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
             >
               <div className="text-white text-[13px] font-semibold truncate">{post.title}</div>
               <div className="text-white/60 text-[11px] truncate">{username}</div>

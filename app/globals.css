@@ -380,6 +380,52 @@ body {
   }
 }
 
+/* hero 关闭回飞落地后：源卡内容区（图片下方）登场动效，柔化「内容突现」。
+   图片区已由回飞图像素级无缝接管，这里让下方文字卡各行「从上到下依次、带高斯模糊」
+   浮现：标题 → 分类/互动 → 作者/时间 逐行渐入。
+   .hero-return-content 容器自身只跑一个等长的占位动画（heroReturnHold），作为总时长锚点，
+   供 onAnimationEnd 在所有子行完成后统一清除状态（见 post-card.tsx）。 */
+.hero-return-content {
+  animation: heroReturnHold 1.2s both;
+}
+/* 命中 PostCardContent 根 div 下的各行（标题 / 分类行 / 作者行） */
+.hero-return-content > div > * {
+  animation: heroReturnRowReveal 1s cubic-bezier(0.22, 0.7, 0.18, 1) both;
+}
+.hero-return-content > div > *:nth-child(1) {
+  animation-delay: 0.02s;
+}
+.hero-return-content > div > *:nth-child(2) {
+  animation-delay: 0.1s;
+}
+.hero-return-content > div > *:nth-child(3) {
+  animation-delay: 0.18s;
+}
+
+/* 占位计时：容器本身无视觉变化，仅作「全部子行完成后清除状态」的总时长锚点 */
+@keyframes heroReturnHold {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* 单行登场：高斯模糊 + 透明度 + 轻微上移，一起化开 */
+@keyframes heroReturnRowReveal {
+  from {
+    opacity: 0;
+    filter: blur(6px);
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0);
+  }
+}
+
 /* 页面入场动画 - 用于非滚动触发的卡片（如个人中心） */
 @keyframes blurFadeIn {
   from {
