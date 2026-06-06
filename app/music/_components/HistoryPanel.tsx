@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Search, X, ChevronRight, History as HistoryIcon, Music2, Play, Pause, Trash2, Heart } from "lucide-react"
 import { usePlayback } from "../_context/PlaybackContext"
+import { useIsAndroid } from "../_lib/useIsAndroid"
 import type { Track } from "../_data/tracks"
 import { TrackCover } from "./TrackCover"
 
@@ -15,6 +16,10 @@ type Props = {
 
 export function HistoryPanel({ open, onOpen, onClose }: Props) {
   const { history, favorites, tracks, currentTrack, isPlaying, play, togglePlay, clearHistory } = usePlayback()
+  // 安卓 WebView：backdrop-filter + 动画化 filter:blur 叠加会撕裂合成层（碎裂闪）；
+  // 且 overlayOpen 时 canvas 已隐藏、抽屉背后本就纯黑、毛玻璃无效 —— 安卓改实底背景
+  // + 列表切换动画去掉 filter:blur。其它平台保留毛玻璃 + 高斯凝结过渡。
+  const isAndroid = useIsAndroid()
   const [query, setQuery] = useState("")
   const [tab, setTab] = useState<"favorites" | "history" | "all">("history")
   // Mac-Dock-style sliding highlight that follows the hovered tab.
@@ -62,6 +67,15 @@ export function HistoryPanel({ open, onOpen, onClose }: Props) {
     )
   }, [query, tracks])
 
+  // 列表视图切换动画：安卓去掉 filter:blur（见上方 isAndroid 注释），仅淡入淡出。
+  const listAnim = isAndroid
+    ? { initial: { opacity: 0 }, animate: { opacity: 1 }, exit: { opacity: 0 } }
+    : {
+        initial: { opacity: 0, filter: "blur(20px)" },
+        animate: { opacity: 1, filter: "blur(0px)" },
+        exit: { opacity: 0, filter: "blur(20px)" },
+      }
+
   return (
     <>
       {/* Drawer */}
@@ -69,9 +83,10 @@ export function HistoryPanel({ open, onOpen, onClose }: Props) {
         className="fixed top-0 right-0 z-[55] flex h-full w-[360px] max-w-[88vw] flex-col text-white transition-transform duration-300 ease-out"
         style={{
           transform: open ? "translateX(0)" : "translateX(100%)",
-          background: "rgba(255,255,255,0.05)",
-          backdropFilter: "blur(32px) saturate(140%)",
-          WebkitBackdropFilter: "blur(32px) saturate(140%)",
+          // 安卓：实底（抽屉背后已纯黑，毛玻璃无效）；其它平台：毛玻璃。
+          background: isAndroid ? "rgba(24,24,27,0.94)" : "rgba(255,255,255,0.05)",
+          backdropFilter: isAndroid ? undefined : "blur(32px) saturate(140%)",
+          WebkitBackdropFilter: isAndroid ? undefined : "blur(32px) saturate(140%)",
           boxShadow:
             "0 0 80px -10px rgba(0,0,0,0.5), inset 1px 0 0 rgba(255,255,255,0.12)",
         }}
@@ -194,9 +209,9 @@ export function HistoryPanel({ open, onOpen, onClose }: Props) {
             // key triggers exit + enter, giving us the same Gaussian-blur
             // condensation language used elsewhere.
             key={filtered ? "search" : tab}
-            initial={{ opacity: 0, filter: "blur(20px)" }}
-            animate={{ opacity: 1, filter: "blur(0px)" }}
-            exit={{ opacity: 0, filter: "blur(20px)" }}
+            initial={listAnim.initial}
+            animate={listAnim.animate}
+            exit={listAnim.exit}
             transition={{ duration: 1, ease: [0.2, 0.8, 0.2, 1] }}
           >
           {filtered ? (

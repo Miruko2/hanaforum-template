@@ -8,6 +8,7 @@ import { type Track } from "../_data/tracks"
 import { usePlayback, useTracks } from "../_context/PlaybackContext"
 import { useDominantHue } from "../_lib/useDominantHue"
 import { useReducedMotion } from "../_lib/useReducedMotion"
+import { useIsAndroid } from "../_lib/useIsAndroid"
 import { TrackCover } from "./TrackCover"
 
 /** Screen-space rect of the card that was clicked — used as flight start. */
@@ -71,6 +72,12 @@ function ExpandedInner({
   const isCurrent = currentTrack?.id === shown.id
   const playing = isCurrent && isPlaying
   const reducedMotion = useReducedMotion()
+  // 安卓 WebView 合成器 bug：backdrop-filter 与「动画化的 filter:blur」叠加会撕裂
+  // backing buffer（碎裂/雪花闪）。安卓上改实底背景 + 入场动画去掉 filter:blur，仅留
+  // opacity/scale；其它平台保留毛玻璃 + 高斯凝结入场。
+  // 附带：安卓上 overlayOpen 时 MusicCanvas 已 hideForOverlay（canvas 退出渲染），
+  // 面板 backdrop-filter 背后本就是纯黑，模糊看不出效果 —— 去掉零视觉损失还省合成。
+  const isAndroid = useIsAndroid()
   const fav = isFavorite(shown.id)
 
   // ---- Responsive sizing ----
@@ -182,6 +189,19 @@ function ExpandedInner({
   const thumbX = SVG_SIZE / 2 + RING_R * Math.cos(thumbAngle)
   const thumbY = SVG_SIZE / 2 + RING_R * Math.sin(thumbAngle)
 
+  // 面板入场/退场动画：安卓去掉 filter:blur（见上方 isAndroid 注释），仅 opacity+scale。
+  const panelAnim = isAndroid
+    ? {
+        initial: { opacity: 0, scale: 0.96 },
+        animate: { opacity: 1, scale: 1 },
+        exit: { opacity: 0, scale: 0.96 },
+      }
+    : {
+        initial: { opacity: 0, scale: 0.96, filter: "blur(20px)" },
+        animate: { opacity: 1, scale: 1, filter: "blur(0px)" },
+        exit: { opacity: 0, scale: 0.96, filter: "blur(20px)" },
+      }
+
   return (
     <motion.div
       className="fixed inset-0 z-[60] flex items-center justify-center"
@@ -202,9 +222,10 @@ function ExpandedInner({
           width: PANEL_W,
           height: PANEL_H,
           borderRadius: 28,
-          background: "rgba(255,255,255,0.05)",
-          backdropFilter: "blur(32px) saturate(140%)",
-          WebkitBackdropFilter: "blur(32px) saturate(140%)",
+          // 安卓：实底（背后已纯黑，毛玻璃无效）；其它平台：毛玻璃。
+          background: isAndroid ? "rgba(28,28,30,0.92)" : "rgba(255,255,255,0.05)",
+          backdropFilter: isAndroid ? undefined : "blur(32px) saturate(140%)",
+          WebkitBackdropFilter: isAndroid ? undefined : "blur(32px) saturate(140%)",
           boxShadow:
             "0 30px 90px -15px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.12), inset 0 1px 0 rgba(255,255,255,0.10)",
           transformOrigin: "center center",
@@ -212,9 +233,10 @@ function ExpandedInner({
         // Gaussian-blur condensation: panel materialises out of a blur — sits
         // visually inside the same magnifying-glass language as the frosted
         // backdrop. Cubic easing (not spring) so it lands quietly, no bounce.
-        initial={{ opacity: 0, scale: 0.96, filter: "blur(20px)" }}
-        animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
-        exit={{ opacity: 0, scale: 0.96, filter: "blur(20px)" }}
+        // （安卓走 panelAnim 的无 filter 变体，规避合成器 bug。）
+        initial={panelAnim.initial}
+        animate={panelAnim.animate}
+        exit={panelAnim.exit}
         transition={{ duration: 1, ease: [0.2, 0.8, 0.2, 1] }}
       >
         {/* Vinyl + progress ring */}
