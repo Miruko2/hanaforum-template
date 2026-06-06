@@ -134,6 +134,41 @@ export default function PostDetailModal({
     }
   }, [isOpen])
 
+  // 预热灯箱原图：详情页一打开，就在浏览器空闲时后台预下载原图（post.image_url，
+  // 与灯箱用的是同一条直链）。这样首次点击放大可直接命中 HTTP 缓存、无需等待加载
+  // ——灯箱内部已有 img.complete 兜底，命中缓存会跳过 loading 直接弹入。
+  // 非阻塞：用 requestIdleCallback 让位详情页首屏（小图+评论），不支持时延迟兜底；
+  // 详情页关闭时中断尚未完成的预热下载，避免白白占用带宽。
+  React.useEffect(() => {
+    const url = post.image_url
+    if (!isOpen || !url) return
+
+    let img: HTMLImageElement | null = null
+    const warm = () => {
+      img = new Image()
+      img.decoding = "async"
+      img.src = url
+    }
+
+    const w = window as typeof window & {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number
+      cancelIdleCallback?: (id: number) => void
+    }
+    let idleId: number | undefined
+    let timer: ReturnType<typeof setTimeout> | undefined
+    if (typeof w.requestIdleCallback === "function") {
+      idleId = w.requestIdleCallback(warm, { timeout: 1500 })
+    } else {
+      timer = setTimeout(warm, 400)
+    }
+
+    return () => {
+      if (idleId != null && typeof w.cancelIdleCallback === "function") w.cancelIdleCallback(idleId)
+      if (timer) clearTimeout(timer)
+      if (img) img.src = ""
+    }
+  }, [isOpen, post.image_url])
+
   // 置顶帖子处理
   const handlePinPost = async (e: React.MouseEvent) => {
     e.stopPropagation()
