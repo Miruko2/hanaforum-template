@@ -244,13 +244,18 @@ export function MusicCanvas({ onExpand, overlayOpen = false }: Props) {
     const radius = Math.min(viewSize.w, viewSize.h) * FISHEYE_RADIUS_FACTOR
 
     // 底部播放器遮挡区（屏幕坐标；viewport 是 fixed inset-0，故与屏幕坐标一致）。
-    // 高度 120 覆盖 bottom-5 边距 + 面板高度并留余量；宽度对齐播放器最大宽 640 + 两侧余量。
+    // 高度 120 覆盖 bottom-5 边距 + 面板高度并留余量。
+    //
+    // 宽度取「整屏宽」而非播放器宽：播放器有 max-width:640，在宽屏（安卓平板）上居中、
+    // 两侧留出大片空白；而安卓 WebView 的 preserve-3d 鬼影是沿「整条底边」出现的。
+    // 旧版遮挡区只盖住中间 ~664px，平板上播放器两侧的底部角落便露出大量闪动鬼影。
+    // 窄屏 / 缩小窗口时播放器近乎占满宽度、限宽遮挡区顺带盖住整条底边，故不复现 ——
+    // 这正是用户反馈「屏幕缩小就不会出现」的根因。取整屏宽后遮住整条底部带、根除角落鬼影。
     // 仅当 occludeForPlayerRef 为真（安卓 app + 播放中）时用于隐藏落入此区的卡片。
     const PLAYER_ZONE_H = 120
     const playerZoneTop = viewSize.h - PLAYER_ZONE_H
-    const playerZoneW = Math.min(640, viewSize.w - 32) + 24
-    const playerZoneLeft = (viewSize.w - playerZoneW) / 2
-    const playerZoneRight = playerZoneLeft + playerZoneW
+    const playerZoneLeft = 0
+    const playerZoneRight = viewSize.w
 
     // --- Per-frame work caches (perf) ---
     // The dominant cost is re-writing each card's transform/opacity/filter every
