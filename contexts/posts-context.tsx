@@ -328,29 +328,47 @@ export function PostsProvider({ children }: { children: ReactNode }) {
   }
   
   // 添加帖子 - 乐观更新UI
-  // username 解析优先级：
-  //   1. post.username 已传入（调用方明确给了）
-  //   2. 自己发的帖 → 直接用当前用户的 metadata.username（零延迟）
-  //   3. 别人发的帖（realtime 推送）→ 先用兜底占位，后台异步查 profiles 拿真名再 dispatch UPDATE_POST
-  // 之所以拆"先占位 + 后修正"是为了不阻塞 UI：用户看到的延迟约 200ms 的名字闪烁，比看到"用户_xxx"几秒后才纠正友好得多
+  // username / 头像 解析优先级：
+  //   1. post 已带（调用方明确给了 username / users.avatar_url）
+  //   2. 自己发的帖 → 用当前用户 metadata 里的 username（零延迟）；头像一般不在 metadata，留待后台补
+  //   3. 缺名字或缺头像 → 后台异步查 profiles 一次性补 username + avatar_url，再 dispatch UPDATE_POST
+  // 拆"先占位 + 后修正"是为了不阻塞 UI：约 200ms 的名字/头像闪烁，
+  // 比一直显示"用户_xxx"/首字母头像直到手动刷新友好得多
   const addPost = (post: Post) => {
     const ownerId = post.user_id
     const fallback = `用户_${ownerId.substring(0, 6)}`
+    const isOwn = !!user && ownerId === user.id
 
     // 解析初始 username
     let initialUsername = post.username
-    if (!initialUsername && user && ownerId === user.id) {
+    if (!initialUsername && isOwn) {
       // 自己刚发的帖：metadata 已经在内存里，直接用
-      initialUsername = (user.user_metadata?.username as string | undefined) || undefined
+      initialUsername = (user?.user_metadata?.username as string | undefined) || undefined
     }
 
+    // 解析初始头像：优先用传入的；自己发的帖再尝试 metadata（通常没有 → 留空待后台补）。
+    // 头像权威源是 profiles.avatar_url，所以多数情况要靠下面的后台查询补齐。
+    let initialAvatar = post.users?.avatar_url
+    if (!initialAvatar && isOwn) {
+      initialAvatar = (user?.user_metadata?.avatar_url as string | undefined) || undefined
+    }
+
+    const resolvedUsername = initialUsername ?? fallback
     const completePost: Post = {
       ...post,
       likes: post.likes ?? 0,
       comments: post.comments ?? 0,
       likes_count: post.likes_count ?? 0,
       comments_count: post.comments_count ?? 0,
-      username: initialUsername ?? fallback,
+      username: resolvedUsername,
+      // 头像取自 post.users?.avatar_url（见 post-card），这里必须构造好 users 对象，
+      // 否则 realtime 推来的新帖（payload 不含 users）只能显示首字母头像。
+      users: {
+        ...post.users,
+        id: ownerId,
+        username: initialUsername ?? post.users?.username,
+        avatar_url: initialAvatar,
+      },
       imageContent: post.image_url ? undefined : ["+", "X", "O", "□", "△", "◇"][Math.floor(Math.random() * 6)],
     }
 
@@ -359,23 +377,32 @@ export function PostsProvider({ children }: { children: ReactNode }) {
 
     dispatch({ type: 'ADD_POST', payload: completePost })
 
-    // 如果初始名是兜底占位，后台异步查 profiles 拿真名再修正
-    if (!initialUsername) {
+    // 缺名字 或 缺头像 → 后台异步查 profiles 一次性补齐再修正
+    const needName = !initialUsername
+    const needAvatar = !initialAvatar
+    if (needName || needAvatar) {
       void supabase
         .from('profiles')
-        .select('username')
+        .select('username, avatar_url')
         .eq('id', ownerId)
         .single()
         .then(({ data, error }) => {
-          if (error || !data?.username) return // 查不到就保持兜底名，下次 loadPosts 会拉到真名
-          if (data.username === fallback) return
-          dispatch({
-            type: 'UPDATE_POST',
-            payload: {
-              id: post.id,
-              updates: { username: data.username },
-            },
-          })
+          if (error || !data) return // 查不到就保持现状，下次 loadPosts 会拉到真名/真头像
+          const updates: Partial<Post> = {}
+          const realName =
+            needName && data.username && data.username !== fallback ? data.username : undefined
+          if (realName) updates.username = realName
+          if (needAvatar && data.avatar_url) {
+            // users 是嵌套对象，UPDATE_POST 为浅合并，需整体重建 users 才能更新到 avatar_url
+            updates.users = {
+              id: ownerId,
+              username: realName ?? resolvedUsername,
+              avatar_url: data.avatar_url,
+            }
+          }
+          if (Object.keys(updates).length > 0) {
+            dispatch({ type: 'UPDATE_POST', payload: { id: post.id, updates } })
+          }
         })
     }
   }
