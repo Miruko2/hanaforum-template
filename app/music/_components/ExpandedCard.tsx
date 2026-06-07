@@ -8,7 +8,6 @@ import { type Track } from "../_data/tracks"
 import { usePlayback, useTracks } from "../_context/PlaybackContext"
 import { useDominantHue } from "../_lib/useDominantHue"
 import { useReducedMotion } from "../_lib/useReducedMotion"
-import { useIsAndroid } from "../_lib/useIsAndroid"
 import { TrackCover } from "./TrackCover"
 
 /** Screen-space rect of the card that was clicked — used as flight start. */
@@ -77,7 +76,15 @@ function ExpandedInner({
   // opacity/scale；其它平台保留毛玻璃 + 高斯凝结入场。
   // 附带：安卓上 overlayOpen 时 MusicCanvas 已 hideForOverlay（canvas 退出渲染），
   // 面板 backdrop-filter 背后本就是纯黑，模糊看不出效果 —— 去掉零视觉损失还省合成。
-  const isAndroid = useIsAndroid()
+  //
+  // 必须「同步」判定，不能用 useIsAndroid()：它驱动 framer-motion 的 initial filter，
+  // 而 initial 只在挂载首帧生效。useIsAndroid 首帧返回 false（useEffect 后才翻 true），
+  // 会让首帧错用「非安卓」变体把 filter:blur(20px) 设到面板上，随后切到无 filter 变体时
+  // framer-motion 不再接管 filter → blur 卡死、面板永久模糊（已踩坑）。本组件 ssr:false
+  // + mounted gate，navigator 必可用、无 hydration 风险，故直接同步读 UA（与 MusicPlayer 一致）。
+  const [isAndroid] = useState(
+    () => typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent),
+  )
   const fav = isFavorite(shown.id)
 
   // ---- Responsive sizing ----

@@ -4,7 +4,6 @@ import { useMemo, useRef, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Search, X, ChevronRight, History as HistoryIcon, Music2, Play, Pause, Trash2, Heart } from "lucide-react"
 import { usePlayback } from "../_context/PlaybackContext"
-import { useIsAndroid } from "../_lib/useIsAndroid"
 import type { Track } from "../_data/tracks"
 import { TrackCover } from "./TrackCover"
 
@@ -19,7 +18,13 @@ export function HistoryPanel({ open, onOpen, onClose }: Props) {
   // 安卓 WebView：backdrop-filter + 动画化 filter:blur 叠加会撕裂合成层（碎裂闪）；
   // 且 overlayOpen 时 canvas 已隐藏、抽屉背后本就纯黑、毛玻璃无效 —— 安卓改实底背景
   // + 列表切换动画去掉 filter:blur。其它平台保留毛玻璃 + 高斯凝结过渡。
-  const isAndroid = useIsAndroid()
+  // 必须「同步」判定，不能用 useIsAndroid()：它驱动列表 motion.div 的 initial filter，
+  // initial 只在首帧生效；useIsAndroid 首帧 false 会让首帧错设 filter:blur(20px)、随后
+  // 切到无 filter 变体时 framer-motion 撒手不管 → blur 卡死、列表永久模糊。ssr:false，
+  // navigator 必可用，同步读 UA 无 hydration 风险（与 MusicPlayer 一致）。
+  const [isAndroid] = useState(
+    () => typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent),
+  )
   const [query, setQuery] = useState("")
   const [tab, setTab] = useState<"favorites" | "history" | "all">("history")
   // Mac-Dock-style sliding highlight that follows the hovered tab.
