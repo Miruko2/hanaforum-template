@@ -444,15 +444,53 @@ export default function LiveWallContent() {
     return () => clearInterval(timer)
   }, [comments])
 
-  // 自动滚底部：依赖最后一条消息的 typedChars，让打字过程也跟随滚动
-  const lastTypedKey = comments.length
-    ? `${comments[comments.length - 1].id}:${comments[comments.length - 1].typedChars}`
-    : ""
+  // ===== 滚动行为：上滑看历史时不被新消息打断 =====
+  // 记录用户是否「贴在底部附近」。只有贴底时新消息 / 打字推进才自动滚到底；
+  // 用户上滑看历史时保持其位置，改用「新消息」提示按钮引导回到最新。
+  const isAtBottomRef = useRef(true)
+  const [showNewMsgHint, setShowNewMsgHint] = useState(false)
+
+  // 监听滚动，实时更新「是否贴底」（阈值 60px，容忍抖动 / 顶部 mask 渐隐）
   useEffect(() => {
-    if (listRef.current) {
-      listRef.current.scrollTop = listRef.current.scrollHeight
+    const el = listRef.current
+    if (!el) return
+    const onScroll = () => {
+      const distance = el.scrollHeight - el.scrollTop - el.clientHeight
+      const atBottom = distance < 60
+      isAtBottomRef.current = atBottom
+      if (atBottom) setShowNewMsgHint(false)
     }
-  }, [lastTypedKey])
+    el.addEventListener("scroll", onScroll, { passive: true })
+    return () => el.removeEventListener("scroll", onScroll)
+  }, [])
+
+  // 自动滚底 + 新消息提示。依赖最后一条消息的 typedChars，让打字过程也跟随。
+  const lastId = comments.length ? comments[comments.length - 1].id : ""
+  const lastTypedKey = comments.length
+    ? `${lastId}:${comments[comments.length - 1].typedChars}`
+    : ""
+  const prevLastIdRef = useRef("")
+  useEffect(() => {
+    const el = listRef.current
+    if (!el) return
+    if (isAtBottomRef.current) {
+      // 贴底：跟随到最新
+      el.scrollTop = el.scrollHeight
+    } else if (lastId && lastId !== prevLastIdRef.current) {
+      // 在看历史，且来了「新消息」（而非同一条的打字推进）→ 提示但不打断
+      setShowNewMsgHint(true)
+    }
+    prevLastIdRef.current = lastId
+  }, [lastTypedKey, lastId])
+
+  // 点「新消息」提示：平滑回到最新
+  const scrollToBottom = useCallback(() => {
+    const el = listRef.current
+    if (!el) return
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" })
+    isAtBottomRef.current = true
+    setShowNewMsgHint(false)
+  }, [])
 
   // 发送
   const handleSend = useCallback(async () => {
@@ -621,6 +659,19 @@ export default function LiveWallContent() {
             </span>
           </button>
         </aside>
+
+        {/* 上滑看历史时新消息不打断，用这个按钮回到最新 */}
+        {showNewMsgHint && (
+          <button
+            type="button"
+            className="live-wall-newmsg"
+            onClick={scrollToBottom}
+            aria-label="回到最新消息"
+          >
+            <ChevronDown className="h-3.5 w-3.5" />
+            <span>新消息</span>
+          </button>
+        )}
       </div>
 
       {/* 输入框 */}

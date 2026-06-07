@@ -2873,6 +2873,39 @@ body.modal-open {
   box-shadow: -2px 0 8px rgba(245, 166, 209, 0.15);
 }
 
+/* 「新消息」提示按钮：上滑看历史时新消息不打断，点它平滑回到最新。
+   定位在弹幕区底部居中（.live-wall-body 已 position:relative）。 */
+.live-wall-newmsg {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: #f5a6d1;
+  background: rgba(22, 12, 20, 0.92);
+  border: 1px solid rgba(245, 166, 209, 0.5);
+  box-shadow: 0 0 12px rgba(245, 166, 209, 0.3);
+  text-shadow: 0 0 6px rgba(245, 166, 209, 0.5);
+  /* 入场只用 transform（避开安卓对 opacity/filter 的坑） */
+  animation: liveWallNewMsgIn 0.28s ease;
+}
+.live-wall-newmsg:hover {
+  background: rgba(40, 18, 32, 0.95);
+  border-color: rgba(245, 166, 209, 0.8);
+  box-shadow: 0 0 18px rgba(245, 166, 209, 0.45);
+}
+@keyframes liveWallNewMsgIn {
+  from { transform: translate(-50%, 8px); }
+  to   { transform: translate(-50%, 0); }
+}
+
 /* ============================================
  * 主播舞台内部样式
  * ============================================ */
