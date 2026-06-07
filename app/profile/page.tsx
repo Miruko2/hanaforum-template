@@ -4,6 +4,7 @@
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useEffect, useState, useRef } from "react"
 import { supabase } from "@/lib/supabaseClient"
+import { compressImage } from "@/lib/image-compress"
 import Navbar from "@/components/navbar"
 import BackgroundEffects from "@/components/background-effects"
 import { Bell, LogOut, ChevronRight, Camera, Pencil, Check, X, Smartphone } from "lucide-react"
@@ -88,14 +89,20 @@ export default function ProfilePage() {
     setUploading(true)
 
     try {
-      // 生成唯一文件名: userId/timestamp.ext
-      const ext = file.name.split(".").pop() || "jpg"
+      // 头像压缩到 256px webp（显示仅 40px，256 足够清晰）+ 降质量，
+      // 600KB 原图 → 几十 KB，从源头砍 avatars bucket 的 Cached Egress 大头。
+      const { blob, ext, contentType } = await compressImage(file, 256, 0.8)
       const filePath = `${user.id}/${Date.now()}.${ext}`
 
-      // 上传到 avatars bucket
+      // 上传 avatars：文件名带时间戳唯一 → cacheControl 1 年，让浏览器/CDN
+      // 长缓存、不再每小时回源（默认 3600 秒是头像 egress 的放大器）。
       const { error: uploadError } = await supabase.storage
         .from("avatars")
-        .upload(filePath, file, { upsert: true })
+        .upload(filePath, blob, {
+          upsert: true,
+          cacheControl: "31536000",
+          contentType,
+        })
 
       if (uploadError) {
         console.error("上传失败:", uploadError)
