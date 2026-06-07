@@ -27,6 +27,12 @@ export default function ImageLightbox({ src, alt = "", onClose }: ImageLightboxP
   // 原图是否加载完成 —— 决定何时触发弹入动画
   const [loaded, setLoaded] = useState(false)
   const imgRef = useRef<HTMLImageElement>(null)
+  // 安卓 WebView：backdrop-filter 叠加父级 opacity 动画会撕裂 backing buffer
+  // （放大/关闭那一瞬「鬼影/碎裂闪」，与 music 覆盖层同一类合成器 bug）。
+  // 同步判定（驱动样式、挂载即用，不能用异步 hook）。
+  const [isAndroid] = useState(
+    () => typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent),
+  )
 
   useEffect(() => {
     if (!src) return
@@ -61,8 +67,11 @@ export default function ImageLightbox({ src, alt = "", onClose }: ImageLightboxP
           transition={{ duration: 0.22 }}
           style={{
             background: "rgba(0,0,0,0.82)",
-            backdropFilter: "blur(10px)",
-            WebkitBackdropFilter: "blur(10px)",
+            // 安卓去掉背景模糊：backdrop-filter 叠加本元素的 opacity 动画会撕裂
+            // backing buffer（鬼影/碎裂闪）。82% 黑实底已够暗、视觉损失极小；
+            // 桌面/iOS 保留毛玻璃。
+            backdropFilter: isAndroid ? undefined : "blur(10px)",
+            WebkitBackdropFilter: isAndroid ? undefined : "blur(10px)",
           }}
         >
           {/* 关闭按钮 */}
