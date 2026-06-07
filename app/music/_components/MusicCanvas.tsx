@@ -68,6 +68,9 @@ export function MusicCanvas({ onExpand, overlayOpen = false }: Props) {
   const isAndroid = useIsAndroid()
   // 安卓上有弹窗时退出渲染。其他平台 / 无弹窗时保持 canvas 显示。
   const hideForOverlay = isAndroid && overlayOpen
+  // rAF 循环闭包依赖 [] 不重建，用 ref 让每帧读到最新 hideForOverlay。
+  const hideForOverlayRef = useRef(false)
+  hideForOverlayRef.current = hideForOverlay
 
   // ---- 安卓 app 底部播放器鬼影根治：遮挡播放器矩形区内的卡片 ----
   // 安卓 WebView 的合成器 bug 让 preserve-3d 卡片穿透、画到 z-60 底部播放器上
@@ -280,6 +283,8 @@ export function MusicCanvas({ onExpand, overlayOpen = false }: Props) {
     let paintSeq = 0
     let lastPainted = -1
     let prevOcclude = false
+    // 安卓 overlay 打开/关闭翻转时强制补一帧（把卡片整层写 hidden / 恢复）。
+    let prevHide = false
     const prevStyle = new Map<
       string,
       { t: string; o: string; f: string; v: string; far: string }
@@ -347,8 +352,12 @@ export function MusicCanvas({ onExpand, overlayOpen = false }: Props) {
       // A1（静止停渲）：只有 pan 在动 / 可见集刚变 / 遮挡态翻转时才逐卡重写。
       // 三者皆否 = 墙面静止，本帧整段跳过（rAF 仍在转，但不再空算 fisheye）。
       const occludeNow = occludeForPlayerRef.current
+      const hideNow = hideForOverlayRef.current
       const needPass =
-        panMoved || paintSeq !== lastPainted || occludeNow !== prevOcclude
+        panMoved ||
+        paintSeq !== lastPainted ||
+        occludeNow !== prevOcclude ||
+        hideNow !== prevHide
 
       if (needPass) {
         // 本帧是否把当前可见集的每张卡都画到了。异步挂载的新卡若还没出现，
@@ -402,7 +411,11 @@ export function MusicCanvas({ onExpand, overlayOpen = false }: Props) {
             sx < playerZoneRight &&
             sx + inst.card.width > playerZoneLeft &&
             sy + inst.card.height > playerZoneTop
-          const visibility = occluded ? "hidden" : "visible"
+          // 安卓 overlay 打开时整层卡片隐藏（防 preserve-3d 卡片穿透的鬼影）。
+          // 必须写在「卡片自身」：Stage 父级的 visibility:hidden 会被这里每帧写的
+          // 子级 visibility:visible 覆盖（visibility 可被子级逆转），故隐藏职责落到
+          // rAF。不能改用 opacity 隐藏父层（<1 会扁平化 preserve-3d、整面墙跳位）。
+          const visibility = hideNow || occluded ? "hidden" : "visible"
 
           const prev = prevStyle.get(inst.key)
           if (!prev) {
@@ -438,6 +451,7 @@ export function MusicCanvas({ onExpand, overlayOpen = false }: Props) {
 
         if (allFound) lastPainted = paintSeq
         prevOcclude = occludeNow
+        prevHide = hideNow
       }
 
       prevPanX = panX
