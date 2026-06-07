@@ -32,6 +32,8 @@ import { broadcastAnnouncement } from "@/lib/supabase"
 // 因此缓存数据始终是"用户上次看到的样子"，不会出现陈旧 UI。
 type CachedAdminData = {
   users: any[]
+  // 注册用户真实总数（count: "exact"，不受 PostgREST max-rows=1000 限制）
+  userCount: number
   posts: any[]
   admins: any[]
   hanakoAllowedUsers: any[]
@@ -57,6 +59,7 @@ export default function AdminPage() {
   // 缓存命中就跳过 spinner，直接渲染
   const [loading, setLoading] = useState(!cachedAdminData)
   const [users, setUsers] = useState<any[]>(cachedAdminData?.users || [])
+  const [userCount, setUserCount] = useState<number>(cachedAdminData?.userCount ?? 0)
   const [posts, setPosts] = useState<any[]>(cachedAdminData?.posts || [])
   const [admins, setAdmins] = useState<any[]>(cachedAdminData?.admins || [])
   const [newAdminEmail, setNewAdminEmail] = useState("")
@@ -143,7 +146,7 @@ export default function AdminPage() {
       const [usersResult, postsResult, adminsResult, allowedResult] = await Promise.allSettled([
         supabase
           .from("profiles")
-          .select("id, username, avatar_url, updated_at")
+          .select("id, username, avatar_url, updated_at", { count: "exact" })
           .order("updated_at", { ascending: false, nullsFirst: false }),
         supabase
           .from("posts")
@@ -163,6 +166,7 @@ export default function AdminPage() {
       // 某项查询失败就保留上次状态值，不至于把 UI 清空
       const snapshot: CachedAdminData = {
         users,
+        userCount,
         posts,
         admins,
         hanakoAllowedUsers,
@@ -171,6 +175,8 @@ export default function AdminPage() {
       // 处理用户列表
       if (usersResult.status === "fulfilled" && !usersResult.value.error) {
         snapshot.users = usersResult.value.data || []
+        // 真实总数取 count（不受 1000 行限制）；拿不到则退回列表长度
+        snapshot.userCount = usersResult.value.count ?? snapshot.users.length
       }
 
       // 处理帖子列表
@@ -252,6 +258,7 @@ export default function AdminPage() {
 
       // 一并提交：组件 state + 模块缓存
       setUsers(snapshot.users)
+      setUserCount(snapshot.userCount)
       setPosts(snapshot.posts)
       setAdmins(snapshot.admins)
       setHanakoAllowedUsers(snapshot.hanakoAllowedUsers)
@@ -831,7 +838,7 @@ export default function AdminPage() {
                 {/* 注册用户总数：等于下方列表行数（profiles 表） */}
                 <div className="shrink-0 text-right">
                   <div className="text-3xl font-bold text-lime-400 tabular-nums leading-none">
-                    {users.length}
+                    {userCount}
                   </div>
                   <div className="mt-1 text-xs text-gray-500">注册用户总数</div>
                 </div>
