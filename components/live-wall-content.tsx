@@ -7,7 +7,7 @@ import {
   useState,
 } from "react"
 import { useRouter } from "next/navigation"
-import { ArrowLeft, Send } from "lucide-react"
+import { ArrowLeft, ChevronDown, ChevronUp, Send } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
 import { apiUrl } from "@/lib/api-base"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
@@ -85,6 +85,30 @@ export default function LiveWallContent() {
   const [inputFocused, setInputFocused] = useState(false)
   const [onlineCount, setOnlineCount] = useState(0)
   const listRef = useRef<HTMLDivElement>(null)
+
+  // 主播画面折叠：手机端一键收起 hanako 视频，给聊天腾出更多空间。
+  // 收起后视频区缩成接缝处的一条细按钮，聊天区自动撑满；AI 回复本就会写入
+  // live_comments、在聊天流里照常显示，所以收起视频不会丢任何内容。
+  // 选择持久化到 localStorage，下次进来保持上次状态（本页 ssr:false，可安全惰性读取）。
+  const [stageCollapsed, setStageCollapsed] = useState<boolean>(() => {
+    try {
+      return (
+        typeof window !== "undefined" &&
+        localStorage.getItem("live-stage-collapsed") === "1"
+      )
+    } catch {
+      return false
+    }
+  })
+  const toggleStage = useCallback(() => {
+    setStageCollapsed((prev) => {
+      const next = !prev
+      try {
+        localStorage.setItem("live-stage-collapsed", next ? "1" : "0")
+      } catch {}
+      return next
+    })
+  }, [])
 
   // Hanako AI 状态
   const [hanakoEmotion, setHanakoEmotion] = useState<HanakoEmotion>("neutral")
@@ -498,7 +522,11 @@ export default function LiveWallContent() {
   const shown = mounted && !closing
 
   return (
-    <div className={`live-wall-page ${shown ? "live-wall-shown" : ""}`}>
+    <div
+      className={`live-wall-page ${shown ? "live-wall-shown" : ""} ${
+        stageCollapsed ? "live-stage-collapsed" : ""
+      }`}
+    >
       {/* 纯黑底 + 极淡青色扫描线 */}
       <div className="live-wall-bg-scanlines" aria-hidden />
       <div className="live-wall-bg-vignette" aria-hidden />
@@ -576,6 +604,22 @@ export default function LiveWallContent() {
             reply={hanakoReply}
             isThinking={hanakoThinking}
           />
+          <button
+            type="button"
+            className="live-stage-toggle"
+            onClick={toggleStage}
+            aria-expanded={!stageCollapsed}
+            aria-label={stageCollapsed ? "展开主播画面" : "收起主播画面"}
+          >
+            {stageCollapsed ? (
+              <ChevronDown className="h-4 w-4" />
+            ) : (
+              <ChevronUp className="h-4 w-4" />
+            )}
+            <span className="live-stage-toggle-label">
+              {stageCollapsed ? "展开 hanako" : "收起画面"}
+            </span>
+          </button>
         </aside>
       </div>
 

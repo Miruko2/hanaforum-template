@@ -2797,8 +2797,71 @@ body.modal-open {
   flex-shrink: 0;
   border-left: 1px solid rgba(245, 166, 209, 0.12);
   display: flex;
+  flex-direction: column;
   align-items: stretch;
+  justify-content: flex-end;
   background: #160c14;
+  overflow: hidden;
+  /* 折叠动画：桌面收 width、移动收 height（见媒体查询），同一条丝滑曲线 */
+  transition: height 0.34s cubic-bezier(0.22, 1, 0.36, 1),
+    width 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* 主播视频在列布局里填满；收起时整块向一侧滑出（transform 走合成层，安卓最稳） */
+.live-wall-stage > .live-host-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+  transition: transform 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* 收起 / 展开主播画面的开关 */
+.live-stage-toggle {
+  position: relative;
+  flex: 0 0 auto;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 4px auto 8px;
+  padding: 5px 16px;
+  border-radius: 999px;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  white-space: nowrap;
+  color: rgba(245, 166, 209, 0.85);
+  background: rgba(22, 12, 20, 0.92);
+  border: 1px solid rgba(245, 166, 209, 0.3);
+  box-shadow: 0 0 10px rgba(245, 166, 209, 0.12);
+  z-index: 6;
+  transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+.live-stage-toggle:hover {
+  color: #f5a6d1;
+  border-color: rgba(245, 166, 209, 0.55);
+  background: rgba(40, 18, 32, 0.95);
+  box-shadow: 0 0 14px rgba(245, 166, 209, 0.25);
+}
+.live-stage-toggle-label {
+  white-space: nowrap;
+}
+
+/* 收起态：视频整块滑走、容器收窄/收矮，聊天区平滑撑满。
+   桌面右栏从 320px 收成留住开关的窄条（横向滑出）；移动端的收矮 + 上滑见下方媒体查询。 */
+.live-stage-collapsed .live-wall-stage {
+  width: 132px;
+}
+.live-stage-collapsed .live-wall-stage > .live-host-stage {
+  transform: translateX(-100%);
+}
+
+/* 晕动症 / 省电：尊重系统“减少动态效果”，直接切换不做过渡 */
+@media (prefers-reduced-motion: reduce) {
+  .live-wall-stage,
+  .live-wall-stage > .live-host-stage {
+    transition: none;
+  }
 }
 
 /* AI 消息行特殊样式 */
@@ -3150,11 +3213,28 @@ body.modal-open {
   .live-wall-stage {
     order: -1;
     width: 100%;
-    height: 40vh;
-    min-height: 260px;
-    max-height: 360px;
+    /* 用 clamp 内联上下限，避免 min/max-height 每帧夹紧打断 height 过渡 */
+    height: clamp(260px, 42vh, 360px);
     border-left: none;
     border-bottom: 1px solid rgba(245, 166, 209, 0.15);
+  }
+
+  /* 移动端：视频绝对定位 + 固定高度，容器收矮时只被裁切 / 上滑，不会被压扁 */
+  .live-wall-stage > .live-host-stage {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: clamp(260px, 42vh, 360px);
+  }
+
+  /* 收起态（移动端）：主播区收成只剩开关的细条，视频整块向上“拉起”滑出，聊天撑满整屏 */
+  .live-stage-collapsed .live-wall-stage {
+    width: 100%;
+    height: 46px;
+  }
+  .live-stage-collapsed .live-wall-stage > .live-host-stage {
+    transform: translateY(-100%);
   }
 
   .live-host-stage {
