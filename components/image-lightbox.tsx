@@ -37,17 +37,33 @@ export default function ImageLightbox({ src, alt = "", onClose }: ImageLightboxP
   useEffect(() => {
     if (!src) return
     setLoaded(false)
-    // 缓存命中时，<img> 可能在 React 绑定 onLoad 之前就已 complete，onLoad 不会再触发；
-    // 下一帧用 complete 兜底，确保已缓存的图也能正常弹入（否则会一直停在 loading）。
+    let cancelled = false
+    const reveal = () => {
+      if (!cancelled) setLoaded(true)
+    }
+    // 用 decode() 等「完全解码」再触发入场动画，而非 onLoad（仅代表下载完成）。
+    // decoding="async" 下，onLoad 后图片仍在后台异步解码；若此时就开始 scale spring，
+    // 安卓 WebView 会「边解码边合成」并发撕裂 backing buffer → 图片鬼影闪 —— 且只在
+    // 「首次未缓存的大原图」出现、缓存后消失（正是用户现象）。decode() resolve 时图已
+    // 解码就绪、动画流畅。下一帧执行确保 <img> 已挂载并绑定 src；decode 不支持时退回
+    // complete/load 兜底。
     const raf = requestAnimationFrame(() => {
       const el = imgRef.current
-      if (el && el.complete && el.naturalWidth > 0) setLoaded(true)
+      if (!el) return
+      if (typeof el.decode === "function") {
+        el.decode().then(reveal).catch(reveal)
+      } else if (el.complete && el.naturalWidth > 0) {
+        reveal()
+      } else {
+        el.addEventListener("load", reveal, { once: true })
+      }
     })
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose()
     }
     window.addEventListener("keydown", onKey)
     return () => {
+      cancelled = true
       cancelAnimationFrame(raf)
       window.removeEventListener("keydown", onKey)
     }
@@ -106,7 +122,6 @@ export default function ImageLightbox({ src, alt = "", onClose }: ImageLightboxP
             draggable={false}
             decoding="async"
             onClick={(e) => e.stopPropagation()}
-            onLoad={() => setLoaded(true)}
             className="max-h-full max-w-full select-none rounded-2xl object-contain shadow-[0_30px_90px_-20px_rgba(0,0,0,0.8)] cursor-zoom-out"
             initial={{ scale: 0.6, opacity: 0 }}
             animate={loaded ? { scale: 1, opacity: 1 } : { scale: 0.6, opacity: 0 }}
