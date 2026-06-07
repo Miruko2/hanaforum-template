@@ -33,6 +33,17 @@ export default function ImageLightbox({ src, alt = "", onClose }: ImageLightboxP
   const [isAndroid] = useState(
     () => typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent),
   )
+  // 进一步区分「安卓 app（Capacitor WebView）」：图片入场的 scale 动画在 app 的
+  // WebView 里，首次把未缓存大图栅格化成 GPU 合成层时与动画并发，仍会撕裂（鬼影闪）——
+  // decode() 只解决 CPU 解码、管不到 GPU 首次纹理化，故安卓网页端够、app 端不够。
+  // app 端图片入场去掉几何动画（见 imgAnim）。同步判定，与 MusicPlayer 的 isAndroidWebView 一致。
+  const [isAndroidApp] = useState(() => {
+    if (typeof navigator === "undefined" || typeof window === "undefined") return false
+    const ua = navigator.userAgent
+    return (
+      (/Android/.test(ua) && /wv|WebView/.test(ua)) || "Capacitor" in window
+    )
+  })
 
   useEffect(() => {
     if (!src) return
@@ -70,6 +81,23 @@ export default function ImageLightbox({ src, alt = "", onClose }: ImageLightboxP
   }, [src, onClose])
 
   if (typeof window === "undefined") return null
+
+  // 图片入场/退场动画：安卓 app（WebView）去掉 scale 几何动画，仅按 loaded 控制
+  // 显隐（decode 完瞬显），消除「首次大图栅格化 + 动画并发」撕裂；其它平台（含安卓
+  // 网页，已靠 decode() 解决）保留 spring 弹跳。
+  const imgAnim = isAndroidApp
+    ? {
+        initial: { opacity: 0 },
+        animate: loaded ? { opacity: 1 } : { opacity: 0 },
+        exit: { opacity: 0 },
+        transition: { duration: 0 },
+      }
+    : {
+        initial: { scale: 0.6, opacity: 0 },
+        animate: loaded ? { scale: 1, opacity: 1 } : { scale: 0.6, opacity: 0 },
+        exit: { scale: 0.5, opacity: 0 },
+        transition: { type: "spring" as const, stiffness: 300, damping: 24, mass: 0.7 },
+      }
 
   return createPortal(
     <AnimatePresence>
@@ -123,10 +151,10 @@ export default function ImageLightbox({ src, alt = "", onClose }: ImageLightboxP
             decoding="async"
             onClick={(e) => e.stopPropagation()}
             className="max-h-full max-w-full select-none rounded-2xl object-contain shadow-[0_30px_90px_-20px_rgba(0,0,0,0.8)] cursor-zoom-out"
-            initial={{ scale: 0.6, opacity: 0 }}
-            animate={loaded ? { scale: 1, opacity: 1 } : { scale: 0.6, opacity: 0 }}
-            exit={{ scale: 0.5, opacity: 0 }}
-            transition={{ type: "spring", stiffness: 300, damping: 24, mass: 0.7 }}
+            initial={imgAnim.initial}
+            animate={imgAnim.animate}
+            exit={imgAnim.exit}
+            transition={imgAnim.transition}
           />
         </motion.div>
       )}
