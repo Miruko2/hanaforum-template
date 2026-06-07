@@ -69,12 +69,6 @@ export function MusicCanvas({ onExpand, overlayOpen = false }: Props) {
   // 安卓上有弹窗时退出渲染。其他平台 / 无弹窗时保持 canvas 显示。
   const hideForOverlay = isAndroid && overlayOpen
 
-  // 安卓 overlay 打开期间冻结 viewSize（仅安卓，条件同 hideForOverlay）。
-  // ResizeObserver 闭包依赖 [] 不重建，且 isAndroid/overlayOpen 会变，故用 ref
-  // 让回调每次读到最新值。详见下方 viewport size effect 的注释。
-  const freezeViewSizeRef = useRef(false)
-  freezeViewSizeRef.current = hideForOverlay
-
   // ---- 安卓 app 底部播放器鬼影根治：遮挡播放器矩形区内的卡片 ----
   // 安卓 WebView 的合成器 bug 让 preserve-3d 卡片穿透、画到 z-60 底部播放器上
   // （封面附近方形鬼影/闪动）。纯 CSS（不透明背景 / 提层 / 封层）均压不住，唯一
@@ -157,14 +151,6 @@ export function MusicCanvas({ onExpand, overlayOpen = false }: Props) {
     const el = viewportRef.current
     if (!el) return
     const update = () => {
-      // 安卓：overlay 打开期间冻结 viewSize。安卓 Chrome/WebView 的地址栏显隐、
-      // 软键盘会改 layout viewport 高度 → 这个 `fixed inset-0` 视口元素尺寸变 →
-      // ResizeObserver 触发 → 鱼眼焦点 (w/2, h/2) 重算 → 背景卡片整体跳位，关闭
-      // 又弹回，很突兀（用户反馈，仅安卓；iOS 软键盘盖在视口上、不缩 layout
-      // viewport，iPad/桌面不复现，故只在安卓冻结）。打开期间卡片本就被
-      // hideForOverlay 藏起、用户看不到，冻结零副作用；关闭后元素尺寸恢复、
-      // RO 再次触发（此时不冻结）同步回原值，全程 viewSize 不变、卡片不跳。
-      if (freezeViewSizeRef.current) return
       const r = el.getBoundingClientRect()
       setViewSize({ w: r.width, h: r.height })
     }
@@ -535,13 +521,16 @@ export function MusicCanvas({ onExpand, overlayOpen = false }: Props) {
         className="absolute inset-0 pointer-events-none"
         style={{
           transformStyle: "preserve-3d",
-          opacity: hideForOverlay ? 0 : 1,
+          // 安卓 overlay 打开时隐藏卡片层（防 preserve-3d 卡片穿透、画到覆盖层
+          // 上的鬼影）。只能用 visibility 瞬切，绝不能用 opacity 过渡 ——
+          // opacity<1 是 CSS grouping property，按规范会把本元素的
+          // transform-style 强制扁平化为 flat；安卓上 opacity∈[0,1) 的那一瞬
+          // 卡片层被拍平、perspective 透视投影整体塌陷，表现为「整面墙一起
+          // 跳位」（打开淡出 + 关闭淡入各塌一次，用户反馈）。visibility 不是
+          // grouping property、不触发扁平化，瞬切隐藏/显示不动 3D 投影，根除跳位。
+          // 代价：卡片由淡出变为瞬间隐藏/显示（被覆盖层入场掩盖，可接受）。
+          // iPad/桌面 hideForOverlay 恒 false、opacity 恒 1，从不进入此路径。
           visibility: hideForOverlay ? "hidden" : "visible",
-          // visibility 延迟到 opacity 淡完才切，避免"瞬间消失"——
-          // 关闭时 visibility 立刻 visible 再淡入
-          transition:
-            "opacity 200ms ease-out, visibility 0s linear " +
-            (hideForOverlay ? "200ms" : "0s"),
         }}
       >
         {instances.map((inst) => (
