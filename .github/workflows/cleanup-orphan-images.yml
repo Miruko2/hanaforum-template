@@ -1,0 +1,26 @@
+name: 清理孤儿图(post-images)
+
+# 兜底清理已删帖遗留的 storage 孤儿图。频率低即可（孤儿图不紧急）。
+# 需在 仓库 Settings → Secrets and variables → Actions 配置：
+#   SUPABASE_SERVICE_ROLE_KEY（service role key 只放 Secret，绝不进代码）
+#   注：URL 直接复用已有的 NEXT_PUBLIC_SUPABASE_URL（supabase-keepalive 已配），无需重复添加
+on:
+  schedule:
+    # 周日 18:00 UTC = 北京周一 02:00，每周一次
+    - cron: "0 18 * * 0"
+  workflow_dispatch: {} # 支持在 Actions 页手动触发（建议首次手动跑、看日志确认）
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      # 脚本只依赖 supabase-js，单独装即可（无需装全项目依赖）
+      - run: npm i @supabase/supabase-js@2 --no-save
+      - run: node scripts/cleanup-orphan-post-images.mjs --delete
+        env:
+          SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
