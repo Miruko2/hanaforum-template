@@ -17,7 +17,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          # supabase-js 新版 createClient 即初始化 RealtimeClient，需 Node 22+ 原生 WebSocket；
+          # Node 20 会报 "Node.js 20 detected without native WebSocket support" 而崩。
+          node-version: "22"
       # 脚本只依赖 supabase-js，单独装即可（无需装全项目依赖）
       - run: npm i @supabase/supabase-js@2 --no-save
       - run: node scripts/cleanup-orphan-post-images.mjs --delete
