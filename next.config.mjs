@@ -34,9 +34,13 @@ const nextConfig = {
   images: {
     unoptimized: isCapacitor || process.env.NODE_ENV !== "production",
     // 以下配置在build时不起作用，但可以在开发模式下帮助优化
-    deviceSizes: [640, 750, 828, 1080, 1200, 1920, 2048],
-    imageSizes: [16, 32, 48, 64, 96, 128, 256, 384],
-    formats: ['image/webp', 'image/avif'],
+    // 精简变体数（原 7+8 档）→ 降低 Vercel Image Optimization 的 transformation 次数：
+    // 每多一个尺寸/格式档，同一源图就可能多生成一份、多吃一次 transformation 额度。
+    deviceSizes: [640, 1080, 1920],
+    imageSizes: [64, 128, 256],
+    // 只留 webp：原 webp+avif 会让同一源图按浏览器各生成一份（×2 transformation）；
+    // webp 覆盖率足够，去掉 avif 直接砍掉一半图片转换消耗。
+    formats: ['image/webp'],
     minimumCacheTTL: 86400, // 24小时缓存
     dangerouslyAllowSVG: true,
     contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;",
