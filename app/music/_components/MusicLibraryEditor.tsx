@@ -17,7 +17,7 @@ import {
 import { usePlayback } from "../_context/PlaybackContext"
 import { parseNeteaseUrl, fetchNeteaseTracks } from "../_lib/neteaseImport"
 
-const MAX_TRACKS = 50
+const MAX_TRACKS = 100
 // 导入冷却：两次网易歌单解析至少间隔这么久，降低对 injahow 的抓取频率。
 // 软限制（前端记账 + localStorage 持久化，刷新不重置）；够挡住正常误操作 / 连点。
 const IMPORT_COOLDOWN_MS = 60_000

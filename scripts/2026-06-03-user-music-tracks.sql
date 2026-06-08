@@ -54,8 +54,8 @@ BEGIN
   FROM public.user_music_tracks
   WHERE user_id = NEW.user_id;
 
-  IF cnt >= 50 THEN
-    RAISE EXCEPTION '每个用户最多 50 首自定义曲目'
+  IF cnt >= 100 THEN
+    RAISE EXCEPTION '每个用户最多 100 首自定义曲目'
       USING ERRCODE = 'check_violation';
   END IF;
 
