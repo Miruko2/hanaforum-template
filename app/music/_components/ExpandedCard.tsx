@@ -5,7 +5,7 @@ import { createPortal } from "react-dom"
 import { motion, AnimatePresence } from "framer-motion"
 import { Pause, Play, SkipBack, SkipForward, Heart, X } from "lucide-react"
 import { type Track } from "../_data/tracks"
-import { usePlayback, useTracks } from "../_context/PlaybackContext"
+import { usePlayback, usePlaybackTime, useTracks } from "../_context/PlaybackContext"
 import { useDominantHue } from "../_lib/useDominantHue"
 import { useReducedMotion } from "../_lib/useReducedMotion"
 import { TrackCover } from "./TrackCover"
@@ -64,8 +64,9 @@ function ExpandedInner({
   target: { track: Track; rect: ExpandRect }
   onClose: () => void
 }) {
-  const { currentTrack, isPlaying, currentTime, duration, isFallback, togglePlay, play, seek, isFavorite, toggleFavorite } =
+  const { currentTrack, isPlaying, isFallback, togglePlay, play, seek, isFavorite, toggleFavorite } =
     usePlayback()
+  const { currentTime, duration } = usePlaybackTime()
   const tracks = useTracks()
   const [shown, setShown] = useState<Track>(target.track)
   const isCurrent = currentTrack?.id === shown.id

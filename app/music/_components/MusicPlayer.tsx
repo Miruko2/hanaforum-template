@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Pause, Play, SkipBack, SkipForward, History as HistoryIcon, Heart, Repeat, Repeat1, Square } from "lucide-react"
-import { usePlayback } from "../_context/PlaybackContext"
+import { usePlayback, usePlaybackTime } from "../_context/PlaybackContext"
 import { useDominantHue } from "../_lib/useDominantHue"
 import { TrackCover } from "./TrackCover"
 import { PlayModeMenu } from "./PlayModeMenu"
@@ -127,8 +127,9 @@ function ProgressBar({
 }
 
 export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
-  const { currentTrack, isPlaying, currentTime, duration, buffered, isFallback, togglePlay, seek, next, prev, isFavorite, toggleFavorite, playMode, setPlayMode } =
+  const { currentTrack, isPlaying, isFallback, togglePlay, seek, next, prev, isFavorite, toggleFavorite, playMode, setPlayMode } =
     usePlayback()
+  const { currentTime, duration, buffered } = usePlaybackTime()
   const fav = currentTrack ? isFavorite(currentTrack.id) : false
 
   // 播放模式上拉菜单

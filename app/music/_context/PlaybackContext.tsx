@@ -44,9 +44,6 @@ export type HistoryEntry = {
 export type PlaybackState = {
   currentTrack: Track | null
   isPlaying: boolean
-  currentTime: number
-  duration: number
-  buffered: number         // 已缓冲（加载）到的时长，秒
   isFallback: boolean      // true when the current track's audio source is unavailable
   /** 播放模式：列表循环 / 单曲循环 / 播完就暂停。持久化。 */
   playMode: PlayMode
@@ -87,6 +84,23 @@ export function usePlayback(): PlaybackState {
   const ctx = useContext(PlaybackCtx)
   if (!ctx) throw new Error("usePlayback must be used inside <PlaybackProvider>")
   return ctx
+}
+
+// ---- 高频时间 Context：currentTime / duration / buffered ----
+// 只有进度条组件（MusicPlayer / ExpandedCard）需要订阅这些每 240ms 变化一次的值。
+// 拆成独立 Context 后，卡片墙、HistoryPanel 等不会被时间抖动触发重渲染。
+export type PlaybackTimeState = {
+  currentTime: number
+  duration: number
+  buffered: number
+}
+const PlaybackTimeCtx = createContext<PlaybackTimeState>({
+  currentTime: 0,
+  duration: 0,
+  buffered: 0,
+})
+export function usePlaybackTime(): PlaybackTimeState {
+  return useContext(PlaybackTimeCtx)
 }
 
 // 单独的低频上下文：只承载曲目列表（仅在用户曲目加载/切换时变化）。
@@ -167,6 +181,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   const [duration, setDuration] = useState(0)
   const [buffered, setBuffered] = useState(0) // 已缓冲（加载）到的时长（秒）
   const [isFallback, setIsFallback] = useState(false)
+  // timeValue 用 useMemo 避免每次 render 都新建对象 → 避免 TimeCtx 消费者无谓重渲染
   const [playMode, setPlayModeState] = useState<PlayMode>("list")
   // playModeRef / nextRef：供 [] 依赖的音频初始化 effect 里的 onEnded 读到最新值。
   const playModeRef = useRef<PlayMode>("list")
@@ -629,13 +644,15 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     return smoothedIntensityRef.current
   }, [])
 
+  const timeValue = useMemo<PlaybackTimeState>(
+    () => ({ currentTime, duration, buffered }),
+    [currentTime, duration, buffered],
+  )
+
   const value: PlaybackState = useMemo(
     () => ({
       currentTrack,
       isPlaying,
-      currentTime,
-      duration,
-      buffered,
       isFallback,
       playMode,
       history,
@@ -654,7 +671,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       getAudioIntensity,
       refreshTracks,
     }),
-    [currentTrack, isPlaying, currentTime, duration, buffered, isFallback, playMode, history, favorites, tracks, play, pause, togglePlay, seek, next, prev, clearHistory, isFavorite, toggleFavorite, setPlayMode, getAudioIntensity, refreshTracks],
+    [currentTrack, isPlaying, isFallback, playMode, history, favorites, tracks, play, pause, togglePlay, seek, next, prev, clearHistory, isFavorite, toggleFavorite, setPlayMode, getAudioIntensity, refreshTracks],
   )
 
   const tracksCtxValue = useMemo<TrackSourceCtx>(
@@ -664,7 +681,9 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
 
   return (
     <PlaybackCtx.Provider value={value}>
-      <PlaybackTracksCtx.Provider value={tracksCtxValue}>{children}</PlaybackTracksCtx.Provider>
+      <PlaybackTimeCtx.Provider value={timeValue}>
+        <PlaybackTracksCtx.Provider value={tracksCtxValue}>{children}</PlaybackTracksCtx.Provider>
+      </PlaybackTimeCtx.Provider>
     </PlaybackCtx.Provider>
   )
 }

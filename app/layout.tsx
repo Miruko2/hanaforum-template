@@ -90,7 +90,9 @@ export default function RootLayout({
             backgroundRepeat: "no-repeat",
           }}
         />
-        <Providers>{children}</Providers>
+        <Providers>
+          {children}
+        </Providers>
       </body>
     </html>
   )

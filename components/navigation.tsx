@@ -1,12 +1,12 @@
 "use client"
 
-import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { Suspense, useEffect, useMemo, useState, type ReactNode } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
-import { LogOut, User, Settings, Menu, X, PlusCircle, Home, Layers, LogIn, UserPlus, ChevronDown } from "lucide-react"
+import { LogOut, User, Settings, Menu, X, PlusCircle, Home, Layers, LogIn, UserPlus, ChevronDown, MessageCircle } from "lucide-react"
 import Link from "next/link"
 import { createPortal } from "react-dom"
 import { AnimatePresence, motion } from "framer-motion"
@@ -22,6 +22,7 @@ import {
 import NotificationBell from "@/components/notification-bell"
 import CategoryMenu from "@/components/category-menu"
 import { useCinemaMode } from "@/contexts/cinema-mode-context"
+import { useChatUI } from "@/contexts/chat-ui-context"
 import { isValidCategory, CATEGORIES } from "@/lib/categories"
 import { Clapperboard, Zap, Music } from "lucide-react"
 
@@ -36,10 +37,6 @@ function NavigationContent() {
   // 分类卡片在浮层内展开二级分类
   const [catExpanded, setCatExpanded] = useState(false)
   const [mounted, setMounted] = useState(false)
-  const [isNavVisible, setIsNavVisible] = useState(true)
-  // lastScrollY 只在滚动 handler 内做比较，不参与渲染，用 ref 避免 set 触发
-  // useEffect 重新绑/解绑 scroll 监听器（之前每帧重绑一次）
-  const lastScrollYRef = useRef(0)
   const [isScrolled, setIsScrolled] = useState(false)
   // 当前激活的分类（仅用于 CategoryMenu 的高亮态）— useSearchParams 自动跟随 URL
   const activeCategory = useMemo(() => {
@@ -48,6 +45,8 @@ function NavigationContent() {
   }, [searchParams])
   // 影院模式由 CinemaModeProvider 统一管理（替代之前的 CustomEvent 总线）
   const { cinemaMode, toggleCinemaMode: ctxToggleCinemaMode } = useCinemaMode()
+  // 聊天室入口：读未读数显示红点、点击打开面板（与 floating-chat 共享状态）
+  const { setOpen: setChatOpen, unread: chatUnread } = useChatUI()
   // 用户头像
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
 
@@ -160,27 +159,9 @@ function NavigationContent() {
     if (!mounted) return
 
     const handleScroll = () => {
-      const currentScrollY = window.scrollY
-      const lastScrollY = lastScrollYRef.current
-
-      // 更新滚动状态（用于视觉效果）
-      setIsScrolled(currentScrollY > 50)
-
-      // 在页面顶部时始终显示导航栏
-      if (currentScrollY < 10) {
-        setIsNavVisible(true)
-      }
-      // 向下滚动且超过500px时隐藏导航栏
-      else if (currentScrollY > lastScrollY && currentScrollY > 500) {
-        setIsNavVisible(false)
-        setIsMobileMenuOpen(false) // 隐藏时关闭移动端菜单
-      }
-      // 向上滚动时显示导航栏
-      else if (currentScrollY < lastScrollY) {
-        setIsNavVisible(true)
-      }
-
-      lastScrollYRef.current = currentScrollY
+      // 仅更新视觉状态（滚动一定距离后背景加深）。导航栏不再随向下滚动隐藏——
+      // 聊天入口现在挂在导航栏上，必须全站、各滚动位置都可达（用户需求）。
+      setIsScrolled(window.scrollY > 50)
     }
 
     // 添加节流优化，避免过度触发
@@ -239,8 +220,7 @@ function NavigationContent() {
 
   return (
     <header className={cn(
-      "fixed top-4 left-4 right-4 z-40 max-w-6xl mx-auto transition-transform duration-300 ease-in-out",
-      isNavVisible ? "translate-y-0" : "-translate-y-full"
+      "fixed top-4 left-4 right-4 z-40 max-w-6xl mx-auto transition-transform duration-300 ease-in-out translate-y-0"
     )}>
       <div className={cn(
         "bg-black/20 backdrop-blur-lg border border-white/10 rounded-2xl px-6 shadow-lg transition-all duration-300",
@@ -343,6 +323,20 @@ function NavigationContent() {
           <div className="flex items-center">
             {user ? (
               <>
+                {/* 聊天室入口：与通知铃并列，带未读红点；全站常驻 */}
+                <button
+                  onClick={() => setChatOpen(true)}
+                  className="relative flex h-10 w-10 items-center justify-center rounded-full text-gray-300 transition-colors hover:bg-white/10 hover:text-pink-300"
+                  aria-label="聊天室"
+                  title="聊天室"
+                >
+                  <MessageCircle className="h-5 w-5" />
+                  {chatUnread > 0 && (
+                    <span className="absolute right-1 top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-pink-300/70 px-1 text-[10px] font-bold leading-none text-white shadow">
+                      {chatUnread > 99 ? "99+" : chatUnread}
+                    </span>
+                  )}
+                </button>
                 <NotificationBell />
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>

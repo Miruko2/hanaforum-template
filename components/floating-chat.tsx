@@ -1,0 +1,809 @@
+"use client"
+
+import { useCallback, useEffect, useRef, useState } from "react"
+import { motion, AnimatePresence } from "framer-motion"
+import { X, Send, Smile, Users, Hash } from "lucide-react"
+import { supabase } from "@/lib/supabaseClient"
+import { useSimpleAuth } from "@/contexts/auth-context-simple"
+import { useChatUI } from "@/contexts/chat-ui-context"
+import { useToast } from "@/hooks/use-toast"
+import styles from "./floating-chat.module.css"
+
+// 统一的展示消息形状（大厅与私聊都映射到这个）
+interface DisplayMsg {
+  id: string
+  fromId: string
+  username: string
+  avatar_url?: string | null
+  kind: "text" | "sticker"
+  content: string
+  // 仅「会话中实时新到」的消息为 true → 播放入场动效；历史与切换不动
+  isNew?: boolean
+}
+
+interface OnlineUser {
+  id: string
+  username: string
+  avatar_url?: string | null
+}
+
+interface Partner {
+  id: string
+  username: string
+  avatar_url?: string | null
+}
+
+interface DmConv extends Partner {
+  unread: number
+}
+
+// 当前会话：大厅，或与某人的私聊
+type Active = { kind: "hall" } | ({ kind: "dm" } & Partner)
+
+const MAX_LEN = 300
+const STICKERS = ["happy", "shy", "worried", "yandere", "surprised", "sleepy"]
+const ASSET_EXTS = ["jpg", "png", "webp", "gif"]
+
+// Blur effect constants for scroll fade
+const BLUR_FADE_ZONE = 50 // pixels from edge to start blur
+const BLUR_MAX = 12 // max blur in pixels
+
+const pairKey = (a: string, b: string) => [a, b].sort().join(":")
+
+// localStorage key for persisting chat panel position
+const POS_STORAGE_KEY = "floating-chat-pos"
+
+interface PanelPosition {
+  x: number
+  y: number
+}
+
+function loadSavedPosition(): PanelPosition | null {
+  if (typeof window === "undefined") return null
+  try {
+    const raw = localStorage.getItem(POS_STORAGE_KEY)
+    if (!raw) return null
+    const pos = JSON.parse(raw) as PanelPosition
+    if (typeof pos.x === "number" && typeof pos.y === "number") return pos
+  } catch {}
+  return null
+}
+
+function savePosition(pos: PanelPosition) {
+  try {
+    localStorage.setItem(POS_STORAGE_KEY, JSON.stringify(pos))
+  } catch {}
+}
+
+export default function FloatingChat() {
+  const { user } = useSimpleAuth()
+  const { toast } = useToast()
+
+  // open / 未读红点由导航栏入口共享：本组件只读 open（决定渲染面板）、写 unread（红点数）
+  const { open, setOpen, setUnread } = useChatUI()
+  const [active, setActive] = useState<Active>({ kind: "hall" })
+  const [convs, setConvs] = useState<DmConv[]>([])
+  const [messages, setMessages] = useState<DisplayMsg[]>([])
+  const [online, setOnline] = useState<OnlineUser[]>([])
+  const [input, setInput] = useState("")
+  const [sending, setSending] = useState(false)
+  const [showStickers, setShowStickers] = useState(false)
+
+  // Drag position state - persisted in localStorage
+  const [position, setPosition] = useState<PanelPosition | null>(null)
+  const [isDragging, setIsDragging] = useState(false)
+
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const feedRef = useRef<HTMLDivElement>(null)
+  const atBottomRef = useRef(true)
+  const avatarRef = useRef<string | null>(null)
+  const activeRef = useRef<Active>(active)
+  const convsRef = useRef<DmConv[]>(convs)
+  const openRef = useRef(open)
+
+  // Load saved position on mount
+  useEffect(() => {
+    const saved = loadSavedPosition()
+    if (saved) setPosition(saved)
+  }, [])
+
+  // Lock body scroll when chat is open (prevent touch event passthrough)
+  useEffect(() => {
+    if (!open) return
+
+    const isMobile = window.innerWidth <= 640
+    if (!isMobile) return
+
+    // Save current scroll position
+    const scrollY = window.scrollY
+    const body = document.body
+
+    // Prevent body scroll
+    body.style.position = 'fixed'
+    body.style.top = `-${scrollY}px`
+    body.style.width = '100%'
+
+    return () => {
+      // Restore body scroll
+      body.style.position = ''
+      body.style.top = ''
+      body.style.width = ''
+      window.scrollTo(0, scrollY)
+    }
+  }, [open])
+
+  useEffect(() => {
+    activeRef.current = active
+  }, [active])
+  useEffect(() => {
+    convsRef.current = convs
+  }, [convs])
+  useEffect(() => {
+    openRef.current = open
+  }, [open])
+  // 私聊未读总数 → 同步给导航栏红点（关闭面板时也持续更新）
+  useEffect(() => {
+    setUnread(convs.reduce((sum, c) => sum + c.unread, 0))
+  }, [convs, setUnread])
+
+  const myId = user?.id
+  const myName =
+    user?.user_metadata?.username || (user?.email ? user.email.split("@")[0] : "匿名")
+
+  // 自己的头像（发送快照 + 心跳带上）
+  useEffect(() => {
+    if (!user?.id) return
+    let alive = true
+    supabase
+      .from("profiles")
+      .select("avatar_url")
+      .eq("id", user.id)
+      .single()
+      .then(({ data }) => {
+        if (alive) avatarRef.current = data?.avatar_url ?? null
+      })
+    return () => {
+      alive = false
+    }
+  }, [user?.id])
+
+  // 加载私聊会话列表（侧边栏）。保留已有未读计数。
+  const loadConvs = useCallback(async () => {
+    if (!myId) return
+    const { data, error } = await supabase
+      .from("dm_messages")
+      .select("sender_id,recipient_id,created_at")
+      .order("created_at", { ascending: false })
+      .limit(200)
+    if (error || !data) return
+    const rows = (data ?? []) as { sender_id: string; recipient_id: string }[]
+    const partners: string[] = []
+    for (const r of rows) {
+      const other: string = r.sender_id === myId ? r.recipient_id : r.sender_id
+      if (other && other !== myId && !partners.includes(other)) partners.push(other)
+    }
+    if (partners.length === 0) {
+      setConvs([])
+      return
+    }
+    const { data: profs } = await supabase
+      .from("profiles")
+      .select("id,username,avatar_url")
+      .in("id", partners)
+    const pmap = new Map((profs ?? []).map((p: { id: string; username: string; avatar_url: string | null }) => [p.id, p]))
+    setConvs((prev) => {
+      const unreadMap = new Map(prev.map((c) => [c.id, c.unread]))
+      return partners.map((id) => {
+        const p = pmap.get(id)
+        return {
+          id,
+          username: p?.username || "用户",
+          avatar_url: p?.avatar_url ?? null,
+          unread: unreadMap.get(id) ?? 0,
+        }
+      })
+    })
+  }, [myId])
+
+  // 挂载即载入会话列表（不依赖面板是否打开）：关闭时也能算未读、亮红点
+  useEffect(() => {
+    if (myId) loadConvs()
+  }, [myId, loadConvs])
+
+  // 全局常驻：监听「发给我」的私聊 → 更新侧边栏 + 未读。
+  // 不依赖面板是否打开——关闭时也要累积未读、让导航栏红点亮起来。
+  useEffect(() => {
+    if (!myId) return
+    const ch = supabase
+      .channel("dm_incoming")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "dm_messages", filter: `recipient_id=eq.${myId}` },
+        (payload) => {
+          const m = payload.new as { sender_id: string }
+          const a = activeRef.current
+          // 仅当面板开着且正在看这个人才不计未读；其余（含面板关闭）一律 +1
+          const viewing = openRef.current && a.kind === "dm" && a.id === m.sender_id
+          const known = convsRef.current.some((c) => c.id === m.sender_id)
+          setConvs((prev) => {
+            const exists = prev.find((c) => c.id === m.sender_id)
+            if (exists) {
+              return prev.map((c) =>
+                c.id === m.sender_id ? { ...c, unread: viewing ? 0 : c.unread + 1 } : c,
+              )
+            }
+            return [{ id: m.sender_id, username: "用户", avatar_url: null, unread: viewing ? 0 : 1 }, ...prev]
+          })
+          if (!known) loadConvs() // 新对话才回查资料，补全头像/名字
+        },
+      )
+      .subscribe()
+    return () => {
+      supabase.removeChannel(ch)
+    }
+  }, [myId, loadConvs])
+
+  // 在线状态：独立于 active，面板打开期间始终维持 presence 心跳
+  useEffect(() => {
+    if (!open || !myId) return
+
+    const seen = new Map<string, { username: string; avatar_url: string | null; ts: number }>()
+    const refresh = () => {
+      const now = Date.now()
+      for (const [id, v] of seen) if (now - v.ts > 30000) seen.delete(id)
+      setOnline(Array.from(seen, ([id, v]) => ({ id, username: v.username, avatar_url: v.avatar_url })))
+    }
+    seen.set(myId, { username: myName, avatar_url: avatarRef.current, ts: Date.now() })
+    setOnline([{ id: myId, username: myName, avatar_url: avatarRef.current }])
+    const presence = supabase.channel("chat_room_online", { config: { broadcast: { self: true } } })
+    const beat = () =>
+      presence.send({ type: "broadcast", event: "hb", payload: { id: myId, username: myName, avatar_url: avatarRef.current } })
+    presence
+      .on("broadcast", { event: "hb" }, ({ payload }) => {
+        if (payload?.id) {
+          seen.set(payload.id, { username: payload.username || "匿名", avatar_url: payload.avatar_url ?? null, ts: Date.now() })
+          refresh()
+        }
+      })
+      .on("broadcast", { event: "bye" }, ({ payload }) => {
+        if (payload?.id && seen.delete(payload.id)) refresh()
+      })
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") beat()
+      })
+    const beatTimer = setInterval(beat, 10000)
+    const pruneTimer = setInterval(refresh, 3000)
+
+    return () => {
+      presence.send({ type: "broadcast", event: "bye", payload: { id: myId } })
+      supabase.removeChannel(presence)
+      clearInterval(beatTimer)
+      clearInterval(pruneTimer)
+    }
+  }, [open, myId, myName])
+
+  // 当前会话：加载历史 + 订阅实时（大厅 or 某个私聊）
+  useEffect(() => {
+    if (!open || !myId) return
+    let alive = true
+    setMessages([])
+
+    if (active.kind === "hall") {
+      ;(async () => {
+        const { data, error } = await supabase
+          .from("chat_messages")
+          .select("id,user_id,username,avatar_url,kind,content,created_at")
+          .order("created_at", { ascending: false })
+          .limit(100)
+        if (!alive || error) return
+        const rows = ((data ?? []) as ChatRow[]).slice().reverse()
+        setMessages(rows.map(mapHall))
+      })()
+
+      const msgChannel = supabase
+        .channel("chat_room_messages")
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_messages" }, (payload) => {
+          const m = payload.new as ChatRow
+          setMessages((prev) => (prev.some((x) => x.id === m.id) ? prev : [...prev, { ...mapHall(m), isNew: true }].slice(-200)))
+        })
+        .on("postgres_changes", { event: "DELETE", schema: "public", table: "chat_messages" }, (payload) => {
+          const id = (payload.old as { id: string }).id
+          setMessages((prev) => prev.filter((x) => x.id !== id))
+        })
+        .subscribe()
+
+      return () => {
+        alive = false
+        supabase.removeChannel(msgChannel)
+      }
+    }
+
+    // 私聊
+    const partner: Partner = { id: active.id, username: active.username, avatar_url: active.avatar_url }
+    const pk = pairKey(myId, partner.id)
+    ;(async () => {
+      const { data, error } = await supabase
+        .from("dm_messages")
+        .select("id,sender_id,kind,content,created_at")
+        .eq("pair_key", pk)
+        .order("created_at", { ascending: false })
+        .limit(100)
+      if (!alive || error) return
+      const rows = ((data ?? []) as DmRow[]).slice().reverse()
+      setMessages(rows.map((m) => mapDm(m, myId, myName, partner)))
+    })()
+
+    const ch = supabase
+      .channel(`dm_${pk}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "dm_messages", filter: `pair_key=eq.${pk}` }, (payload) => {
+        const m = payload.new as DmRow
+        setMessages((prev) => (prev.some((x) => x.id === m.id) ? prev : [...prev, { ...mapDm(m, myId, myName, partner), isNew: true }].slice(-200)))
+      })
+      .subscribe()
+
+    return () => {
+      alive = false
+      supabase.removeChannel(ch)
+    }
+  }, [open, myId, myName, active])
+
+  // Update blur effect for messages near edges
+  const updateBlur = useCallback(() => {
+    const container = feedRef.current
+    if (!container) return
+
+    const containerRect = container.getBoundingClientRect()
+    const containerHeight = containerRect.height
+    const scrollTop = container.scrollTop
+    const isScrolled = scrollTop > 5
+    const isAtBottom = container.scrollHeight - scrollTop - containerHeight < 60
+
+    // Get all message rows
+    const rows = container.querySelectorAll(`.${styles.row}`)
+    const totalRows = rows.length
+
+    rows.forEach((row, index) => {
+      const rowRect = row.getBoundingClientRect()
+      const top = rowRect.top - containerRect.top
+      const bottom = rowRect.bottom - containerRect.top
+
+      let t = 1 // 0 = fully blurred, 1 = fully clear
+
+      // Don't blur the last 3 messages when at bottom (keep latest messages visible)
+      const isNearEnd = index >= totalRows - 3
+      const skipBottomBlur = isAtBottom && isNearEnd
+
+      if (bottom < 0 || top > containerHeight) {
+        // Completely outside
+        t = 0
+      } else if (!skipBottomBlur && top > containerHeight - BLUR_FADE_ZONE) {
+        // Near bottom edge (skip for recent messages when at bottom)
+        t = Math.max(0, (containerHeight - top) / BLUR_FADE_ZONE)
+      } else if (isScrolled && top < BLUR_FADE_ZONE) {
+        // Near top edge (only when scrolled)
+        t = Math.max(0, top / BLUR_FADE_ZONE)
+      }
+
+      const blurAmount = BLUR_MAX * (1 - t)
+      const opacityValue = 0.2 + 0.8 * t
+
+      if (t < 0.99) {
+        ;(row as HTMLElement).style.filter = `blur(${blurAmount.toFixed(2)}px)`
+        ;(row as HTMLElement).style.opacity = opacityValue.toFixed(3)
+      } else {
+        ;(row as HTMLElement).style.filter = ""
+        ;(row as HTMLElement).style.opacity = ""
+      }
+    })
+  }, [])
+
+  // 贴底才自动滚（看历史不被打断）
+  const onScroll = () => {
+    const el = feedRef.current
+    if (el) {
+      atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60
+      updateBlur()
+    }
+  }
+  useEffect(() => {
+    const el = feedRef.current
+    if (el && atBottomRef.current) {
+      el.scrollTop = el.scrollHeight
+    }
+    // Update blur after messages change (with small delay to allow DOM update)
+    requestAnimationFrame(() => {
+      requestAnimationFrame(updateBlur)
+    })
+  }, [messages, open, active, updateBlur])
+
+  const send = useCallback(
+    async (kind: "text" | "sticker", content: string) => {
+      if (!user || sending) return
+      const text = content.trim()
+      if (!text) return
+      const a = activeRef.current
+      setSending(true)
+      try {
+        let error
+        if (a.kind === "hall") {
+          ;({ error } = await supabase
+            .from("chat_messages")
+            .insert([{ user_id: user.id, username: myName, avatar_url: avatarRef.current, kind, content: text }]))
+        } else {
+          ;({ error } = await supabase
+            .from("dm_messages")
+            .insert([{ pair_key: pairKey(user.id, a.id), sender_id: user.id, recipient_id: a.id, kind, content: text }]))
+        }
+        if (error) {
+          const rl = (error as { code?: string }).code === "42501" || /row-level security/i.test(error.message || "")
+          toast({
+            title: rl ? "发太快了" : "发送失败",
+            description: rl ? "慢一点～3 秒最多 3 条" : error.message || "请稍后重试",
+            variant: "destructive",
+          })
+        }
+      } catch (e) {
+        toast({ title: "发送失败", description: (e as Error)?.message || "请稍后重试", variant: "destructive" })
+      } finally {
+        setSending(false)
+      }
+    },
+    [user, sending, myName, toast],
+  )
+
+  const submitText = () => {
+    const t = input.trim()
+    if (!t) return
+    send("text", t)
+    setInput("")
+    // Reset textarea height after clearing
+    if (textareaRef.current) textareaRef.current.style.height = "auto"
+  }
+
+  const autoResize = useCallback((el: HTMLTextAreaElement) => {
+    el.style.height = "auto"
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`
+  }, [])
+
+  // 发起 / 切到与某人的私聊
+  const startDm = useCallback(
+    (p: Partner) => {
+      if (!myId || p.id === myId) return
+      setActive({ kind: "dm", id: p.id, username: p.username, avatar_url: p.avatar_url ?? null })
+      setConvs((prev) => {
+        const exists = prev.find((c) => c.id === p.id)
+        if (exists) return prev.map((c) => (c.id === p.id ? { ...c, unread: 0, username: p.username, avatar_url: p.avatar_url ?? null } : c))
+        return [{ id: p.id, username: p.username, avatar_url: p.avatar_url ?? null, unread: 0 }, ...prev]
+      })
+      setShowStickers(false)
+    },
+    [myId],
+  )
+
+  const switchTo = useCallback((a: Active) => {
+    setActive(a)
+    if (a.kind === "dm") setConvs((prev) => prev.map((c) => (c.id === a.id ? { ...c, unread: 0 } : c)))
+    setShowStickers(false)
+  }, [])
+
+  if (!user) return null
+
+  const headerLabel = active.kind === "hall" ? "聊天大厅" : active.username
+
+  return (
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          className={styles.panel}
+          initial={{ opacity: 0, scale: 0.92 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.92 }}
+          transition={{ type: "spring", stiffness: 380, damping: 28 }}
+          drag
+          dragMomentum={false}
+          dragElastic={0}
+          onDragStart={() => setIsDragging(true)}
+          onDragEnd={(_, info) => {
+            setIsDragging(false)
+            // Calculate final position based on offset
+            const current = position || { x: 0, y: 0 }
+            const newPos = {
+              x: current.x + info.offset.x,
+              y: current.y + info.offset.y,
+            }
+            setPosition(newPos)
+            savePosition(newPos)
+          }}
+          style={{
+            // Apply saved position offset
+            x: position?.x ?? 0,
+            y: position?.y ?? 0,
+          }}
+        >
+          {/* 侧边栏：大厅 + 私聊会话切换 */}
+          <div className={styles.rail}>
+            <button
+              className={`${styles.railItem} ${active.kind === "hall" ? styles.railActive : ""}`}
+              onClick={() => switchTo({ kind: "hall" })}
+              title="聊天大厅"
+              aria-label="聊天大厅"
+            >
+              <Hash className="h-5 w-5" />
+            </button>
+            {convs.length > 0 && <div className={styles.railDivider} />}
+            <div className={styles.railList}>
+              {convs.map((c) => (
+                <button
+                  key={c.id}
+                  className={`${styles.railItem} ${active.kind === "dm" && active.id === c.id ? styles.railActive : ""}`}
+                  onClick={() => switchTo({ kind: "dm", id: c.id, username: c.username, avatar_url: c.avatar_url })}
+                  title={c.username}
+                >
+                  <UserAvatar username={c.username} avatarUrl={c.avatar_url} size={34} />
+                  {c.unread > 0 && <span className={styles.railBadge}>{c.unread > 9 ? "9+" : c.unread}</span>}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 主区 */}
+          <div className={styles.main}>
+            <header className={styles.header}>
+              <div className={styles.headerTitle}>
+                <span className={styles.headerName}>{headerLabel}</span>
+                {active.kind === "hall" ? (
+                  <span className={styles.headerOnline}>
+                    <Users className="h-3.5 w-3.5" />
+                    {online.length} 在聊
+                  </span>
+                ) : (
+                  <span className={styles.headerOnline}>私聊</span>
+                )}
+              </div>
+              <button className={styles.headerClose} onClick={() => setOpen(false)} aria-label="关闭">
+                <X className="h-5 w-5" />
+              </button>
+            </header>
+
+            {active.kind === "hall" && online.length > 0 && (
+              <div className={styles.onlineStrip}>
+                {online.slice(0, 12).map((u) => (
+                  <button
+                    key={u.id}
+                    className={styles.onlineAvatarBtn}
+                    onClick={() => startDm(u)}
+                    title={u.id === user.id ? u.username : `和 ${u.username} 私聊`}
+                  >
+                    <UserAvatar username={u.username} avatarUrl={u.avatar_url} size={22} />
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <div ref={feedRef} className={styles.feed} onScroll={onScroll}>
+              {messages.length === 0 ? (
+                <div className={styles.empty}>
+                  {active.kind === "hall" ? "还没有人说话，来打个招呼吧～" : `和 ${active.username} 开始聊天吧～`}
+                </div>
+              ) : (
+                messages.map((m) => {
+                  const mine = m.fromId === user.id
+                  return (
+                    <div key={m.id} className={`${styles.row} ${mine ? styles.rowMine : styles.rowOther} ${m.isNew ? styles.rowNew : ""}`}>
+                      {!mine &&
+                        (active.kind === "hall" ? (
+                          <button
+                            className={styles.avatarBtn}
+                            onClick={() => startDm({ id: m.fromId, username: m.username, avatar_url: m.avatar_url })}
+                            title={`和 ${m.username} 私聊`}
+                          >
+                            <UserAvatar username={m.username} avatarUrl={m.avatar_url} size={28} />
+                          </button>
+                        ) : (
+                          <UserAvatar username={m.username} avatarUrl={m.avatar_url} size={28} />
+                        ))}
+                      <div className={styles.msgCol}>
+                        {!mine && active.kind === "hall" && <span className={styles.msgName}>{m.username}</span>}
+                        {m.kind === "sticker" ? (
+                          <HanakoImg base={`/hanako/stickers/${m.content}`} className={styles.msgSticker} />
+                        ) : (
+                          <div className={`${styles.bubble} ${mine ? styles.bubbleMine : styles.bubbleOther}`}>{m.content}</div>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+
+            <AnimatePresence>
+              {showStickers && (
+                <motion.div
+                  className={styles.stickerPicker}
+                  initial={{ opacity: 0, scale: 0.8, y: 10 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.8, y: 10 }}
+                  transition={{
+                    type: "spring",
+                    stiffness: 400,
+                    damping: 25,
+                    mass: 0.8,
+                  }}
+                >
+                  {STICKERS.map((id) => (
+                    <button
+                      key={id}
+                      className={styles.stickerBtn}
+                      onClick={() => {
+                        send("sticker", id)
+                        setShowStickers(false)
+                      }}
+                      aria-label={id}
+                    >
+                      <HanakoImg
+                        base={`/hanako/stickers/${id}`}
+                        alt={id}
+                        onGiveUp={(img) => {
+                          const btn = img.closest("button")
+                          if (btn) (btn as HTMLElement).style.display = "none"
+                        }}
+                      />
+                    </button>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <footer className={styles.footer}>
+              <button className={styles.iconBtn} onClick={() => setShowStickers((s) => !s)} aria-label="表情包">
+                <Smile className="h-5 w-5" />
+              </button>
+              <textarea
+                ref={textareaRef}
+                className={styles.input}
+                value={input}
+                rows={1}
+                onChange={(e) => {
+                  setInput(e.target.value.slice(0, MAX_LEN))
+                  autoResize(e.currentTarget)
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault()
+                    submitText()
+                  }
+                }}
+                placeholder={active.kind === "hall" ? "对大厅说点什么…" : `私聊 ${active.username}…`}
+                maxLength={MAX_LEN}
+              />
+              <button className={styles.send} onClick={submitText} disabled={sending || !input.trim()} aria-label="发送">
+                <Send className="h-4 w-4" />
+              </button>
+            </footer>
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  )
+}
+
+// ───────── 数据映射 ─────────
+
+interface ChatRow {
+  id: string
+  user_id: string
+  username: string
+  avatar_url?: string | null
+  kind: "text" | "sticker"
+  content: string
+}
+interface DmRow {
+  id: string
+  sender_id: string
+  kind: "text" | "sticker"
+  content: string
+}
+
+function mapHall(m: ChatRow): DisplayMsg {
+  return { id: m.id, fromId: m.user_id, username: m.username, avatar_url: m.avatar_url, kind: m.kind, content: m.content }
+}
+function mapDm(m: DmRow, myId: string, myName: string, partner: Partner): DisplayMsg {
+  const mine = m.sender_id === myId
+  return {
+    id: m.id,
+    fromId: m.sender_id,
+    username: mine ? myName : partner.username,
+    avatar_url: mine ? null : partner.avatar_url ?? null,
+    kind: m.kind,
+    content: m.content,
+  }
+}
+
+// ───────── 子组件 ─────────
+
+function UserAvatar({
+  username,
+  avatarUrl,
+  size = 32,
+}: {
+  username: string
+  avatarUrl?: string | null
+  size?: number
+}) {
+  const initial = (username?.[0] || "?").toUpperCase()
+  return (
+    <div className={styles.uavatar} style={{ width: size, height: size, fontSize: size * 0.45 }}>
+      <span className={styles.uavatarFallback}>{initial}</span>
+      {avatarUrl && (
+        <img
+          src={avatarUrl}
+          alt={username}
+          className={styles.uavatarImg}
+          onError={(e) => {
+            e.currentTarget.style.display = "none"
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+// 加载 public/hanako 下的图片（头像 / 表情包），格式不限：依次尝试 jpg→png→webp→gif，
+// 全部失败才放弃（默认隐藏，或交给 onGiveUp）。
+// 使用 fetch HEAD 请求检查，避免 404 错误污染控制台。
+function HanakoImg({
+  base,
+  alt = "",
+  className,
+  onGiveUp,
+}: {
+  base: string
+  alt?: string
+  className?: string
+  onGiveUp?: (img: HTMLImageElement) => void
+}) {
+  const [src, setSrc] = useState<string | null>(null)
+  const imgRef = useRef<HTMLImageElement>(null)
+
+  useEffect(() => {
+    let cancelled = false
+
+    const tryLoad = async () => {
+      for (const ext of ASSET_EXTS) {
+        const url = `${base}.${ext}`
+        try {
+          const res = await fetch(url, { method: "HEAD" })
+          if (cancelled) return
+          if (res.ok) {
+            setSrc(url)
+            return
+          }
+        } catch {
+          if (cancelled) return
+          // Network error, try next format
+        }
+      }
+      // All formats failed
+      if (!cancelled) {
+        if (onGiveUp && imgRef.current) {
+          onGiveUp(imgRef.current)
+        } else {
+          setSrc("__failed__")
+        }
+      }
+    }
+
+    tryLoad()
+    return () => { cancelled = true }
+  }, [base, onGiveUp])
+
+  if (src === "__failed__") {
+    return <img ref={imgRef} alt={alt} className={className} style={{ display: "none" }} />
+  }
+
+  if (!src) {
+    return <img ref={imgRef} alt={alt} className={className} style={{ visibility: "hidden" }} />
+  }
+
+  return <img ref={imgRef} src={src} alt={alt} className={className} />
+}
