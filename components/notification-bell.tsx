@@ -179,11 +179,13 @@ export default function NotificationBell({ mobileView = false }: NotificationBel
           transition={{ duration: 0.2 }}
           style={{ willChange: "opacity" }}
         >
-          {/* 背景：半透明黑色遮罩 */}
+          {/* 背景：半透明黑色遮罩 + 毛玻璃 */}
           <motion.div
             className="absolute inset-0"
             style={{
-              background: "rgba(0, 0, 0, 0.6)",
+              background: "rgba(0, 0, 0, 0.5)",
+              backdropFilter: "blur(10px)",
+              WebkitBackdropFilter: "blur(10px)",
             }}
             onClick={() => setIsOpen(false)}
           />
@@ -192,7 +194,9 @@ export default function NotificationBell({ mobileView = false }: NotificationBel
           <motion.div
             className="relative w-[95%] max-w-2xl max-h-[85vh] overflow-hidden flex flex-col rounded-2xl border border-white/15 shadow-2xl"
             style={{
-              background: "rgba(30, 30, 40, 0.95)",
+              background: "rgba(20, 20, 28, 0.55)",
+              backdropFilter: "blur(24px) saturate(150%)",
+              WebkitBackdropFilter: "blur(24px) saturate(150%)",
             }}
             initial={{ scale: 0.96, y: 8 }}
             animate={{ scale: 1, y: 0 }}

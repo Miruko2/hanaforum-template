@@ -548,6 +548,26 @@
   }
 }
 
+/* ── 表情包灯箱 ── */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.lightboxImg {
+  max-width: 85vw;
+  max-height: 85vh;
+  object-fit: contain;
+  border-radius: 16px;
+  filter: drop-shadow(0 8px 30px rgba(0, 0, 0, 0.6));
+}
+
 /* ── 尊重「减少动态效果」 ── */
 @media (prefers-reduced-motion: reduce) {
   .panel,

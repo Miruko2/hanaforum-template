@@ -89,6 +89,7 @@ export default function FloatingChat() {
   const [input, setInput] = useState("")
   const [sending, setSending] = useState(false)
   const [showStickers, setShowStickers] = useState(false)
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
 
   // 右键菜单（关闭私聊）
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; convId: string; username: string } | null>(null)
@@ -654,7 +655,11 @@ export default function FloatingChat() {
                       <div className={styles.msgCol}>
                         {!mine && active.kind === "hall" && <span className={styles.msgName}>{m.username}</span>}
                         {m.kind === "sticker" ? (
-                          <HanakoImg base={`/hanako/stickers/${m.content}`} className={styles.msgSticker} />
+                          <HanakoImg
+                            base={`/hanako/stickers/${m.content}`}
+                            className={styles.msgSticker}
+                            onClick={(src) => setLightboxSrc(src)}
+                          />
                         ) : (
                           <div className={`${styles.bubble} ${mine ? styles.bubbleMine : styles.bubbleOther}`}>{m.content}</div>
                         )}
@@ -745,6 +750,31 @@ export default function FloatingChat() {
       </div>,
       document.body,
     )}
+
+    {/* 表情包灯箱 */}
+    <AnimatePresence>
+      {lightboxSrc && (
+        <motion.div
+          className={styles.lightbox}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          onClick={() => setLightboxSrc(null)}
+        >
+          <motion.img
+            src={lightboxSrc}
+            alt=""
+            className={styles.lightboxImg}
+            initial={{ scale: 0.7, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.7, opacity: 0 }}
+            transition={{ type: "spring", stiffness: 300, damping: 25 }}
+            onClick={(e) => e.stopPropagation()}
+          />
+        </motion.div>
+      )}
+    </AnimatePresence>
     </>
   )
 }
@@ -818,11 +848,13 @@ function HanakoImg({
   alt = "",
   className,
   onGiveUp,
+  onClick,
 }: {
   base: string
   alt?: string
   className?: string
   onGiveUp?: (img: HTMLImageElement) => void
+  onClick?: (src: string) => void
 }) {
   const [src, setSrc] = useState<string | null>(null)
   const imgRef = useRef<HTMLImageElement>(null)
@@ -867,5 +899,14 @@ function HanakoImg({
     return <img ref={imgRef} alt={alt} className={className} style={{ visibility: "hidden" }} />
   }
 
-  return <img ref={imgRef} src={src} alt={alt} className={className} />
+  return (
+    <img
+      ref={imgRef}
+      src={src}
+      alt={alt}
+      className={className}
+      style={onClick ? { cursor: "pointer" } : undefined}
+      onClick={onClick ? () => onClick(src) : undefined}
+    />
+  )
 }
