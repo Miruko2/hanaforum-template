@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import { motion, AnimatePresence } from "framer-motion"
 import { X, Send, Smile, Users, Hash } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
@@ -89,11 +90,16 @@ export default function FloatingChat() {
   const [sending, setSending] = useState(false)
   const [showStickers, setShowStickers] = useState(false)
 
+  // 右键菜单（关闭私聊）
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; convId: string; username: string } | null>(null)
+  const ctxMenuRef = useRef<HTMLDivElement>(null)
+
   // Drag position state - persisted in localStorage
   const [position, setPosition] = useState<PanelPosition | null>(null)
   const [isDragging, setIsDragging] = useState(false)
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const feedRef = useRef<HTMLDivElement>(null)
   const atBottomRef = useRef(true)
   const avatarRef = useRef<string | null>(null)
@@ -486,11 +492,38 @@ export default function FloatingChat() {
     setShowStickers(false)
   }, [])
 
+  // 关闭（删除）一个私聊会话
+  const closeDm = useCallback((convId: string) => {
+    setConvs((prev) => prev.filter((c) => c.id !== convId))
+    // 如果正在看这个人的私聊，切回大厅
+    if (activeRef.current.kind === "dm" && activeRef.current.id === convId) {
+      setActive({ kind: "hall" })
+    }
+    setCtxMenu(null)
+  }, [])
+
+  // 点击/触摸外部关闭右键菜单
+  useEffect(() => {
+    if (!ctxMenu) return
+    const handler = (e: MouseEvent | TouchEvent) => {
+      if (ctxMenuRef.current && !ctxMenuRef.current.contains(e.target as Node)) {
+        setCtxMenu(null)
+      }
+    }
+    document.addEventListener("mousedown", handler)
+    document.addEventListener("touchstart", handler)
+    return () => {
+      document.removeEventListener("mousedown", handler)
+      document.removeEventListener("touchstart", handler)
+    }
+  }, [ctxMenu])
+
   if (!user) return null
 
   const headerLabel = active.kind === "hall" ? "聊天大厅" : active.username
 
   return (
+    <>
     <AnimatePresence>
       {open && (
         <motion.div
@@ -537,6 +570,22 @@ export default function FloatingChat() {
                   key={c.id}
                   className={`${styles.railItem} ${active.kind === "dm" && active.id === c.id ? styles.railActive : ""}`}
                   onClick={() => switchTo({ kind: "dm", id: c.id, username: c.username, avatar_url: c.avatar_url })}
+                  onContextMenu={(e) => {
+                    e.preventDefault()
+                    setCtxMenu({ x: e.clientX, y: e.clientY, convId: c.id, username: c.username })
+                  }}
+                  onTouchStart={(e) => {
+                    const touch = e.touches[0]
+                    longPressTimerRef.current = setTimeout(() => {
+                      setCtxMenu({ x: touch.clientX, y: touch.clientY, convId: c.id, username: c.username })
+                    }, 500)
+                  }}
+                  onTouchEnd={() => {
+                    if (longPressTimerRef.current) { clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null }
+                  }}
+                  onTouchMove={() => {
+                    if (longPressTimerRef.current) { clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null }
+                  }}
                   title={c.username}
                 >
                   <UserAvatar username={c.username} avatarUrl={c.avatar_url} size={34} />
@@ -684,6 +733,19 @@ export default function FloatingChat() {
         </motion.div>
       )}
     </AnimatePresence>
+    {ctxMenu && createPortal(
+      <div
+        ref={ctxMenuRef}
+        className={styles.ctxMenu}
+        style={{ left: ctxMenu.x, top: ctxMenu.y }}
+      >
+        <button className={styles.ctxMenuItem} onClick={() => closeDm(ctxMenu.convId)}>
+          删除会话
+        </button>
+      </div>,
+      document.body,
+    )}
+    </>
   )
 }
 
