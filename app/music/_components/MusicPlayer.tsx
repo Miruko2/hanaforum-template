@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Pause, Play, SkipBack, SkipForward, History as HistoryIcon, Heart, Repeat, Repeat1, Square } from "lucide-react"
+import { Pause, Play, SkipBack, SkipForward, History as HistoryIcon, Heart, Repeat, Repeat1, Square, Volume2, Volume1, VolumeX } from "lucide-react"
 import { usePlayback, usePlaybackTime } from "../_context/PlaybackContext"
 import { useDominantHue } from "../_lib/useDominantHue"
 import { TrackCover } from "./TrackCover"
 import { PlayModeMenu } from "./PlayModeMenu"
+import { VolumeMenu } from "./VolumeMenu"
 import type { Track } from "../_data/tracks"
 import type { ExpandRect } from "./ExpandedCard"
 
@@ -127,7 +128,7 @@ function ProgressBar({
 }
 
 export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
-  const { currentTrack, isPlaying, isFallback, togglePlay, seek, next, prev, isFavorite, toggleFavorite, playMode, setPlayMode } =
+  const { currentTrack, isPlaying, isFallback, togglePlay, seek, next, prev, isFavorite, toggleFavorite, playMode, setPlayMode, volume, muted, setVolume, toggleMute } =
     usePlayback()
   const { currentTime, duration, buffered } = usePlaybackTime()
   const fav = currentTrack ? isFavorite(currentTrack.id) : false
@@ -135,8 +136,12 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
   // 播放模式上拉菜单
   const [modeMenuOpen, setModeMenuOpen] = useState(false)
   const [modeMenuAnchor, setModeMenuAnchor] = useState<HTMLElement | null>(null)
+  // 音量菜单
+  const [volMenuOpen, setVolMenuOpen] = useState(false)
+  const [volMenuAnchor, setVolMenuAnchor] = useState<HTMLElement | null>(null)
   useEffect(() => {
     setModeMenuOpen(false)
+    setVolMenuOpen(false)
   }, [currentTrack?.id])
 
   const handleSeek = useCallback(
@@ -287,6 +292,8 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
               style={{ color: `hsl(${hue} 75% 65%)` }}
               onClick={(e) => {
                 e.stopPropagation()
+                // 互斥：开音量时关掉模式菜单，反之亦然，避免两个 menu 视觉堆叠。
+                if (!modeMenuOpen) setVolMenuOpen(false)
                 setModeMenuAnchor(e.currentTarget)
                 setModeMenuOpen((v) => !v)
               }}
@@ -297,6 +304,30 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
                 <Square size={13} />
               ) : (
                 <Repeat size={15} />
+              )}
+            </button>
+            <button
+              type="button"
+              aria-label={muted ? "取消静音" : "静音"}
+              aria-haspopup="menu"
+              aria-expanded={volMenuOpen}
+              title={muted ? "取消静音" : "音量"}
+              className={`ml-1 h-8 w-8 grid place-items-center rounded-full transition-colors ${
+                volMenuOpen ? "bg-white/10" : "hover:bg-white/10"
+              } ${muted ? "text-rose-300" : "text-white/70 hover:text-white"}`}
+              onClick={(e) => {
+                e.stopPropagation()
+                if (!volMenuOpen) setModeMenuOpen(false)
+                setVolMenuAnchor(e.currentTarget)
+                setVolMenuOpen((v) => !v)
+              }}
+            >
+              {muted ? (
+                <VolumeX size={15} />
+              ) : volume < 0.4 ? (
+                <Volume1 size={15} />
+              ) : (
+                <Volume2 size={15} />
               )}
             </button>
             <button
@@ -335,6 +366,16 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
           mode={playMode}
           onSelect={setPlayMode}
           onClose={() => setModeMenuOpen(false)}
+        />
+      )}
+
+      {volMenuOpen && currentTrack && volMenuAnchor && (
+        <VolumeMenu
+          anchor={volMenuAnchor}
+          volume={volume}
+          muted={muted}
+          onVolumeChange={setVolume}
+          onClose={() => setVolMenuOpen(false)}
         />
       )}
     </div>
