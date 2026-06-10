@@ -15,10 +15,10 @@ import {
   type UserMusicTrackRow,
 } from "@/lib/supabase"
 import { usePlayback } from "../_context/PlaybackContext"
-import { parseNeteaseUrl, fetchNeteaseTracks } from "../_lib/neteaseImport"
+import { parseMusicUrl, fetchMetingTracks, platformLabel } from "../_lib/musicImport"
 
 const MAX_TRACKS = 100
-// 导入冷却：两次网易歌单解析至少间隔这么久，降低对 injahow 的抓取频率。
+// 导入冷却：两次歌单解析至少间隔这么久，降低对 injahow 的抓取频率。
 // 软限制（前端记账 + localStorage 持久化，刷新不重置）；够挡住正常误操作 / 连点。
 const IMPORT_COOLDOWN_MS = 60_000
 const IMPORT_COOLDOWN_KEY = "music-import-cooldown"
@@ -193,9 +193,11 @@ export function MusicLibraryEditor({
     if (left > 0) {
       return toast({ description: `导入太频繁，请 ${Math.ceil(left / 1000)}s 后再试` })
     }
-    const ref = parseNeteaseUrl(importUrl)
-    if (!ref) {
-      return toast({ description: "请粘贴网易云歌单 / 单曲链接（music.163.com/...id=）" })
+    const parsed = parseMusicUrl(importUrl)
+    if (!parsed) {
+      return toast({
+        description: "请粘贴网易云(music.163.com)或 QQ音乐(y.qq.com)的完整歌单 / 单曲链接",
+      })
     }
     const remaining = MAX_TRACKS - rows.length
     if (remaining <= 0) return toast({ description: `已满 ${MAX_TRACKS} 首` })
@@ -210,7 +212,7 @@ export function MusicLibraryEditor({
     }
     setNowTs(Date.now())
     try {
-      const items = await fetchNeteaseTracks(ref)
+      const items = await fetchMetingTracks(parsed.platform, parsed.ref)
       const slice = items.slice(0, remaining)
       const inserted = await addUserMusicTracks(user.id, slice, rows.length)
       setRows((prev) => [...prev, ...inserted])
@@ -218,7 +220,7 @@ export function MusicLibraryEditor({
       await refreshTracks()
       const skipped = items.length - slice.length
       toast({
-        description: `导入 ${inserted.length} 首${
+        description: `从${platformLabel(parsed.platform)}导入 ${inserted.length} 首${
           skipped > 0 ? `（超出 ${MAX_TRACKS} 首上限，略过 ${skipped} 首）` : ""
         }`,
       })
@@ -318,14 +320,14 @@ export function MusicLibraryEditor({
             {/* 网易歌单 / 单曲导入 */}
             <div className="shrink-0 px-5 pt-1 pb-3">
               <div className="mb-1.5 text-[11px] tracking-wide text-white/45">
-                从网易云歌单 / 单曲导入
+                从 网易云 / QQ音乐 歌单 / 单曲导入
               </div>
               <div className="flex items-center gap-2">
                 <input
                   type="text"
                   value={importUrl}
                   onChange={(e) => setImportUrl(e.target.value)}
-                  placeholder="粘贴 music.163.com/...id= 链接"
+                  placeholder="粘贴 music.163.com 或 y.qq.com 链接"
                   style={FIELD_STYLE}
                   className="min-w-0 flex-1 rounded-lg px-3 py-2 text-[13px] outline-none ring-1 ring-white/15 placeholder:text-white/45 focus:ring-white/35"
                 />
@@ -344,7 +346,7 @@ export function MusicLibraryEditor({
                 </button>
               </div>
               <div className="mt-1 text-[10px] leading-snug text-white/30">
-                最多 {MAX_TRACKS} 首；网易源经第三方解析，部分 VIP / 区域受限歌曲可能无法播放。
+                最多 {MAX_TRACKS} 首；经第三方公共解析，QQ音乐源不如网易稳定，部分 VIP / 区域受限歌曲可能无法播放。
               </div>
             </div>
 
@@ -424,7 +426,7 @@ export function MusicLibraryEditor({
                         <div className="truncate text-[13px] text-white/90">{r.title}</div>
                         <div className="truncate text-[10px] text-white/45">
                           {r.artist || "—"}
-                          {r.source === "netease" ? " · 网易导入" : ""}
+                          {r.source === "netease" ? " · 网易导入" : r.source === "tencent" ? " · QQ音乐导入" : ""}
                         </div>
                       </div>
                       <button

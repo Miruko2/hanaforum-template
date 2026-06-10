@@ -1579,7 +1579,7 @@ export type UserMusicTrackRow = {
   cover_url: string;
   audio_url: string;
   sort_index: number;
-  source: "link" | "netease";
+  source: "link" | "netease" | "tencent";
   created_at: string;
 };
 
@@ -1588,7 +1588,7 @@ export type UserMusicTrackInput = {
   artist?: string;
   cover_url?: string;
   audio_url: string;
-  source?: "link" | "netease";
+  source?: "link" | "netease" | "tencent";
 };
 
 export async function getUserMusicTracks(userId: string): Promise<UserMusicTrackRow[]> {
