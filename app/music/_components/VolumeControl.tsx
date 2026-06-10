@@ -17,6 +17,8 @@ const CAP_H = 156
 const ICON_SIZE = 20
 const ICON_BOX = 30
 const ICON_BOTTOM = 12
+// 液体水面波浪高度（px）
+const WAVE_H = 9
 
 // 停止调节后 HUD 多久淡出（ms）
 const HUD_LINGER = 1000
@@ -287,32 +289,42 @@ export function VolumeControl({
               exit={{ opacity: 0, x: 44, y: "-50%" }}
               transition={{ type: "spring", stiffness: 420, damping: 34 }}
             >
-              {/* 底层喇叭图标（白色）：露在水位之上的部分由它显示 */}
+              {/* 液体水位：整块满高填充，用 translateY 控制水位（transform，避免重排、安卓友好），
+                  spring 低阻尼带回弹 → 涨落时像液体晃动；底部圆角由胶囊裁出。顶部叠流动波浪。 */}
+              <motion.div
+                className="absolute inset-x-0 top-0"
+                style={{
+                  height: CAP_H,
+                  background: `linear-gradient(0deg, hsl(${hue} 85% 68%), hsl(${
+                    (hue + 30) % 360
+                  } 90% 78%))`,
+                }}
+                initial={false}
+                animate={{ y: (1 - volume) * CAP_H }}
+                transition={{ type: "spring", stiffness: 220, damping: 18 }}
+              >
+                {/* 流动波浪：水面持续左移（画 2 个波长，平移半幅无缝循环），营造液体流动感。 */}
+                <motion.div
+                  className="absolute left-0"
+                  style={{ top: 1 - WAVE_H, width: "200%", height: WAVE_H }}
+                  animate={{ x: ["0%", "-50%"] }}
+                  transition={{ duration: 1.4, repeat: Infinity, ease: "linear" }}
+                >
+                  <svg width="100%" height={WAVE_H} viewBox="0 0 200 16" preserveAspectRatio="none">
+                    <path
+                      d="M0,8 Q25,1 50,8 T100,8 T150,8 T200,8 V16 H0 Z"
+                      fill={`hsl(${(hue + 30) % 360} 95% 85%)`}
+                    />
+                  </svg>
+                </motion.div>
+              </motion.div>
+
+              {/* 喇叭图标（白色，始终完整显示在水面之上） */}
               <div
                 className="absolute inset-x-0 grid place-items-center text-white"
                 style={{ bottom: ICON_BOTTOM, height: ICON_BOX }}
               >
                 <Icon size={ICON_SIZE} />
-              </div>
-
-              {/* 水位填充：矩形（顶部水位线平直，底部圆角由胶囊裁出），盖住水位内区域。
-                  内含同款白色图标，补齐被填充盖住的下半，与底层白图标拼成完整图标，
-                  避免图标下半被水位填充截断。 */}
-              <div
-                className="absolute inset-x-0 bottom-0 overflow-hidden"
-                style={{
-                  height: `${volume * 100}%`,
-                  background: `linear-gradient(0deg, hsl(${hue} 85% 68%), hsl(${
-                    (hue + 30) % 360
-                  } 90% 78%))`,
-                }}
-              >
-                <div
-                  className="absolute inset-x-0 grid place-items-center text-white"
-                  style={{ bottom: ICON_BOTTOM, height: ICON_BOX }}
-                >
-                  <Icon size={ICON_SIZE} />
-                </div>
               </div>
 
               {/* 顶部把手（装饰） */}
