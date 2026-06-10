@@ -20,7 +20,6 @@ const Toaster = dynamic(
   { ssr: false }
 )
 const FloatingChatMount = dynamic(() => import("@/components/floating-chat-mount"), { ssr: false })
-const VolumeHud = dynamic(() => import("@/components/volume-hud").then(mod => ({ default: mod.VolumeHud })), { ssr: false })
 
 // 延迟加载包装器：等浏览器空闲后再挂载，让首屏内容优先抢占主线程。
 // requestIdleCallback 在不支持的浏览器（Safari < 18.4）上回退到 setTimeout。
@@ -92,8 +91,6 @@ export function Providers({ children }: { children: ReactNode }) {
 
             {/* 全站浮动聊天室：放在 PageTransition 外，不随页面切换动画消失 */}
             <FloatingChatMount />
-            {/* 全局系统音量胶囊：仅 App 内，监听硬件音量键发来的 volumebuttons 事件（网页静默无副作用） */}
-            <VolumeHud />
             </ChatUIProvider>
             </CinemaModeProvider>
           </NotificationProvider>

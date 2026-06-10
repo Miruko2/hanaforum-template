@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { motion, AnimatePresence } from "framer-motion"
 import { Volume2, Volume1, VolumeX } from "lucide-react"
+import { Capacitor, registerPlugin } from "@capacitor/core"
 
 // 底部弹层里的细滑条尺寸
 const POP_W = 44
@@ -19,6 +20,13 @@ const ICON_BOTTOM = 12
 
 // 停止调节后 HUD 多久淡出（ms）
 const HUD_LINGER = 1000
+
+// 极简原生插件：让前端开关「音乐页是否拦截机身音量键」。
+// 仅 App 内有原生实现；Web 平台靠下方 isNativePlatform() 守卫，不会真正调用。
+interface VolumeKeysPlugin {
+  setEnabled(options: { enabled: boolean }): Promise<void>
+}
+const VolumeKeys = registerPlugin<VolumeKeysPlugin>("VolumeKeys")
 
 /**
  * 底部播放器的音量控件，由两部分组成：
@@ -79,6 +87,34 @@ export function VolumeControl({
       if (hudTimerRef.current) clearTimeout(hudTimerRef.current)
     }
   }, [])
+
+  // 仅 App 内：本控件挂载（音乐页有歌）时让原生拦截机身音量键、卸载时归还。
+  // 拦截范围与彩色 HUD 的处理范围天然一致；离开音乐页硬件键自动恢复调系统音量。
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return
+    VolumeKeys.setEnabled({ enabled: true }).catch(() => {})
+    return () => {
+      VolumeKeys.setEnabled({ enabled: false }).catch(() => {})
+    }
+  }, [])
+
+  // 机身音量键：原生发来 volumebuttons(direction)，按方向调播放器音量、弹彩色 HUD。
+  useEffect(() => {
+    const onVolKey = (e: Event) => {
+      const detail = (e as CustomEvent).detail
+      let dir = ""
+      try {
+        const data = typeof detail === "string" ? JSON.parse(detail) : detail
+        dir = data?.direction ?? ""
+      } catch {
+        /* ignore */
+      }
+      if (dir === "up") changeVolume(volumeRef.current + 0.1)
+      else if (dir === "down") changeVolume(volumeRef.current - 0.1)
+    }
+    window.addEventListener("volumebuttons", onVolKey)
+    return () => window.removeEventListener("volumebuttons", onVolKey)
+  }, [changeVolume])
 
   // 弹层定位：锚到喇叭按钮正上方，水平居中并夹到视口内（随 resize 更新）。
   useEffect(() => {
