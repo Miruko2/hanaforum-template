@@ -10,30 +10,45 @@ import { useToast } from "@/hooks/use-toast"
 import {
   getOwnProfile,
   uploadAvatar,
+  uploadBackground,
   updateUsername,
   syncAuthUsername,
+  updateBio,
   validateUsername,
   UsernameTakenError,
 } from "@/lib/profiles"
-import ProfileInfoCard from "./_components/profile-info-card"
+import ProfileHeader from "./_components/profile-header"
 import ProfileSettingsList from "./_components/profile-settings-list"
 
 // 「我的」页 = 编排层：持有页面级状态，handler 薄封装调用 lib/profiles 数据层，
-// 再把状态/回调下发给信息卡与设置菜单。头像、用户名各有「卡片 + 菜单」两个触发点，
-// 故编辑态在此集中持有，隐藏的文件 input 也只此一处、供两处共享。
+// 再把状态/回调下发给 Banner 头部与设置菜单。头像、背景图各有一个隐藏文件 input
+// （只此一处、由头部对应区域触发）。
 export default function ProfilePage() {
   const { user, signOut } = useSimpleAuth()
   const router = useRouter()
   const { toast } = useToast()
+
   const [username, setUsername] = useState("")
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
+  const [backgroundUrl, setBackgroundUrl] = useState<string | null>(null)
+  const [bio, setBio] = useState("")
   const [loading, setLoading] = useState(true)
-  const [uploading, setUploading] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // 上传态
+  const [uploadingAvatar, setUploadingAvatar] = useState(false)
+  const [uploadingBackground, setUploadingBackground] = useState(false)
+  const avatarInputRef = useRef<HTMLInputElement>(null)
+  const bgInputRef = useRef<HTMLInputElement>(null)
+
   // 用户名编辑态
   const [editingUsername, setEditingUsername] = useState(false)
   const [draftUsername, setDraftUsername] = useState("")
   const [savingUsername, setSavingUsername] = useState(false)
+
+  // 签名编辑态
+  const [editingBio, setEditingBio] = useState(false)
+  const [draftBio, setDraftBio] = useState("")
+  const [savingBio, setSavingBio] = useState(false)
 
   useEffect(() => {
     if (user) {
@@ -47,6 +62,8 @@ export default function ProfilePage() {
         if (profile) {
           if (profile.username) setUsername(profile.username)
           setAvatarUrl(profile.avatar_url || null)
+          setBackgroundUrl(profile.background_url || null)
+          setBio(profile.bio || "")
         }
         setLoading(false)
       }
@@ -61,66 +78,80 @@ export default function ProfilePage() {
     router.push("/")
   }
 
-  const handleAvatarClick = () => {
-    fileInputRef.current?.click()
-  }
+  // ───────── 头像上传 ─────────
+  const handleAvatarClick = () => avatarInputRef.current?.click()
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAvatarFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file || !user) return
-
-    // 验证文件类型
     if (!file.type.startsWith("image/")) {
       alert("请选择图片文件")
       return
     }
-    // 验证文件大小 (5MB)
     if (file.size > 5 * 1024 * 1024) {
       alert("图片大小不能超过 5MB")
       return
     }
-
-    setUploading(true)
+    setUploadingAvatar(true)
     try {
-      const publicUrl = await uploadAvatar(user.id, file)
-      setAvatarUrl(publicUrl)
+      const url = await uploadAvatar(user.id, file)
+      setAvatarUrl(url)
     } catch (err) {
       console.error("头像上传异常:", err)
       const e = err as { message?: string }
       alert(e?.message || "上传出错，请重试")
     } finally {
-      setUploading(false)
-      // 清空 input 以便重复选择同一文件
-      if (fileInputRef.current) fileInputRef.current.value = ""
+      setUploadingAvatar(false)
+      if (avatarInputRef.current) avatarInputRef.current.value = ""
     }
   }
 
-  // 进入编辑模式（卡片自动聚焦输入框）
+  // ───────── 背景图上传 ─────────
+  const handleBgClick = () => bgInputRef.current?.click()
+
+  const handleBgFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file || !user) return
+    if (!file.type.startsWith("image/")) {
+      alert("请选择图片文件")
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      alert("图片大小不能超过 5MB")
+      return
+    }
+    setUploadingBackground(true)
+    try {
+      const url = await uploadBackground(user.id, file)
+      setBackgroundUrl(url)
+    } catch (err) {
+      console.error("背景图上传异常:", err)
+      const e = err as { message?: string }
+      alert(e?.message || "上传出错，请重试")
+    } finally {
+      setUploadingBackground(false)
+      if (bgInputRef.current) bgInputRef.current.value = ""
+    }
+  }
+
+  // ───────── 用户名编辑 ─────────
   const handleStartEditUsername = () => {
     setDraftUsername(username)
     setEditingUsername(true)
   }
-
-  // 取消编辑
   const handleCancelEditUsername = () => {
     setEditingUsername(false)
     setDraftUsername("")
   }
-
-  // 保存新用户名
   const handleSaveUsername = async () => {
-    if (!user) return
-    if (savingUsername) return
+    if (!user || savingUsername) return
 
-    // 1. 本地校验
     const result = validateUsername(draftUsername)
     if (!result.ok) {
       toast({ title: "用户名不合法", description: result.error, variant: "destructive" })
       return
     }
     const newName = result.value
-
-    // 无变化直接退出，不发请求
     if (newName === username) {
       setEditingUsername(false)
       return
@@ -128,7 +159,7 @@ export default function ProfilePage() {
 
     setSavingUsername(true)
     try {
-      // ① 更新 profiles（RLS 已限定 auth.uid()=id，安全）
+      // ① 更新 profiles（RLS 已限定 auth.uid()=id）
       try {
         await updateUsername(user.id, newName)
       } catch (err) {
@@ -150,19 +181,14 @@ export default function ProfilePage() {
       setEditingUsername(false)
 
       // ② 同步 auth.user_metadata.username（弹幕墙 AI 称呼依赖这个）
-      // 注：posts 表无 username 列（显示名靠前端 join profiles），无需 UPDATE posts
       try {
         await syncAuthUsername(newName)
       } catch (metaErr) {
         console.warn("同步 user_metadata 失败:", metaErr)
-        toast({
-          title: "用户名已修改",
-          description: "弹幕墙等部分场景下次登录才会生效",
-        })
+        toast({ title: "用户名已修改", description: "弹幕墙等部分场景下次登录才会生效" })
         return
       }
 
-      // 全链路成功
       toast({ title: "用户名已更新", description: `现在你叫「${newName}」` })
     } catch (err) {
       const e = err as { message?: string }
@@ -174,6 +200,37 @@ export default function ProfilePage() {
       })
     } finally {
       setSavingUsername(false)
+    }
+  }
+
+  // ───────── 签名编辑 ─────────
+  const handleStartEditBio = () => {
+    setDraftBio(bio)
+    setEditingBio(true)
+  }
+  const handleCancelEditBio = () => {
+    setEditingBio(false)
+    setDraftBio("")
+  }
+  const handleSaveBio = async () => {
+    if (!user || savingBio) return
+    const value = draftBio.trim()
+    if (value === bio.trim()) {
+      setEditingBio(false)
+      return
+    }
+    setSavingBio(true)
+    try {
+      await updateBio(user.id, value)
+      setBio(value)
+      setEditingBio(false)
+      toast({ title: value ? "签名已更新" : "已清空签名" })
+    } catch (err) {
+      const e = err as { message?: string }
+      console.error("保存签名异常:", e)
+      toast({ title: "保存失败", description: e?.message || "请稍后再试", variant: "destructive" })
+    } finally {
+      setSavingBio(false)
     }
   }
 
@@ -197,31 +254,56 @@ export default function ProfilePage() {
       <BackgroundEffects />
       <Navbar />
 
-      {/* 头像上传隐藏 input：单一来源，供「头像圈」与「编辑头像」菜单项共享触发 */}
+      {/* 头像 / 背景图上传的隐藏 input（各一处，由头部对应区域触发） */}
       <input
-        ref={fileInputRef}
+        ref={avatarInputRef}
         type="file"
         accept="image/*"
         className="hidden"
-        onChange={handleFileChange}
+        onChange={handleAvatarFileChange}
+      />
+      <input
+        ref={bgInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleBgFileChange}
       />
 
-      <div className="flex items-center justify-center min-h-screen px-4 pt-20">
+      <div className="flex items-center justify-center min-h-screen px-4 pt-20 pb-10">
         <div className="w-full max-w-lg space-y-6">
-          <ProfileInfoCard
-            avatarUrl={avatarUrl}
+          <ProfileHeader
             fallbackLetter={avatarLetter}
-            email={user?.email}
-            uploading={uploading}
-            onAvatarClick={handleAvatarClick}
-            username={username}
-            editing={editingUsername}
-            draft={draftUsername}
-            saving={savingUsername}
-            onDraftChange={setDraftUsername}
-            onStartEdit={handleStartEditUsername}
-            onSave={handleSaveUsername}
-            onCancel={handleCancelEditUsername}
+            avatar={{
+              url: avatarUrl,
+              uploading: uploadingAvatar,
+              onClick: handleAvatarClick,
+            }}
+            background={{
+              url: backgroundUrl,
+              uploading: uploadingBackground,
+              onClick: handleBgClick,
+            }}
+            username={{
+              value: username,
+              editing: editingUsername,
+              draft: draftUsername,
+              saving: savingUsername,
+              onDraftChange: setDraftUsername,
+              onStartEdit: handleStartEditUsername,
+              onSave: handleSaveUsername,
+              onCancel: handleCancelEditUsername,
+            }}
+            bio={{
+              value: bio,
+              editing: editingBio,
+              draft: draftBio,
+              saving: savingBio,
+              onDraftChange: setDraftBio,
+              onStartEdit: handleStartEditBio,
+              onSave: handleSaveBio,
+              onCancel: handleCancelEditBio,
+            }}
           />
 
           <ProfileSettingsList

@@ -1,6 +1,6 @@
 // lib/profiles.ts
 //
-// 个人资料数据层（统一收口 profiles 表的读写 + 头像上传 + 用户名校验）。
+// 个人资料数据层（统一收口 profiles 表的读写 + 头像/背景图上传 + 用户名校验）。
 // 当前服务于 /profile「我的」页；后续社交个人页(/user/[id]) 直接复用。
 //
 // 注：lib/supabase.ts 里的 getUserProfile（带缓存、给「他人」展示用，被
@@ -10,12 +10,17 @@
 import { supabase } from "./supabaseClient"
 import { compressImage } from "./image-compress"
 
-// 个人资料。社交化后会扩展 background_url / bio（本次不加）。
+// 个人资料。background_url / bio 为社交资料字段（见 scripts/2026-06-10-profiles-social-fields.sql）。
 export type Profile = {
   id: string
   username: string | null
   avatar_url: string | null
+  background_url: string | null
+  bio: string | null
 }
+
+// 签名最大长度（与 DB CHECK 约束 profiles_bio_chk 保持一致）。
+export const BIO_MAX = 200
 
 // ───────── 用户名校验（纯函数，从 profile page 平移） ─────────
 
@@ -37,12 +42,13 @@ export function validateUsername(raw: string): UsernameCheck {
 
 // ───────── 读 ─────────
 
-// 读自己的资料（username + avatar_url）。RLS 已限定 auth.uid()=id。
+// 读自己的资料（username + avatar_url + background_url + bio）。RLS 已限定 auth.uid()=id。
 // 读不到返回 null（上层据此走兜底）。
+// ⚠️ select 含 background_url/bio，需先在 Supabase 跑过加列迁移，否则会报 column 不存在。
 export async function getOwnProfile(userId: string): Promise<Profile | null> {
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, username, avatar_url")
+    .select("id, username, avatar_url, background_url, bio")
     .eq("id", userId)
     .single()
   if (error || !data) return null
@@ -81,34 +87,70 @@ export async function syncAuthUsername(name: string): Promise<void> {
   if (error) throw error
 }
 
-// ───────── 写：头像 ─────────
+// ───────── 写：签名 ─────────
 
-// 头像上传全流程：压缩 → 传 avatars 桶(长缓存) → 写回 profiles.avatar_url → 返回 publicUrl。
-//   · 压缩到 256px webp / 0.8（显示仅 40-112px，256 足够清晰），从源头砍 avatars 桶的
-//     Cached Egress 大头。
-//   · 文件名带时间戳唯一 → cacheControl 1 年，让浏览器/CDN 长缓存、不每小时回源。
-// 失败抛 Error，message 区分「上传失败」与「上传成功但更新记录失败」，供上层提示。
-export async function uploadAvatar(userId: string, file: File): Promise<string> {
-  const { blob, ext, contentType } = await compressImage(file, 256, 0.8)
-  const filePath = `${userId}/${Date.now()}.${ext}`
+// 写 profiles.bio（trim + 截断到 BIO_MAX 防御；DB CHECK 兜底）。允许空串=清空签名。
+export async function updateBio(userId: string, bio: string): Promise<void> {
+  const value = bio.trim().slice(0, BIO_MAX)
+  const { error } = await supabase
+    .from("profiles")
+    .update({ bio: value })
+    .eq("id", userId)
+  if (error) throw error
+}
 
+// ───────── 写：图片（头像 / 背景图） ─────────
+
+// 把压缩后的图片传 avatars 桶并返回 publicUrl。背景图复用 avatars 桶（已 public+RLS，
+// 路径前缀 {userId}/ 满足该桶按用户隔离的 policy），免去单独建桶/配 policy。
+//   · 文件名带时间戳唯一 → cacheControl 1 年，让浏览器/CDN 长缓存、不每小时回源
+//     （3600 秒默认值是图片 Cached Egress 的放大器）。
+async function uploadToAvatars(
+  filePath: string,
+  file: File,
+  maxEdge: number,
+  quality: number,
+): Promise<string> {
+  const { blob, ext, contentType } = await compressImage(file, maxEdge, quality)
+  const path = `${filePath}.${ext}`
   const { error: uploadError } = await supabase.storage
     .from("avatars")
-    .upload(filePath, blob, {
-      upsert: true,
-      cacheControl: "31536000",
-      contentType,
-    })
-  if (uploadError) throw new Error("头像上传失败: " + uploadError.message)
+    .upload(path, blob, { upsert: true, cacheControl: "31536000", contentType })
+  if (uploadError) throw uploadError
+  return supabase.storage.from("avatars").getPublicUrl(path).data.publicUrl
+}
 
-  const { data: urlData } = supabase.storage.from("avatars").getPublicUrl(filePath)
-  const publicUrl = urlData.publicUrl
-
+// 头像上传：压缩到 256px webp/0.8（显示仅 40-112px，256 足够清晰）→ 传桶 → 写回
+// profiles.avatar_url → 返回 publicUrl。失败 message 区分「上传失败」「更新记录失败」。
+export async function uploadAvatar(userId: string, file: File): Promise<string> {
+  let publicUrl: string
+  try {
+    publicUrl = await uploadToAvatars(`${userId}/${Date.now()}`, file, 256, 0.8)
+  } catch (e) {
+    throw new Error("头像上传失败: " + ((e as { message?: string })?.message ?? ""))
+  }
   const { error: updateError } = await supabase
     .from("profiles")
     .update({ avatar_url: publicUrl })
     .eq("id", userId)
   if (updateError) throw new Error("头像上传成功但更新记录失败")
+  return publicUrl
+}
 
+// 背景图上传：背景图是整条大图，压缩到最大边 1280 / webp / 0.8（banner 显示足够清晰），
+// 从源头压住 Cached Egress（背景图最易成为流量大头）→ 传桶 {userId}/bg_xxx → 写回
+// profiles.background_url → 返回 publicUrl。
+export async function uploadBackground(userId: string, file: File): Promise<string> {
+  let publicUrl: string
+  try {
+    publicUrl = await uploadToAvatars(`${userId}/bg_${Date.now()}`, file, 1280, 0.8)
+  } catch (e) {
+    throw new Error("背景图上传失败: " + ((e as { message?: string })?.message ?? ""))
+  }
+  const { error: updateError } = await supabase
+    .from("profiles")
+    .update({ background_url: publicUrl })
+    .eq("id", userId)
+  if (updateError) throw new Error("背景图上传成功但更新记录失败")
   return publicUrl
 }
