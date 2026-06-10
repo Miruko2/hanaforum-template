@@ -2,12 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Pause, Play, SkipBack, SkipForward, History as HistoryIcon, Heart, Repeat, Repeat1, Square, Volume2, Volume1, VolumeX } from "lucide-react"
+import { Pause, Play, SkipBack, SkipForward, History as HistoryIcon, Heart, Repeat, Repeat1, Square } from "lucide-react"
 import { usePlayback, usePlaybackTime } from "../_context/PlaybackContext"
 import { useDominantHue } from "../_lib/useDominantHue"
 import { TrackCover } from "./TrackCover"
 import { PlayModeMenu } from "./PlayModeMenu"
-import { VolumeMenu } from "./VolumeMenu"
+import { VolumeControl } from "./VolumeControl"
 import type { Track } from "../_data/tracks"
 import type { ExpandRect } from "./ExpandedCard"
 
@@ -93,7 +93,7 @@ function ProgressBar({
   return (
     <div
       ref={barRef}
-      className="mt-2 h-2 cursor-pointer rounded-full bg-white/10 relative touch-none"
+      className="h-2 cursor-pointer rounded-full bg-white/10 relative touch-none"
       onClick={(e) => e.stopPropagation()}
       onPointerDown={onBarDown}
       onPointerMove={onBarMove}
@@ -128,7 +128,7 @@ function ProgressBar({
 }
 
 export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
-  const { currentTrack, isPlaying, isFallback, togglePlay, seek, next, prev, isFavorite, toggleFavorite, playMode, setPlayMode, volume, muted, setVolume, toggleMute } =
+  const { currentTrack, isPlaying, isFallback, togglePlay, seek, next, prev, isFavorite, toggleFavorite, playMode, setPlayMode, volume, setVolume } =
     usePlayback()
   const { currentTime, duration, buffered } = usePlaybackTime()
   const fav = currentTrack ? isFavorite(currentTrack.id) : false
@@ -136,12 +136,8 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
   // 播放模式上拉菜单
   const [modeMenuOpen, setModeMenuOpen] = useState(false)
   const [modeMenuAnchor, setModeMenuAnchor] = useState<HTMLElement | null>(null)
-  // 音量菜单
-  const [volMenuOpen, setVolMenuOpen] = useState(false)
-  const [volMenuAnchor, setVolMenuAnchor] = useState<HTMLElement | null>(null)
   useEffect(() => {
     setModeMenuOpen(false)
-    setVolMenuOpen(false)
   }, [currentTrack?.id])
 
   const handleSeek = useCallback(
@@ -171,7 +167,7 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
       {currentTrack && (
       <motion.div
         key="player-container"
-        className="pointer-events-auto relative cursor-pointer overflow-hidden rounded-2xl p-2 pr-3 sm:p-3 sm:pr-4"
+        className="pointer-events-auto relative cursor-pointer overflow-hidden rounded-2xl p-2 sm:p-3"
         onPointerDown={(e) => e.stopPropagation()}
         onClick={(e) =>
           onExpand(
@@ -198,13 +194,15 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
         exit={{ opacity: 0, y: 20 }}
         transition={{ duration: 0.55, ease: [0.2, 0.8, 0.2, 1] }}
       >
-        <div className="relative flex items-center gap-2 sm:gap-3">
+        <div className="relative flex flex-col gap-2">
+          {/* 第一行：封面 + 曲名 + 控件 */}
+          <div className="flex items-center gap-2 sm:gap-3">
           {/* Cover */}
           <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-xl sm:h-14 sm:w-14">
             <TrackCover track={currentTrack} sizes="56px" />
           </div>
 
-          {/* Info + progress */}
+          {/* Info（进度条已移到第二行全宽，不再被控件挤压） */}
           <div className="min-w-0 flex-1">
             <AnimatePresence mode="wait">
               <motion.div
@@ -213,36 +211,22 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 8 }}
                 transition={{ duration: 0.3 }}
-                className="flex items-baseline justify-between gap-2"
+                className="min-w-0"
               >
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-[14px] font-semibold text-white flex items-center gap-1.5">
-                    <span className="truncate">{currentTrack.title}</span>
-                    {isFallback && (
-                      <span
-                        className="shrink-0 rounded-full bg-white/15 px-1.5 py-0.5 text-[9px] font-medium text-white/70 tracking-wider"
-                        title="音源暂不可用"
-                      >
-                        无音源
-                      </span>
-                    )}
-                  </div>
-                  <div className="truncate text-[11px] text-white/60">{currentTrack.artist}</div>
+                <div className="truncate text-[14px] font-semibold text-white flex items-center gap-1.5">
+                  <span className="truncate">{currentTrack.title}</span>
+                  {isFallback && (
+                    <span
+                      className="shrink-0 rounded-full bg-white/15 px-1.5 py-0.5 text-[9px] font-medium text-white/70 tracking-wider"
+                      title="音源暂不可用"
+                    >
+                      无音源
+                    </span>
+                  )}
                 </div>
-                <div className="hidden shrink-0 text-[10px] tabular-nums text-white/60 sm:block">
-                  {fmtTime(currentTime)} / {fmtTime(duration)}
-                </div>
+                <div className="truncate text-[11px] text-white/60">{currentTrack.artist}</div>
               </motion.div>
             </AnimatePresence>
-
-            {/* Progress bar - stable across track changes */}
-            <ProgressBar
-              duration={duration}
-              buffered={buffered}
-              currentTime={currentTime}
-              hue={hue}
-              onSeek={handleSeek}
-            />
           </div>
 
           {/* Controls */}
@@ -292,8 +276,6 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
               style={{ color: `hsl(${hue} 75% 65%)` }}
               onClick={(e) => {
                 e.stopPropagation()
-                // 互斥：开音量时关掉模式菜单，反之亦然，避免两个 menu 视觉堆叠。
-                if (!modeMenuOpen) setVolMenuOpen(false)
                 setModeMenuAnchor(e.currentTarget)
                 setModeMenuOpen((v) => !v)
               }}
@@ -306,30 +288,7 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
                 <Repeat size={15} />
               )}
             </button>
-            <button
-              type="button"
-              aria-label={muted ? "取消静音" : "静音"}
-              aria-haspopup="menu"
-              aria-expanded={volMenuOpen}
-              title={muted ? "取消静音" : "音量"}
-              className={`ml-1 h-8 w-8 grid place-items-center rounded-full transition-colors ${
-                volMenuOpen ? "bg-white/10" : "hover:bg-white/10"
-              } ${muted ? "text-rose-300" : "text-white/70 hover:text-white"}`}
-              onClick={(e) => {
-                e.stopPropagation()
-                if (!volMenuOpen) setModeMenuOpen(false)
-                setVolMenuAnchor(e.currentTarget)
-                setVolMenuOpen((v) => !v)
-              }}
-            >
-              {muted ? (
-                <VolumeX size={15} />
-              ) : volume < 0.4 ? (
-                <Volume1 size={15} />
-              ) : (
-                <Volume2 size={15} />
-              )}
-            </button>
+            <VolumeControl volume={volume} setVolume={setVolume} hue={hue} />
             <button
               type="button"
               aria-label={fav ? "unlike" : "like"}
@@ -355,6 +314,26 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
               <HistoryIcon size={14} />
             </button>
           </div>
+          </div>
+
+          {/* 第二行：横跨全宽的进度条 + 两端时间（不再被控件挤压） */}
+          <div className="flex items-center gap-2">
+            <span className="w-9 shrink-0 text-right text-[10px] tabular-nums text-white/55">
+              {fmtTime(currentTime)}
+            </span>
+            <div className="min-w-0 flex-1">
+              <ProgressBar
+                duration={duration}
+                buffered={buffered}
+                currentTime={currentTime}
+                hue={hue}
+                onSeek={handleSeek}
+              />
+            </div>
+            <span className="w-9 shrink-0 text-[10px] tabular-nums text-white/55">
+              {fmtTime(duration)}
+            </span>
+          </div>
         </div>
       </motion.div>
       )}
@@ -366,16 +345,6 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
           mode={playMode}
           onSelect={setPlayMode}
           onClose={() => setModeMenuOpen(false)}
-        />
-      )}
-
-      {volMenuOpen && currentTrack && volMenuAnchor && (
-        <VolumeMenu
-          anchor={volMenuAnchor}
-          volume={volume}
-          muted={muted}
-          onVolumeChange={setVolume}
-          onClose={() => setVolMenuOpen(false)}
         />
       )}
     </div>

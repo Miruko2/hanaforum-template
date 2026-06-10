@@ -64,11 +64,10 @@ export type PlaybackState = {
   toggleFavorite: (id: string) => void
   /** 设置播放模式（列表循环 / 单曲循环 / 播完就暂停）。 */
   setPlayMode: (m: PlayMode) => void
-  /** 音量 [0, 1] + 是否静音（独立于 volume，节省用户上次的音量档）。 */
+  /** 播放音量 [0,1]，持久化到 localStorage。 */
   volume: number
-  muted: boolean
+  /** 设置音量 [0,1]（自动夹取范围并持久化）。 */
   setVolume: (v: number) => void
-  toggleMute: () => void
   /**
    * Returns the current audio intensity in [0, 1], smoothed across frames.
    * Implementation strategy:
@@ -187,6 +186,9 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   const [duration, setDuration] = useState(0)
   const [buffered, setBuffered] = useState(0) // 已缓冲（加载）到的时长（秒）
   const [isFallback, setIsFallback] = useState(false)
+  const [volume, setVolumeState] = useState(1) // 播放音量 [0,1]
+  // volumeRef：供 [] 依赖的音频 init effect 读取最新初值（避免把 volume 放进其依赖）。
+  const volumeRef = useRef(1)
   // timeValue 用 useMemo 避免每次 render 都新建对象 → 避免 TimeCtx 消费者无谓重渲染
   const [playMode, setPlayModeState] = useState<PlayMode>("list")
   // playModeRef / nextRef：供 [] 依赖的音频初始化 effect 里的 onEnded 读到最新值。
@@ -194,10 +196,6 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   const nextRef = useRef<() => void>(() => {})
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [favorites, setFavorites] = useState<string[]>([])
-  // 音量：[0, 1]，默认 1。muted 独立保存——静音时记住上次音量，恢复时还原。
-  const [volume, setVolumeState] = useState<number>(1)
-  const [muted, setMuted] = useState<boolean>(false)
-  const prevVolumeRef = useRef<number>(1)
   // Track which track is currently loading so the error handler knows whether
   // to attempt the fallback for THIS attempt (not a stale previous one).
   const playSeqRef = useRef(0)
@@ -322,31 +320,6 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  // 音量变化：clamp 到 [0,1]，同步到 <audio>，持久化；同时维护"取消静音时还原"的快照。
-  // 注意：拖到 0 不自动 muted —— 用户可能就是在最低档，仍要听到；只有显式按静音才 muted。
-  const setVolume = useCallback((v: number) => {
-    if (!isFinite(v)) return
-    const clamped = Math.max(0, Math.min(1, v))
-    setVolumeState(clamped)
-    if (clamped > 0) prevVolumeRef.current = clamped
-    try {
-      localStorage.setItem(VOLUME_KEY, String(clamped))
-    } catch {
-      /* ignore */
-    }
-    const el = audioRef.current
-    if (el) el.volume = clamped
-  }, [])
-
-  const toggleMute = useCallback(() => {
-    setMuted((cur) => {
-      const next = !cur
-      const el = audioRef.current
-      if (el) el.volume = next ? 0 : prevVolumeRef.current
-      return next
-    })
-  }, [])
-
   // ---- 载入持久化的播放模式 ----
   useEffect(() => {
     try {
@@ -357,16 +330,25 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  // ---- 载入持久化的音量（muted 视为 session 状态，不持久化；用户期待切回页面听到声）----
+  const setVolume = useCallback((v: number) => {
+    const clamped = Math.max(0, Math.min(1, v))
+    setVolumeState(clamped)
+    const el = audioRef.current
+    if (el) el.volume = clamped // 立即生效，拖动手感不延迟
+    try {
+      localStorage.setItem(VOLUME_KEY, String(clamped))
+    } catch {
+      /* ignore */
+    }
+  }, [])
+
+  // ---- 载入持久化的音量 ----
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(VOLUME_KEY)
-      if (raw === null) return
-      const n = Number(raw)
-      if (isFinite(n) && n >= 0 && n <= 1) {
-        setVolumeState(n)
-        prevVolumeRef.current = n > 0 ? n : 1
-        // 首次挂载时 audioRef 还没就绪，这里容错即可；初始化 effect 也会回放一次音量。
+      const v = localStorage.getItem(VOLUME_KEY)
+      if (v !== null) {
+        const n = parseFloat(v)
+        if (isFinite(n) && n >= 0 && n <= 1) setVolumeState(n)
       }
     } catch {
       /* ignore */
@@ -383,18 +365,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const el = new Audio()
     el.preload = "metadata"
+    el.volume = volumeRef.current // 套用持久化音量初值（后续变化由独立 effect 同步）
     audioRef.current = el
-    // 把持久化的音量 / 静音状态回放到原生 audio 元素上。
-    // volume 来自闭包（首渲染后值已稳定）；muted 之后由 toggleMute 维护。
-    try {
-      const raw = localStorage.getItem(VOLUME_KEY)
-      const persisted = raw === null ? 1 : Number(raw)
-      if (isFinite(persisted) && persisted >= 0 && persisted <= 1) {
-        el.volume = persisted
-      }
-    } catch {
-      /* ignore */
-    }
 
     // 已缓冲时长 = 最后一段 buffered 区间的末端（顺序下载时即"从头加载到哪"）。
     const updateBuffered = () => {
@@ -490,6 +462,13 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       audioRef.current = null
     }
   }, [])
+
+  // ---- 音量：同步 ref（供 init effect 取初值）+ 写入 <audio>（后续变化兜底）----
+  useEffect(() => {
+    volumeRef.current = volume
+    const el = audioRef.current
+    if (el) el.volume = volume
+  }, [volume])
 
   // Lazily create the AudioContext on the first play (user gesture is
   // required by browsers — play() click qualifies).
@@ -731,13 +710,11 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       toggleFavorite,
       setPlayMode,
       volume,
-      muted,
       setVolume,
-      toggleMute,
       getAudioIntensity,
       refreshTracks,
     }),
-    [currentTrack, isPlaying, isFallback, playMode, history, favorites, tracks, play, pause, togglePlay, seek, next, prev, clearHistory, isFavorite, toggleFavorite, setPlayMode, volume, muted, setVolume, toggleMute, getAudioIntensity, refreshTracks],
+    [currentTrack, isPlaying, isFallback, playMode, history, favorites, tracks, play, pause, togglePlay, seek, next, prev, clearHistory, isFavorite, toggleFavorite, setPlayMode, volume, setVolume, getAudioIntensity, refreshTracks],
   )
 
   const tracksCtxValue = useMemo<TrackSourceCtx>(
