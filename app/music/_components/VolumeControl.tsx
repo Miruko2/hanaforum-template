@@ -101,13 +101,18 @@ export function VolumeControl({
   // 机身音量键：原生发来 volumebuttons(direction)，按方向调播放器音量、弹彩色 HUD。
   useEffect(() => {
     const onVolKey = (e: Event) => {
-      const detail = (e as CustomEvent).detail
-      let dir = ""
-      try {
-        const data = typeof detail === "string" ? JSON.parse(detail) : detail
-        dir = data?.direction ?? ""
-      } catch {
-        /* ignore */
+      // Capacitor 的 triggerWindowJSEvent 多半把字段「直接挂在 event 上」(Object.assign)、
+      // 而非 event.detail —— 旧写法读 e.detail 拿不到。这里兼容：直接属性 / detail 对象 / detail 字符串。
+      const rec = e as unknown as Record<string, unknown>
+      let dir = typeof rec.direction === "string" ? rec.direction : ""
+      const detail = rec.detail
+      if (!dir && detail != null) {
+        try {
+          const data = (typeof detail === "string" ? JSON.parse(detail) : detail) as { direction?: unknown }
+          if (typeof data.direction === "string") dir = data.direction
+        } catch {
+          /* ignore */
+        }
       }
       if (dir === "up") changeVolume(volumeRef.current + 0.1)
       else if (dir === "down") changeVolume(volumeRef.current - 0.1)
