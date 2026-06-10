@@ -75,6 +75,8 @@ export function MusicLibraryEditor({
   // 网易导入
   const [importUrl, setImportUrl] = useState("")
   const [importing, setImporting] = useState(false)
+  // 本次导入数量（1..剩余配额）；歌单可能几百首，用户用滑块自选导前 N 首。
+  const [importCount, setImportCount] = useState(MAX_TRACKS)
   // 导入冷却记账（lastImportAt 持久化；nowTs 每秒 tick 用于倒计时显示）
   const lastImportAtRef = useRef(0)
   const [nowTs, setNowTs] = useState(() => Date.now())
@@ -94,6 +96,12 @@ export function MusicLibraryEditor({
   }, [open])
   const importCooldownLeft = Math.max(0, IMPORT_COOLDOWN_MS - (nowTs - lastImportAtRef.current))
   const importCooldownSec = Math.ceil(importCooldownLeft / 1000)
+
+  // 本次最多可导入数 = 剩余配额（≥1，供滑块上限用）；rows 变动后把 importCount 收敛进区间
+  const importMax = Math.max(1, MAX_TRACKS - rows.length)
+  useEffect(() => {
+    setImportCount((c) => Math.min(Math.max(1, c), Math.max(1, MAX_TRACKS - rows.length)))
+  }, [rows.length])
 
   // 试听
   const [previewState, setPreviewState] = useState<PreviewState>("idle")
@@ -213,15 +221,15 @@ export function MusicLibraryEditor({
     setNowTs(Date.now())
     try {
       const items = await fetchMetingTracks(parsed.platform, parsed.ref)
-      const slice = items.slice(0, remaining)
+      const slice = items.slice(0, Math.min(importCount, remaining))
       const inserted = await addUserMusicTracks(user.id, slice, rows.length)
       setRows((prev) => [...prev, ...inserted])
       setImportUrl("")
       await refreshTracks()
-      const skipped = items.length - slice.length
+      const leftover = items.length - inserted.length
       toast({
         description: `从${platformLabel(parsed.platform)}导入 ${inserted.length} 首${
-          skipped > 0 ? `（超出 ${MAX_TRACKS} 首上限，略过 ${skipped} 首）` : ""
+          leftover > 0 ? `（歌单还有 ${leftover} 首未导）` : ""
         }`,
       })
     } catch (e) {
@@ -229,7 +237,7 @@ export function MusicLibraryEditor({
     } finally {
       setImporting(false)
     }
-  }, [user?.id, importing, importUrl, rows.length, refreshTracks, toast])
+  }, [user?.id, importing, importUrl, importCount, rows.length, refreshTracks, toast])
 
   const handleDelete = useCallback(
     async (id: string) => {
@@ -345,8 +353,11 @@ export function MusicLibraryEditor({
                   {importCooldownLeft > 0 ? `${importCooldownSec}s` : "导入"}
                 </button>
               </div>
-              <div className="mt-1 text-[10px] leading-snug text-white/30">
-                最多 {MAX_TRACKS} 首；经第三方公共解析，QQ音乐源不如网易稳定，部分 VIP / 区域受限歌曲可能无法播放。
+
+              <ImportCountSlider value={importCount} max={importMax} onChange={setImportCount} />
+
+              <div className="mt-2 text-[10px] leading-snug text-white/30">
+                最多 {MAX_TRACKS} 首；滑块选本次导入数量。经第三方公共解析，QQ音乐源不如网易稳定，部分 VIP / 区域受限歌曲可能无法播放。
               </div>
             </div>
 
@@ -477,4 +488,53 @@ function PreviewHint({ state }: { state: PreviewState }) {
     return <span className="text-[11px] text-rose-300">无法播放（跨域/防盗链/链接失效）</span>
   if (state === "loading") return <span className="text-[11px] text-white/40">加载中…</span>
   return null
+}
+
+/**
+ * 导入数量滑块（1..max）。视觉自定义 + 透明原生 range 叠加：外观完全可控、
+ * 契合毛玻璃风，又复用原生 range 的拖动 / 点击定位 / 键盘无障碍，避开各
+ * WebView 原生 range 样式差异。
+ */
+function ImportCountSlider({
+  value,
+  max,
+  onChange,
+}: {
+  value: number
+  max: number
+  onChange: (v: number) => void
+}) {
+  const pct = max <= 1 ? 0 : ((value - 1) / (max - 1)) * 100
+  return (
+    <div className="mt-2.5 flex items-center gap-3">
+      <span className="shrink-0 text-[11px] tracking-wide text-white/45">导入数量</span>
+      <div className="relative h-5 flex-1">
+        {/* 轨道 + 已选填充 */}
+        <div className="pointer-events-none absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-white/15">
+          <div
+            className="absolute inset-y-0 left-0 rounded-full bg-white/80"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+        {/* thumb */}
+        <div
+          className="pointer-events-none absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-[0_2px_6px_rgba(0,0,0,0.4)]"
+          style={{ left: `${pct}%` }}
+        />
+        {/* 交互层：透明原生 range 盖满，负责拖动 / 无障碍 */}
+        <input
+          type="range"
+          min={1}
+          max={max}
+          value={value}
+          onChange={(e) => onChange(Number(e.target.value))}
+          className="absolute inset-0 m-0 h-full w-full cursor-pointer opacity-0"
+          aria-label="导入数量"
+        />
+      </div>
+      <span className="w-12 shrink-0 text-right text-[12px] font-semibold tabular-nums text-white">
+        {value} 首
+      </span>
+    </div>
+  )
 }
