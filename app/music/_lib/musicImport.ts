@@ -1,11 +1,11 @@
 import type { UserMusicTrackInput } from "@/lib/supabase"
 import { neteaseDirectCover } from "./neteasePic"
+import { METING_INSTANCES } from "./metingInstances"
 
-// 第三方 Meting 实例（公共）。歌单/单曲解析全在客户端发起：
-// 浏览器直连 injahow（其 CORS 为 *），请求分散在各用户 IP，我们服务器不参与
-// （无 SSRF、不汇聚流量）。返回的 url 是 injahow 的 type=url 重解析跳转，
-// 每次播放现取新签名、不会过期。
-const METING_BASE = "https://api.injahow.cn/meting/"
+// 第三方 Meting 实例（公共，主备多实例见 metingInstances.ts）。歌单/单曲解析
+// 全在客户端发起：浏览器直连实例（其 CORS 为 *），请求分散在各用户 IP，我们
+// 服务器不参与（无 SSRF、不汇聚流量）。返回的 url 是实例的 type=url 重解析
+// 跳转，每次播放现取新签名、不会过期。
 
 // 支持的平台 = Meting 的 server 取值。
 //   · netease = 网易云
@@ -101,17 +101,16 @@ function tencentDirectCover(url: string): string {
 }
 
 /**
- * 调 injahow 取歌单/单曲，映射成可批量插入的输入。
- * 过滤掉没有有效 https 音频的条目；不在此处截断数量（由调用方按剩余配额截断）。
- *
- * 封面：两端都把 injahow 的 pic 跳转换成各自平台的 CDN 直链（并发稳、绕开
- * injahow 限流）——网易走 neteaseDirectCover，QQ 走 tencentDirectCover。
+ * 调单个 Meting 实例取歌单/单曲的原始 JSON。任何一步不对（网络/非 2xx/
+ * 不是 JSON/空数组——injahow 挂掉时就返回 HTTP 200 + PHP 报错文本）都抛错，
+ * 由 fetchMetingTracks 换下一个实例重试。
  */
-export async function fetchMetingTracks(
+async function fetchFromInstance(
+  base: string,
   platform: MusicPlatform,
   ref: MetingRef,
-): Promise<UserMusicTrackInput[]> {
-  const url = `${METING_BASE}?server=${platform}&type=${ref.type}&id=${encodeURIComponent(ref.id)}`
+): Promise<Array<Record<string, unknown>>> {
+  const url = `${base}?server=${platform}&type=${ref.type}&id=${encodeURIComponent(ref.id)}`
   let res: Response
   try {
     res = await fetch(url)
@@ -127,6 +126,33 @@ export async function fetchMetingTracks(
     throw new Error("解析服务返回了无法识别的内容")
   }
   if (!Array.isArray(data) || data.length === 0) throw new Error("歌单为空或无法解析")
+  return data as Array<Record<string, unknown>>
+}
+
+/**
+ * 取歌单/单曲，映射成可批量插入的输入。多实例主备回退：按 METING_INSTANCES
+ * 顺序逐个试，哪个实例返回了合法结果就用哪个（结果里的 url/pic 也指向该实例，
+ * 存库后播放自然走健康实例）；全挂才把最后一个错误抛给调用方。
+ * 过滤掉没有有效 https 音频的条目；不在此处截断数量（由调用方按剩余配额截断）。
+ *
+ * 封面：两端都把实例的 pic 跳转换成各自平台的 CDN 直链（并发稳、绕开实例
+ * 限流）——网易走 neteaseDirectCover，QQ 走 tencentDirectCover。
+ */
+export async function fetchMetingTracks(
+  platform: MusicPlatform,
+  ref: MetingRef,
+): Promise<UserMusicTrackInput[]> {
+  let data: Array<Record<string, unknown>> | null = null
+  let lastError: Error | null = null
+  for (const base of METING_INSTANCES) {
+    try {
+      data = await fetchFromInstance(base, platform, ref)
+      break
+    } catch (e) {
+      lastError = e instanceof Error ? e : new Error(String(e))
+    }
+  }
+  if (!data) throw lastError ?? new Error("解析失败")
 
   const out: UserMusicTrackInput[] = []
   for (const item of data as Array<Record<string, unknown>>) {

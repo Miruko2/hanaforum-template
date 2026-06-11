@@ -15,6 +15,7 @@ import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useToast } from "@/hooks/use-toast"
 import { getUserMusicTracks, type UserMusicTrackRow } from "@/lib/supabase"
 import { userRowsToTracks } from "../_lib/userTracks"
+import { metingAlternatives } from "../_lib/metingInstances"
 
 const HISTORY_KEY = "music-history-v1"
 const HISTORY_LIMIT = 50
@@ -200,6 +201,9 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   // to attempt the fallback for THIS attempt (not a stale previous one).
   const playSeqRef = useRef(0)
   const fallbackTriedRef = useRef<Set<number>>(new Set())
+  // 实例回退状态（按 playSeq 一份）：首次报错时基于当时的 src 算出其它 meting
+  // 实例上的同构 URL 列表，之后每次报错顺序取下一个重试；列表耗尽才判"音源不可用"。
+  const metingRetryRef = useRef<{ seq: number; alts: string[]; next: number } | null>(null)
 
   // ---- Audio-reactive visuals (simulated pulse only) ----
   //
@@ -416,12 +420,30 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       isPlayingRef.current = false
       setCurrentTime(0)
     }
-    // 音源解析失败（injahow 挂 / 404 / CORS / 区域 / VIP / 链接失效）：
-    // 不再播放本地占位音频，而是标记该曲"音源不可用"并提示一次，由用户换一首。
-    // 每个 play() 尝试只处理一次（按 playSeq 去重，避免重复弹提示）。
+    // 音源解析失败（实例挂 / 404 / CORS / 区域 / VIP / 链接失效）：
+    // 先做实例回退——src 若是已知 meting 实例的 URL，把域名换到下一个实例重试
+    // （存库的 audio_url 钉死在导入时用的实例上，该实例挂掉时其它实例往往是好的）；
+    // 所有实例都试完仍失败，才标记"音源不可用"提示一次，由用户换一首。
+    // 判死按 playSeq 去重，避免重复弹提示。
     const onError = () => {
       const seq = playSeqRef.current
       if (fallbackTriedRef.current.has(seq)) return
+
+      // 本次播放第一次报错时算出备选列表（基于报错时的 src，含原实例之外的全部实例）
+      if (!metingRetryRef.current || metingRetryRef.current.seq !== seq) {
+        metingRetryRef.current = { seq, alts: metingAlternatives(el.src), next: 0 }
+      }
+      const retry = metingRetryRef.current
+      if (retry.next < retry.alts.length) {
+        const alt = retry.alts[retry.next]
+        retry.next += 1
+        el.src = alt
+        el.play().catch(() => {
+          // 播放被拒/再次加载失败 → 下一次 error 事件继续走回退或判死
+        })
+        return
+      }
+
       fallbackTriedRef.current.add(seq)
       setIsFallback(true)
       setIsPlaying(false)
