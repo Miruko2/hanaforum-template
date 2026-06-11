@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { usePosts } from "@/contexts/posts-context"
 import { Card } from "@/components/ui/card"
+import { useRouter } from "next/navigation"
 
 // useLayoutEffect 在 paint 前同步执行，避免「内容区先以正常态闪现一帧、再开始入场动画」；
 // SSR 无 DOM，退回 useEffect 以消除 React 告警。
@@ -92,6 +93,7 @@ const PostCard = memo(function PostCard({
   const { toast } = useToast()
   const { deletePost } = usePosts()
   const isMobile = useIsMobile()
+  const router = useRouter()
 
   // 计算派生状态 - 确保在所有可能的位置都查找用户名
   const username = post.username || 
@@ -410,9 +412,41 @@ const PostCard = memo(function PostCard({
           </div>
         )}
 
+        {/* 作者头像 - 位于图片与下方内容之间，头像略微上移叠在图片底部，点击进入作者主页 */}
+        <div
+          className={cn(
+            "relative z-10 flex items-center gap-2.5 px-4 cursor-pointer group/author",
+            // 有图片时头像上移叠在图片底边；无图片时正常留白
+            post.image_url ? "-mt-5" : "pt-3"
+          )}
+          onClick={(e) => {
+            e.stopPropagation()
+            router.push(`/user?id=${post.user_id}`)
+          }}
+          title={`查看 ${username} 的主页`}
+        >
+          {avatarUrl ? (
+            <img
+              src={avatarUrl}
+              alt={username}
+              className="h-10 w-10 rounded-full object-cover border-2 border-white/30 shadow-lg avatar-hover-effect"
+            />
+          ) : (
+            <div className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-white/30 bg-gradient-to-br from-blue-500 to-purple-600 text-sm font-semibold text-white shadow-lg avatar-hover-effect">
+              {username.charAt(0).toUpperCase()}
+            </div>
+          )}
+          <span className="relative top-3 truncate text-sm font-medium text-white transition-colors group-hover/author:text-lime-400">
+            {username}
+          </span>
+        </div>
+
+        {/* 头像与标题之间的分隔线 */}
+        <div className="mx-4 mt-2.5 border-t border-white/10" />
+
         {/* 内容区域 */}
         <div
-          className={cn("p-4", heroReturn && "hero-return-content")}
+          className={cn("px-2 pb-1 pt-1", heroReturn && "hero-return-content")}
           onAnimationEnd={(e) => {
             // 只认本元素的浮现动画结束，避免子元素动画冒泡误清状态
             if (e.target === e.currentTarget) setHeroReturn(false)

@@ -67,19 +67,7 @@ export default function PostCardContent({
           完整正文走点开后的详情弹窗（PostDetailModal）。
           理由：避免卡片高度参差不齐影响瀑布流观感，同时减少首页信息密度。 */}
 
-      <div className="flex justify-between items-center text-xs text-white/70 gap-2">
-        {/* 用户名可能很长（例如纯数字 ID），用 truncate 截断；
-            min-w-0 必须有，否则 flex 子项不会缩到内容以下、truncate 失效 */}
-        <span
-          className="truncate min-w-0 cursor-pointer hover:text-lime-400 transition-colors"
-          title={username}
-          onClick={(e) => {
-            e.stopPropagation()
-            router.push(`/user?id=${post.user_id}`)
-          }}
-        >
-          {username}
-        </span>
+      <div className="flex justify-end items-center text-xs text-white/70 gap-2">
         <span className="whitespace-nowrap flex-shrink-0" title={new Date(post.created_at).toLocaleString()}>
           {formattedDate}
         </span>

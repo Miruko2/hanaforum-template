@@ -44,71 +44,22 @@ export default function PostCardImage({
   // 详情页直接命中列表已加载的缓存 → hero 飞入即时有图、不闪。高清留给点击后的灯箱原图。
   const imageQuality = isOnMobile ? 40 : 65
   
-  // 计算图片高度 - 基于图片比例
-  const getImageHeight = () => {
+  // 计算图片容器的宽高比 - 让图片按真实比例显示，形成自然的瀑布流高低错落
+  // 返回 { heightClass, aspectStyle } 二选一：
+  // - 详情页/铺满父容器场景仍用固定高度类
+  // - 列表卡片用 aspect-ratio，按图片真实比例撑高，不再统一裁成几个固定档位
+  const getImageSizing = (): { heightClass?: string; aspectStyle?: React.CSSProperties } => {
     // 横版详情：由父容器控制高度，自身铺满
-    if (fillParent) return 'h-full';
-    if (inDetailView) return 'h-[300px]'; // 详情页固定高度
-    
-    // 使用图片比例计算合适的高度
-    const imageRatio = post.image_ratio || 1.5; // 默认宽高比1.5:1
-    
-    // 移动端和桌面端使用不同的高度
-    if (isOnMobile) {
-      // 移动端高度 - 更小的高度以适应移动设备
-      if (imageRatio < 0.6) {
-        // 特别高的竖图
-        return 'h-[240px]';
-      } else if (imageRatio < 0.8) {
-        // 标准竖图
-        return 'h-[220px]';
-      } else if (imageRatio < 1.0) {
-        // 略高于正方形
-        return 'h-[200px]';
-      } else if (imageRatio < 1.2) {
-        // 接近正方形
-        return 'h-[180px]';
-      } else if (imageRatio < 1.5) {
-        // 略宽于正方形
-        return 'h-[160px]';
-      } else if (imageRatio < 1.8) {
-        // 标准横图
-        return 'h-[150px]';
-      } else if (imageRatio < 2.2) {
-        // 较宽横图
-        return 'h-[140px]';
-      } else {
-        // 特别宽的横图
-        return 'h-[130px]';
-      }
-    } else {
-      // 桌面端高度 - 更详细的宽高比分类，以适应不同宽高比的图片
-      if (imageRatio < 0.6) {
-        // 特别高的竖图
-        return 'h-[350px]';
-      } else if (imageRatio < 0.8) {
-        // 标准竖图
-        return 'h-[320px]';
-      } else if (imageRatio < 1.0) {
-        // 略高于正方形
-        return 'h-[280px]';
-      } else if (imageRatio < 1.2) {
-        // 接近正方形
-        return 'h-[250px]';
-      } else if (imageRatio < 1.5) {
-        // 略宽于正方形
-        return 'h-[220px]';
-      } else if (imageRatio < 1.8) {
-        // 标准横图
-        return 'h-[200px]';
-      } else if (imageRatio < 2.2) {
-        // 较宽横图
-        return 'h-[180px]';
-      } else {
-        // 特别宽的横图
-        return 'h-[160px]';
-      }
-    }
+    if (fillParent) return { heightClass: 'h-full' };
+    if (inDetailView) return { heightClass: 'h-[300px]' }; // 详情页固定高度
+
+    // 图片宽高比 = 宽 / 高，默认 1.5:1
+    const rawRatio = post.image_ratio || 1.5;
+    // 裁剪上下限：避免超高竖图(把卡片撑得过长)或超宽横图(变成细条)
+    // 0.75 ≈ 3:4 竖图，1.9 ≈ 接近 2:1 横图
+    const clampedRatio = Math.min(Math.max(rawRatio, 0.75), 1.9);
+
+    return { aspectStyle: { aspectRatio: String(clampedRatio) } };
   };
   
   // 处理图片加载完成，包括获取图片实际尺寸
@@ -133,8 +84,12 @@ export default function PostCardImage({
   
   // 如果有imageContent但没有图片URL，显示文字占位符
   if (hasImageContent && !post.image_url) {
+    const { heightClass, aspectStyle } = getImageSizing()
     return (
-      <div className={`image-glow flex items-center justify-center bg-gray-800/60 ${getImageHeight()} rounded-t-md`}>
+      <div
+        className={cn("image-glow flex items-center justify-center bg-gray-800/60 rounded-t-md", heightClass)}
+        style={aspectStyle}
+      >
         <div className="flex flex-col items-center text-white">
           <span className="text-4xl font-light">{post.imageContent}</span>
         </div>
@@ -149,8 +104,12 @@ export default function PostCardImage({
 
   // 如果图片加载出错，显示错误状态
   if (imageError) {
+    const { heightClass, aspectStyle } = getImageSizing()
     return (
-      <div className={`image-glow flex items-center justify-center bg-gray-800/60 ${getImageHeight()} rounded-t-md`}>
+      <div
+        className={cn("image-glow flex items-center justify-center bg-gray-800/60 rounded-t-md", heightClass)}
+        style={aspectStyle}
+      >
         <div className="flex flex-col items-center text-gray-400">
           <ImageOff className="h-6 w-6 mb-2" />
           <span className="text-sm">图片加载失败</span>
@@ -159,8 +118,8 @@ export default function PostCardImage({
     )
   }
 
-  // 使用计算的高度
-  const imageHeight = getImageHeight();
+  // 使用计算的尺寸（固定高度类 或 aspect-ratio 内联样式）
+  const { heightClass: imageHeight, aspectStyle } = getImageSizing();
   // 始终使用object-cover以填满容器
   const imageObjectFit = 'object-cover';
 
@@ -170,16 +129,19 @@ export default function PostCardImage({
     : 'rounded-t-md';
 
   return (
-    <div className={cn(
-      "image-glow",
-      inDetailView ? "detail-view-image" : "card-view-image",
-      roundingClass,
-      "overflow-hidden",
-      !fillParent && "p-0",
-      "contain-content gpu-accelerated",
-      "relative",
-      imageHeight
-    )}>
+    <div
+      className={cn(
+        "image-glow",
+        inDetailView ? "detail-view-image" : "card-view-image",
+        roundingClass,
+        "overflow-hidden",
+        !fillParent && "p-0",
+        "contain-content gpu-accelerated",
+        "relative",
+        imageHeight
+      )}
+      style={aspectStyle}
+    >
       <Image
         ref={imageRef}
         src={post.image_url || ""}
