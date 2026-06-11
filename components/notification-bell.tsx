@@ -173,24 +173,24 @@ export default function NotificationBell({ mobileView = false }: NotificationBel
         <motion.div
           key="notif-modal"
           className="fixed inset-0 z-[9999] flex items-center justify-center"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.2 }}
-          style={{ willChange: "opacity" }}
         >
-          {/* 背景：半透明黑色遮罩 + 毛玻璃 */}
+          {/* 背景遮罩：半透明压暗 + 自身淡入淡出。
+              ⚠️ 不要在面板的祖先上动画 opacity / 加 will-change:opacity——
+              祖先 opacity<1 会形成 backdrop 边界，导致后代的 backdrop-filter 被整体忽略
+              （表现为面板完全不磨砂、背景清晰透出）。所以淡入交给这层遮罩，
+              外层容器不再animate opacity。 */}
           <motion.div
             className="absolute inset-0"
-            style={{
-              background: "rgba(0, 0, 0, 0.5)",
-              backdropFilter: "blur(10px)",
-              WebkitBackdropFilter: "blur(10px)",
-            }}
+            style={{ background: "rgba(0, 0, 0, 0.45)" }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
             onClick={() => setIsOpen(false)}
           />
 
-          {/* 通知面板 */}
+          {/* 通知面板：唯一的磨砂层，仅用 transform(scale/y) 动画，
+              不动画自身 opacity，保证 backdrop-filter 始终生效。 */}
           <motion.div
             className="relative w-[95%] max-w-2xl max-h-[85vh] overflow-hidden flex flex-col rounded-2xl border border-white/15 shadow-2xl"
             style={{
