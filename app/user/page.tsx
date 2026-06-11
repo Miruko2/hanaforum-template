@@ -84,7 +84,7 @@ function UserProfileContent() {
             />
 
             <section>
-              <h3 className="mb-3 text-sm tracking-widest uppercase text-white/40">
+              <h3 className="mb-4 text-lg font-semibold tracking-wide text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.6)]">
                 Ta 的帖子 · {posts.length}
               </h3>
               {posts.length > 0 ? (

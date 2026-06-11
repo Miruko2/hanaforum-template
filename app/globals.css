@@ -710,45 +710,6 @@ body {
   }
 }
 
-/* ============================================================
-   安卓设备性能降级（仅 <html class="android-lite"> 生效）
-   由 layout.tsx <head> 内联脚本按 UA 注入；iOS / iPadOS / 桌面不受影响。
-   原因：backdrop-filter / filter:blur 在低端安卓 GPU 上每帧重算，是首页
-   滚动掉帧的主因。这里把卡片的所有实时模糊换成纯色，并把「双重模糊」
-   入场动画降级为轻量淡入。视觉接近，GPU 开销大幅下降，可整段删除回滚。
-   ============================================================ */
-
-/* 1) 卡片本体 + 卡片内所有后代与伪元素的 backdrop-filter 全部关闭
-      （.glass-card / .card-meta / .card-category / .card-action-btn /
-      .admin-badge / .menu-button / .image-glow::before 等一网打尽）。
-      !important 确保盖过 :hover 等状态。 */
-.android-lite .glass-card,
-.android-lite .glass-card *,
-.android-lite .glass-card::before,
-.android-lite .glass-card::after,
-.android-lite .glass-card *::before,
-.android-lite .glass-card *::after {
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-}
-
-/* 2) 失去模糊后用更实的纯色背景补偿（原 0.38 太透，纯色下会透出杂乱背景）。
-      :not(.active) 保留激活态的高亮渐变不被覆盖。 */
-.android-lite .glass-card:not(.active) {
-  background: rgba(25, 25, 35, 0.9);
-}
-
-/* 3) 卡片光影伪元素在安卓直接移除（滚动时持续参与图层合成）。 */
-.android-lite .glass-card::after {
-  display: none;
-}
-
-/* 4) 入场动画「雾中浮现」按用户要求在安卓保留：这里不覆盖 .post-enter 系列，
-      安卓直接继承桌面原版 postEnterBlurReveal（filter:blur 渐入 + 滚动重播）。
-      因常态 backdrop-filter 已在上面（规则 1）关闭，入场期只剩单层 filter 模糊，
-      比桌面的 filter+backdrop-filter 双层轻一档。
-      已知取舍：低端安卓滚动时仍会重播这层模糊动画，是用户选定「与桌面一致」的代价。 */
-
 /* 页面容器 */
 .page-container {
   background: rgba(0, 0, 0, 0.5);
@@ -2266,9 +2227,6 @@ body.modal-open {
     transparent 100%
   );
 }
-
-/* 注：.glass-user-card 不做 .android-lite 降级 —— 它是单个、小面积、按需弹出的
-   浮层，不像首页卡片墙那样大量同屏，实时模糊的逐帧开销可以接受。 */
 
 /* ===== 手机端 galgame 卡片菜单（方案 B）=====
    卡片入场用纯 CSS animation（仅 transform/opacity），交给合成器/GPU，

@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from "next"
 import { Inter } from "next/font/google"
-import { headers } from "next/headers"
 import "./globals.css"
 import { Providers } from "@/components/providers"
 
@@ -37,38 +36,16 @@ export const viewport: Viewport = {
 
 const BG_IMAGE = "/mos-background.webp"
 
-// Capacitor 静态导出（CAPACITOR_BUILD=true）没有请求上下文，不能调用 headers()。
-// 该模式与 next.config.mjs 里 output:'export' 由同一个 env 触发，所以此条件自洽：
-// 仅静态导出时跳过服务端 UA 检测，export 构建不会因调用 headers() 而报错。
-const IS_STATIC_EXPORT = process.env.CAPACITOR_BUILD === "true"
-
 export default function RootLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
-  // 安卓性能降级标记：服务端按 User-Agent 直出 android-lite 到 <html>。
-  // 为什么不只靠客户端 <head> 脚本：App Router 下手写 head 内联脚本执行时机不可靠
-  //（Capacitor WebView 实测未生效）。SSR 直出 class 既确定生效，又无「先毛玻璃后变纯色」闪烁。
-  // globals.css 的 .android-lite 规则据此关闭实时模糊；iOS / iPad / 桌面 UA 不含 Android，不受影响。
-  let htmlClass = ""
-  if (!IS_STATIC_EXPORT) {
-    const ua = headers().get("user-agent") || ""
-    if (/Android|Harmony/i.test(ua)) htmlClass = "android-lite"
-  }
-
   return (
-    <html lang="zh-CN" className={htmlClass} suppressHydrationWarning>
+    <html lang="zh-CN" suppressHydrationWarning>
       <head>
         {/* 高优先级预加载背景图，让浏览器一开始就把它加入下载队列 */}
         <link rel="preload" href={BG_IMAGE} as="image" fetchPriority="high" />
-        {/* 客户端兜底：主路径是上面的服务端注入；此脚本仅在静态导出（无服务端 UA）
-            或 SSR 未注入时按 UA 补打 android-lite 标记，与服务端注入幂等。 */}
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `try{if(/Android|Harmony/i.test(navigator.userAgent)){document.documentElement.classList.add('android-lite')}}catch(e){}`,
-          }}
-        />
       </head>
       <body className={`${inter.className} relative bg-transparent`}>
         {/* 背景图独立成固定层：视觉等效于 background-attachment:fixed（固定不随内容滚动），
