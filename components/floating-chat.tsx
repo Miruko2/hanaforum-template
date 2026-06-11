@@ -9,6 +9,7 @@ import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useChatUI } from "@/contexts/chat-ui-context"
 import { useRouter } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
+import ChatUserCard from "./chat-user-card"
 import styles from "./floating-chat.module.css"
 
 // 统一的展示消息形状（大厅与私聊都映射到这个）
@@ -98,9 +99,8 @@ export default function FloatingChat() {
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; convId: string; username: string } | null>(null)
   const ctxMenuRef = useRef<HTMLDivElement>(null)
 
-  // 头像点击菜单（查看主页 / 私聊）
+  // 头像点击 → 弹出精简社交卡片（背景图/头像/签名 + 私聊/进入主页）
   const [avatarMenu, setAvatarMenu] = useState<{ x: number; y: number; partner: Partner } | null>(null)
-  const avatarMenuRef = useRef<HTMLDivElement>(null)
 
   // Drag position state - persisted in localStorage
   const [position, setPosition] = useState<PanelPosition | null>(null)
@@ -538,22 +538,6 @@ export default function FloatingChat() {
     }
   }, [ctxMenu])
 
-  // 点击/触摸外部关闭头像菜单
-  useEffect(() => {
-    if (!avatarMenu) return
-    const handler = (e: MouseEvent | TouchEvent) => {
-      if (avatarMenuRef.current && !avatarMenuRef.current.contains(e.target as Node)) {
-        setAvatarMenu(null)
-      }
-    }
-    document.addEventListener("mousedown", handler)
-    document.addEventListener("touchstart", handler)
-    return () => {
-      document.removeEventListener("mousedown", handler)
-      document.removeEventListener("touchstart", handler)
-    }
-  }, [avatarMenu])
-
   if (!user) return null
 
   const headerLabel = active.kind === "hall" ? "聊天大厅" : active.username
@@ -798,36 +782,21 @@ export default function FloatingChat() {
       document.body,
     )}
 
-    {avatarMenu && createPortal(
-      <div
-        ref={avatarMenuRef}
-        className={styles.ctxMenu}
-        style={{ left: avatarMenu.x, top: avatarMenu.y }}
-      >
-        <button
-          className={styles.ctxMenuItem}
-          onClick={() => {
-            const id = avatarMenu.partner.id
-            setAvatarMenu(null)
-            setOpen(false)
-            router.push(`/user?id=${id}`)
-          }}
-        >
-          查看主页
-        </button>
-        {avatarMenu.partner.id !== myId && (
-          <button
-            className={styles.ctxMenuItem}
-            onClick={() => {
-              startDm(avatarMenu.partner)
-              setAvatarMenu(null)
-            }}
-          >
-            私聊
-          </button>
-        )}
-      </div>,
-      document.body,
+    {avatarMenu && (
+      <ChatUserCard
+        target={avatarMenu.partner}
+        onClose={() => setAvatarMenu(null)}
+        onDm={() => {
+          startDm(avatarMenu.partner)
+          setAvatarMenu(null)
+        }}
+        onGoProfile={() => {
+          const id = avatarMenu.partner.id
+          setAvatarMenu(null)
+          setOpen(false)
+          router.push(`/user?id=${id}`)
+        }}
+      />
     )}
 
     {/* 表情包灯箱 */}
