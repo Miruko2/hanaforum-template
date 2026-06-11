@@ -151,6 +151,21 @@ export default function PostDetailModal({
     }
   }, [isOpen])
 
+  // 手机端：入场动画期间先不挂评论区（CommentList 挂载即拉评论 + 建实时订阅，
+  // 是开场最重的主线程活，低端安卓上会和入场动画抢帧）。350ms 后再挂载 ——
+  // 此刻入场动画（0.32s）刚收尾，评论区自带 0.4s 淡入接上，肉眼几乎无感。
+  // 桌面由 hero 飞入的 flyDone 门控（见下方渲染条件），不走这个计时器。
+  const [mobileCommentsReady, setMobileCommentsReady] = useState(false)
+  React.useEffect(() => {
+    if (!isOpen) {
+      setMobileCommentsReady(false)
+      return
+    }
+    if (!isMobile) return
+    const t = setTimeout(() => setMobileCommentsReady(true), 350)
+    return () => clearTimeout(t)
+  }, [isOpen, isMobile])
+
   // 预热灯箱原图：详情页一打开，就在浏览器空闲时后台预下载原图（post.image_url，
   // 与灯箱用的是同一条直链）。这样首次点击放大可直接命中 HTTP 缓存、无需等待加载
   // ——灯箱内部已有 img.complete 兜底，命中缓存会跳过 loading 直接弹入。
@@ -304,10 +319,10 @@ export default function PostDetailModal({
         </div>
       </motion.div>
 
-      {/* Comments：仅桌面 hero 飞入期间先不挂载 —— CommentList 会拉取评论 + 建实时订阅，是开场
-          最重的主线程活儿，会和飞入克隆抢主线程；等飞入到位（flyDone）再挂载。
-          手机飞入是普通淡入、无克隆，正常挂载；无 hero 时也正常挂载。 */}
-      {(isMobile || !heroActive || flyDone) && (
+      {/* Comments 延迟挂载：CommentList 会拉取评论 + 建实时订阅，是开场最重的主线程活儿。
+          桌面：hero 飞入到位（flyDone）再挂载，不和飞入克隆抢主线程；
+          手机：入场动画收尾后（mobileCommentsReady，350ms）再挂载，安卓不再开场掉帧。 */}
+      {(isMobile ? mobileCommentsReady : !heroActive || flyDone) && (
         <motion.div
           className="mt-6"
           initial={{ opacity: 0, y: 10 }}
@@ -331,10 +346,15 @@ export default function PostDetailModal({
         <motion.div
           className="fixed inset-0 z-40 flex items-center justify-center"
           onClick={handleClose}
-          initial={{ opacity: 0, pointerEvents: "none" }}
-          animate={{ opacity: 1, pointerEvents: "auto" }}
-          exit={{ opacity: 0, pointerEvents: "none" }}
-          transition={{ duration: 0.2 }}
+          // ⚠️ 这个最外层容器绝不能动画 opacity：它是全屏模糊遮罩和玻璃卡的祖先，
+          // 祖先 opacity<1 会让后代的 backdrop-filter 整体失效 —— 表现为开场时
+          // 背景先保持清晰、淡入结束瞬间「啪」地糊上；关闭时第一帧背景突然变清晰
+          // （= 用户看到的开/关帖「闪动」，安卓上尤其明显）。淡入淡出全部下放给
+          // 遮罩层和面板各自完成（参照 notification-bell 同款修复）。
+          // pointerEvents 不是 grouping property，瞬时切换、保留无妨。
+          initial={{ pointerEvents: "none" as const }}
+          animate={{ pointerEvents: "auto" as const }}
+          exit={{ pointerEvents: "none" as const }}
         >
           {/* 背景遮罩：固定模糊半径，只用 opacity 淡入。
               原来用 framer-motion 把 backdrop-filter 从 blur(0)→blur(15) 逐帧插值，
@@ -363,10 +383,14 @@ export default function PostDetailModal({
                 : "relative w-full max-w-4xl mx-4 flex flex-col"
             }
             onClick={(e) => e.stopPropagation()}
-            // 桌面 hero 飞入时模态只做 opacity 淡入——让「图片从卡片飞入」唱主角，
-            // 模态若也缩放会和 hero 叠加、显得乱；其余路径（手机/无图帖/没拿到源矩形）
-            // 走「上浮 + 微缩放」进出场，纯 transform，比干淡入更有进出感。
-            initial={heroFlight ? { opacity: 0 } : { opacity: 0, y: 18, scale: 0.975 }}
+            // 入场「不」在本层动 opacity：本层是 GlassMorph（玻璃卡）的祖先，
+            // 祖先 opacity<1 会废掉玻璃卡的 backdrop-filter（结束瞬间突然上玻璃=闪）。
+            // 淡入由 GlassMorph 在玻璃元素自身上完成（自带 opacity 0→1，与
+            // backdrop-filter 同元素可安全共存）；本层只做纯 transform 的
+            // 「上浮 + 微缩放」（transform 不是 grouping property，不破坏后代毛玻璃）。
+            // 桌面 hero 飞入时本层完全不动，让「图片从卡片飞入」唱主角。
+            // 退出/回飞仍带 opacity：时长很短且面板正在消失，玻璃失效被全屏模糊遮罩盖住。
+            initial={heroFlight ? undefined : { y: 18, scale: 0.975 }}
             animate={
               closing
                 ? { opacity: 0 }
@@ -395,10 +419,13 @@ export default function PostDetailModal({
             // 视觉上更像浮起来的卡片；PC 横版维持 90vh 不变
             style={{ maxHeight: isMobile ? "82vh" : "90vh", zIndex: 41 }}
           >
-            {/* Close button */}
+            {/* Close button（面板容器不再做入场淡入，这里自己淡入；按钮无毛玻璃、安全） */}
             <motion.button
               onClick={handleClose}
               className="absolute -top-12 right-0 z-10 p-2 text-white hover:text-white/80 transition-colors"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: closing ? 0 : 1 }}
+              transition={{ duration: 0.3 }}
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.95 }}
             >

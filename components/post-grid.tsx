@@ -112,14 +112,18 @@ export default function PostGrid() {
     updatePost(postId, updates);
   }, [updatePost]);
 
-  // 处理帖子删除
+  // 处理帖子删除。
+  // activePostId 用 ref 读取：若直接进依赖数组，开/关任意帖子都会让本回调换新引用，
+  // 顺着 props 把所有 PostItem 的 memo 击穿 → 整墙卡片重渲染（与 PostItem 注释呼应）。
+  const activePostIdRef = useRef<string | null>(null);
+  activePostIdRef.current = activePostId;
   const handlePostDeleted = useCallback((postId: string) => {
     deletePost(postId);
     // 如果当前正在查看的帖子被删除，关闭详情视图
-    if (activePostId === postId) {
+    if (activePostIdRef.current === postId) {
       setActivePostId(null);
     }
-  }, [deletePost, activePostId]);
+  }, [deletePost]);
 
   // 处理重试加载
   const handleRetry = useCallback(() => {

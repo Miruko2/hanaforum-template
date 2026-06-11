@@ -11,6 +11,24 @@ import { useCinemaMode } from "@/contexts/cinema-mode-context"
 import { isValidCategory, CATEGORY_LABELS } from "@/lib/categories"
 import { motion } from "framer-motion"
 
+// 百叶窗效果样式（静态对象提升到模块级，避免每次渲染重建）
+const blindsOverlayStyle = {
+  position: 'fixed' as const,
+  top: 0,
+  left: 0,
+  width: '100%',
+  height: '100%',
+  backgroundImage: `repeating-linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0.15),
+    rgba(0, 0, 0, 0.15) 2px,
+    rgba(0, 0, 0, 0.03) 2px,
+    rgba(0, 0, 0, 0.03) 4px
+  )`,
+  pointerEvents: 'none' as const,
+  zIndex: 0,
+}
+
 // HomePage 内部使用了 useSearchParams()，在 Next.js `output:'export'`
 // 静态构建（Capacitor APK）模式下必须包 Suspense，否则 build 阶段 prerender 失败。
 function HomeContent() {
@@ -31,24 +49,6 @@ function HomeContent() {
       setCategory(activeCategory)
     }
   }, [activeCategory, state.category, setCategory])
-
-  // 百叶窗效果样式
-  const blindsOverlayStyle = {
-    position: 'fixed' as const,
-    top: 0,
-    left: 0,
-    width: '100%',
-    height: '100%',
-    backgroundImage: `repeating-linear-gradient(
-      0deg,
-      rgba(0, 0, 0, 0.15),
-      rgba(0, 0, 0, 0.15) 2px,
-      rgba(0, 0, 0, 0.03) 2px,
-      rgba(0, 0, 0, 0.03) 4px
-    )`,
-    pointerEvents: 'none' as const,
-    zIndex: 0,
-  }
 
   return (
     <div className="min-h-screen relative">

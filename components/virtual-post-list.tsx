@@ -45,7 +45,10 @@ const PostItem = memo(function PostItem({
 }: {
   post: Post
   isActive: boolean
-  onClick: () => void
+  /** 稳定引用的回调（接收 postId）。⚠️ 不要在父级 map 里传内联箭头函数 ——
+   *  那会让每次父级重渲染（如开/关任意帖子）都给所有 PostItem 发新 props、
+   *  memo 全部失效 → 整墙卡片跟着重渲染（安卓上开帖瞬间明显掉帧）。 */
+  onClick: (postId: string) => void
   onClose: () => void
   onPostUpdated?: (postId: string, updates: Partial<Post>) => void
   onPostDeleted?: (postId: string) => void
@@ -59,6 +62,9 @@ const PostItem = memo(function PostItem({
 
   const visible = inView
 
+  // PostCard 期望无参 onClick；在这里（memo 边界内）绑定 postId，保持引用稳定
+  const handleClick = useCallback(() => onClick(post.id), [onClick, post.id])
+
   return (
     <div
       ref={ref}
@@ -67,7 +73,7 @@ const PostItem = memo(function PostItem({
       <PostCard
         post={post}
         isActive={isActive}
-        onClick={onClick}
+        onClick={handleClick}
         onClose={onClose}
         onPostUpdated={onPostUpdated}
         onPostDeleted={onPostDeleted}
@@ -190,7 +196,7 @@ export default function VirtualPostList({
               key={post.id}
               post={post}
               isActive={currentActivePostId === post.id}
-              onClick={() => handlePostClick(post.id)}
+              onClick={handlePostClick}
               onClose={handlePostClose}
               onPostUpdated={onPostUpdated}
               onPostDeleted={onPostDeleted}

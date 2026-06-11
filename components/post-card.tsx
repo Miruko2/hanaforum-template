@@ -36,13 +36,18 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { usePosts } from "@/contexts/posts-context"
 import { Card } from "@/components/ui/card"
 import UserHoverCard from "@/components/user-hover-card"
 
 // useLayoutEffect 在 paint 前同步执行，避免「内容区先以正常态闪现一帧、再开始入场动画」；
 // SSR 无 DOM，退回 useEffect 以消除 React 告警。
 const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect
+
+// iOS（含 iPadOS 桌面化 UA：MacIntel + 多点触控）。只在客户端 effect 里使用，SSR 安全。
+const IS_IOS =
+  typeof navigator !== "undefined" &&
+  (/iP(hone|od|ad)/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1))
 
 interface PostCardProps {
   post: Post
@@ -91,7 +96,6 @@ const PostCard = memo(function PostCard({
   const prevActiveRef = useRef(isActive) // 跟踪上一次激活态，用于检测 hero 关闭返回
   const { user, isAdmin } = useSimpleAuth()
   const { toast } = useToast()
-  const { deletePost } = usePosts()
   const isMobile = useIsMobile()
 
   // 计算派生状态 - 确保在所有可能的位置都查找用户名
@@ -117,6 +121,15 @@ const PostCard = memo(function PostCard({
     }
   }, [])
 
+  // 详情弹窗按需挂载：首次打开前完全不渲染。
+  // 否则首页每张卡都会向 body portal 一个空弹窗（30+ 个空 AnimatePresence + 全套 hooks），
+  // 还会在首页加载时就拉取弹窗的动态 chunk。首开后保持挂载（modalEverOpened 不回退），
+  // 关闭动画 / 再次打开行为与之前完全一致。
+  const [modalEverOpened, setModalEverOpened] = useState(false)
+  useEffect(() => {
+    if (isActive) setModalEverOpened(true)
+  }, [isActive])
+
   // hero 关闭返回检测：isActive 由「开 → 关」、且本次走过桌面 hero（量到源图）时，
   // 触发源卡内容区登场动画。时机正好落在回飞图落地、源卡整卡显形的那一刻。
   // 必须用 layout effect：普通 useEffect 在 paint 之后才置 heroReturn，会先把内容区以正常态
@@ -130,45 +143,33 @@ const PostCard = memo(function PostCard({
     }
   }, [isActive, sourceSrc])
 
-  // 保存打开模态框前的滚动位置
-  const savedScrollYRef = useRef(0);
-
-  // 处理模态框打开时禁用页面滚动
+  // 模态框打开时禁用页面滚动。
+  // ⚠️ position:fixed 锁滚动只给 iOS：iOS Safari 的 overflow:hidden 锁不住触摸滚动，
+  // 必须 fixed + top:-scrollY。但这套 hack 会把整个文档塌缩成视口高（巨型 reflow），
+  // 关闭时「清样式（页面瞬间回到顶部）→ scrollTo 跳回原位」之间一旦被绘制一帧，
+  // 用户就看到整页跳顶再跳回 —— 安卓开/关帖子「概率性闪动」的根因之一。
+  // 安卓/桌面只用 overflow:hidden：移动端 overlay 滚动条不占布局宽度，
+  // 切换 ≈ 零 reflow、零滚动位移，闪动根除。
   useEffect(() => {
-    if (isActive) {
-      // 保存当前滚动位置
-      savedScrollYRef.current = window.scrollY || document.documentElement.scrollTop || 0;
-      
-      if (isMobile) {
-        document.body.style.overflow = 'hidden';
-        document.body.style.position = 'fixed';
-        document.body.style.width = '100%';
-        document.body.style.top = `-${savedScrollYRef.current}px`;
-      } else {
-        document.body.style.overflow = 'hidden';
-      }
-    } else {
-      // 恢复滚动位置（移动端需要）
-      if (isMobile && savedScrollYRef.current > 0) {
-        window.scrollTo({ top: savedScrollYRef.current, behavior: 'auto' });
-      }
-      
-      // 移除所有样式
-      document.body.style.overflow = '';
-      document.body.style.position = '';
-      document.body.style.width = '';
-      document.body.style.top = '';
+    if (!isActive) return;
+    const scrollY = window.scrollY || document.documentElement.scrollTop || 0;
+    const body = document.body.style;
+    const fixedLock = isMobile && IS_IOS;
+    body.overflow = 'hidden';
+    if (fixedLock) {
+      body.position = 'fixed';
+      body.width = '100%';
+      body.top = `-${scrollY}px`;
     }
-
     return () => {
-      // 确保组件卸载时清理样式并恢复滚动位置
-      if (savedScrollYRef.current > 0) {
-        window.scrollTo({ top: savedScrollYRef.current, behavior: 'auto' });
+      // 先还原样式再 scrollTo（旧实现顺序相反，靠 cleanup/effect 的执行间隙才碰巧work）
+      body.overflow = '';
+      if (fixedLock) {
+        body.position = '';
+        body.width = '';
+        body.top = '';
+        window.scrollTo({ top: scrollY, behavior: 'auto' });
       }
-      document.body.style.overflow = '';
-      document.body.style.position = '';
-      document.body.style.width = '';
-      document.body.style.top = '';
     };
   }, [isActive, isMobile]);
 
@@ -290,14 +291,13 @@ const PostCard = memo(function PostCard({
         description: "删除操作进行中...",
       });
       
-      // 使用上下文进行UI更新而不是页面刷新
+      // UI 更新统一走 onPostDeleted 回调（PostGrid 里会调 context 的 deletePost）。
+      // 不再在这里直接订阅 usePosts()：context value 每次帖子状态变化都重建，
+      // 卡片一订阅，点赞任意一条都会让整墙卡片绕过 memo 重渲染。
       const success = await deletePostWithUIUpdate(post.id, (deletedId) => {
-        // 通知父组件帖子已删除
         if (onPostDeleted) {
           onPostDeleted(deletedId);
         }
-        // 同时更新上下文状态
-        deletePost(deletedId);
       });
       
       if (success) {
@@ -315,7 +315,7 @@ const PostCard = memo(function PostCard({
       setIsDeleting(false);
       setShowDeleteAlert(false);
     }
-  }, [user, isDeleting, post.id, toast, isActive, onClose, onPostDeleted, deletePost]);
+  }, [user, isDeleting, post.id, toast, isActive, onClose, onPostDeleted]);
 
   // 渲染缩略图卡片
   const renderCard = () => {
@@ -465,9 +465,9 @@ const PostCard = memo(function PostCard({
     );
   };
 
-  // 渲染模态框
+  // 渲染模态框（首次激活前不挂载，见 modalEverOpened 注释）
   const renderModal = () => {
-    if (!isMounted) return null
+    if (!isMounted || !(isActive || modalEverOpened)) return null
 
     return (
       <PostDetailModal
