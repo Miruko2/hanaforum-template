@@ -10,6 +10,7 @@ import { useChatUI } from "@/contexts/chat-ui-context"
 import { useRouter } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
 import ChatUserCard from "./chat-user-card"
+import { fetchUserCardData } from "@/lib/user-card"
 import styles from "./floating-chat.module.css"
 
 // 统一的展示消息形状（大厅与私聊都映射到这个）
@@ -120,6 +121,21 @@ export default function FloatingChat() {
     const saved = loadSavedPosition()
     if (saved) setPosition(saved)
   }, [])
+
+  // 聊天窗开着时空闲预热「出现过的人」（消息作者 + 在线列表）的社交卡数据，
+  // 点头像开卡即直出，不再等查询。fetchUserCardData 自带 60s 缓存 + 并发去重，
+  // 消息频繁刷新也不会重复打查询；小延迟错峰，让位给消息渲染本身。
+  useEffect(() => {
+    if (!open || !user) return
+    const ids = new Set<string>()
+    for (const m of messages) if (m.fromId !== user.id) ids.add(m.fromId)
+    for (const u of online) if (u.id !== user.id) ids.add(u.id)
+    if (ids.size === 0) return
+    const timer = setTimeout(() => {
+      for (const id of ids) void fetchUserCardData(id)
+    }, 600)
+    return () => clearTimeout(timer)
+  }, [open, messages, online, user])
 
   // Lock body scroll when chat is open (prevent touch event passthrough)
   useEffect(() => {
@@ -640,6 +656,7 @@ export default function FloatingChat() {
                   <button
                     key={u.id}
                     className={styles.onlineAvatarBtn}
+                    onPointerEnter={() => void fetchUserCardData(u.id)}
                     onClick={(e) =>
                       setAvatarMenu({
                         x: e.clientX,
@@ -669,6 +686,7 @@ export default function FloatingChat() {
                         (active.kind === "hall" ? (
                           <button
                             className={styles.avatarBtn}
+                            onPointerEnter={() => void fetchUserCardData(m.fromId)}
                             onClick={(e) =>
                               setAvatarMenu({
                                 x: e.clientX,

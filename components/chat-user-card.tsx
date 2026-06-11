@@ -4,8 +4,8 @@ import { useEffect, useState } from "react"
 import { createPortal } from "react-dom"
 import { motion } from "framer-motion"
 import { X } from "lucide-react"
-import { getPublicProfile, type Profile } from "@/lib/profiles"
-import { getUserCardStats, type UserCardStats } from "@/lib/user-card"
+import { type Profile } from "@/lib/profiles"
+import { fetchUserCardData, peekUserCardData, type UserCardStats } from "@/lib/user-card"
 import { UserCardBody } from "@/components/user-hover-card"
 
 // 聊天大厅点头像弹出的「精简社交卡片」。
@@ -25,19 +25,22 @@ export interface ChatUserCardProps {
 }
 
 export default function ChatUserCard({ target, onClose, onDm, onGoProfile }: ChatUserCardProps) {
-  // 先用聊天里已知的头像/名字占位，背景图/签名/统计异步补齐（零延迟开卡）
-  const [profile, setProfile] = useState<Profile | null>(null)
-  const [stats, setStats] = useState<UserCardStats | null>(null)
+  // 先用聊天里已知的头像/名字占位，背景图/签名/统计异步补齐（零延迟开卡）。
+  // 数据走 lib/user-card 的模块级缓存：60s 内看过这个人（hover 卡/聊天卡）直接秒填。
+  const [profile, setProfile] = useState<Profile | null>(
+    () => peekUserCardData(target.id, { allowStale: true })?.profile ?? null,
+  )
+  const [stats, setStats] = useState<UserCardStats | null>(
+    () => peekUserCardData(target.id, { allowStale: true })?.stats ?? null,
+  )
 
   useEffect(() => {
     let alive = true
-    void Promise.all([getPublicProfile(target.id), getUserCardStats(target.id)]).then(
-      ([p, s]) => {
-        if (!alive) return
-        if (p) setProfile(p)
-        setStats(s)
-      }
-    )
+    void fetchUserCardData(target.id).then((d) => {
+      if (!alive) return
+      if (d.profile) setProfile(d.profile)
+      setStats(d.stats)
+    })
     return () => {
       alive = false
     }
