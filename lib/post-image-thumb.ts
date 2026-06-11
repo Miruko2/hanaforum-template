@@ -10,9 +10,10 @@
 // 老帖子没有缩略图、GIF 不生成缩略图（canvas 压缩会丢动画）——消费端一律
 // 「先试缩略图，onError 回退主图」，所以这里的推导只管"按约定拼路径"，不保证存在。
 //
-// ⚠️ 同一约定还硬编码在两个 Node 脚本里（.mjs 无法 import 本 TS 文件），改动需同步：
+// ⚠️ 同一约定还硬编码在三处（.mjs/Deno 无法 import 本 TS 文件），改动需同步：
 //   - scripts/cleanup-orphan-post-images.mjs（主图被引用 ⇒ 对应缩略图也算被引用）
 //   - scripts/backfill-post-image-thumbs.mjs（给存量主图回填缩略图）
+//   - supabase/functions/moderate-image/index.ts（违规删主图时连带删缩略图）
 
 export const POST_THUMB_SUFFIX = "_thumb"
 /** 缩略图统一存 webp 路径（客户端 toBlob/服务端 sharp 都输出 webp） */

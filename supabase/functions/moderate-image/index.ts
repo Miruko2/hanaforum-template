@@ -177,11 +177,21 @@ async function stripImage(admin: SupabaseClient, postId: string, userId: string,
 }
 
 // 删存储里的违规图(仅当确属本项目 post-images 桶；路径从 URL 反解，不接受外部任意路径)。
+// 主图 + 对应 640px 缩略图一起删：发帖时客户端会同步上传 `<base>_thumb.webp`
+// (命名约定见 lib/post-image-thumb.ts，此处为 Deno 环境复制实现)，
+// 只删主图会让违规缩略图以公开 URL 残留到每周孤儿清理才消失。
+// gif 无缩略图；缩略图不存在时 remove 静默忽略，多删无害。
 async function deleteStorageImage(admin: SupabaseClient, imageUrl: string): Promise<void> {
   if (!imageUrl.startsWith(POST_IMAGES_PREFIX)) return
   try {
     const path = decodeURIComponent(imageUrl.slice(POST_IMAGES_PREFIX.length).split("?")[0])
-    const { error } = await admin.storage.from("post-images").remove([path])
+    const targets = [path]
+    if (!/\.gif$/i.test(path)) {
+      const dot = path.lastIndexOf(".")
+      const base = dot > 0 ? path.slice(0, dot) : path
+      targets.push(`${base}_thumb.webp`)
+    }
+    const { error } = await admin.storage.from("post-images").remove(targets)
     if (error) console.error("[moderate-image] 删图失败:", error)
   } catch (e) {
     console.error("[moderate-image] 删图异常:", e)
