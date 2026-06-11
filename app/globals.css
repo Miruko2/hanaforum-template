@@ -2203,6 +2203,73 @@ body.modal-open {
   animation: glassDropdownOut 0.15s ease-out both;
 }
 
+/* ===== 用户社交悬浮卡（UserHoverCard）毛玻璃 =====
+   与 .glass-dropdown 同理：Radix Portal 直挂 body，祖先无 filter/opacity，
+   backdrop-filter 能正常采样页面背景；入场的 opacity/transform 动画与
+   毛玻璃在同一元素上，CSS 规范允许共存，不会出现"先透明后上玻璃"的闪跳。 */
+.glass-user-card {
+  background: rgba(20, 20, 28, 0.55);
+  backdrop-filter: blur(24px) saturate(150%);
+  -webkit-backdrop-filter: blur(24px) saturate(150%);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow:
+    0 24px 64px rgba(0, 0, 0, 0.5),
+    0 0 24px rgba(132, 204, 22, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+/* 卡片在头像上方弹出(side="top")：从下往上、带一点过冲的弹入 */
+@keyframes glassUserCardIn {
+  0% {
+    opacity: 0;
+    transform: translateY(10px) scale(0.94);
+  }
+  60% {
+    opacity: 1;
+    transform: translateY(-2px) scale(1.01);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes glassUserCardOut {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(6px) scale(0.96);
+  }
+}
+.glass-user-card[data-state="open"] {
+  animation: glassUserCardIn 0.28s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  transform-origin: var(--radix-hover-card-content-transform-origin, bottom left);
+}
+.glass-user-card[data-state="closed"] {
+  animation: glassUserCardOut 0.15s ease-out both;
+}
+
+/* banner 图底部渐隐、直接融进玻璃，替代旧的"渐变到实色"硬接缝 */
+.glass-user-card .user-card-banner {
+  mask-image: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 1) 30%,
+    rgba(0, 0, 0, 0.35) 75%,
+    transparent 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 1) 30%,
+    rgba(0, 0, 0, 0.35) 75%,
+    transparent 100%
+  );
+}
+
+/* 注：.glass-user-card 不做 .android-lite 降级 —— 它是单个、小面积、按需弹出的
+   浮层，不像首页卡片墙那样大量同屏，实时模糊的逐帧开销可以接受。 */
+
 /* ===== 手机端 galgame 卡片菜单（方案 B）=====
    卡片入场用纯 CSS animation（仅 transform/opacity），交给合成器/GPU，
    避免 framer-motion 的 JS spring 在 Android WebView 里主线程逐帧计算掉帧、发涩。

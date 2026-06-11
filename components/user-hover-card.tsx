@@ -28,6 +28,91 @@ function Stat({ value, label }: { value: number; label: string }) {
   )
 }
 
+export interface UserCardBodyProps {
+  username: string
+  avatarUrl: string | null
+  backgroundUrl: string | null
+  bio: string | null
+  stats: UserCardStats | null
+  primaryLabel?: string
+  secondaryLabel?: string
+  onPrimary: () => void
+  onSecondary: () => void
+}
+
+// 卡面内容（banner + 头像 + 用户名/签名 + 三栏统计 + 两个动作按钮）。
+// 首页 hover 卡和聊天窗口的居中卡共用这一张卡面，外壳(.glass-user-card)由调用方提供。
+export function UserCardBody({
+  username,
+  avatarUrl,
+  backgroundUrl,
+  bio,
+  stats,
+  primaryLabel = "私信",
+  secondaryLabel = "查看主页",
+  onPrimary,
+  onSecondary,
+}: UserCardBodyProps) {
+  return (
+    <>
+      {/* 背景图 Banner：底部经 mask 渐隐，直接融进毛玻璃（样式见 globals.css） */}
+      <div className="user-card-banner relative h-24 w-full">
+        {backgroundUrl ? (
+          <img src={backgroundUrl} alt="" className="h-full w-full object-cover" />
+        ) : (
+          <div className="h-full w-full bg-gradient-to-br from-lime-400/20 via-emerald-500/10 to-transparent" />
+        )}
+      </div>
+
+      <div className="px-4 pb-4">
+        {/* 头像：叠在 banner 下沿 */}
+        <div className="relative -mt-9 mb-2 inline-block">
+          <img
+            src={avatarUrl || "/logo.png"}
+            alt={username}
+            className="h-16 w-16 rounded-full border-[3px] border-white/25 object-cover shadow-[0_8px_24px_rgba(0,0,0,0.45)]"
+            onError={(e) => {
+              const img = e.currentTarget
+              if (img.src.indexOf("/logo.png") === -1) img.src = "/logo.png"
+            }}
+          />
+        </div>
+
+        {/* 用户名 + 签名 */}
+        <h3 className="truncate text-xl font-bold leading-tight">{username}</h3>
+        <p className="mt-1 line-clamp-2 min-h-[1.25rem] text-sm text-white/50">
+          {bio || "这个人很神秘，什么都没留下"}
+        </p>
+
+        {/* 三栏统计 */}
+        <div className="mt-4 grid grid-cols-3 gap-2 border-t border-white/10 pt-4">
+          <Stat value={stats?.likes ?? 0} label="获赞" />
+          <Stat value={stats?.followers ?? 0} label="粉丝" />
+          <Stat value={stats?.posts ?? 0} label="帖子" />
+        </div>
+
+        {/* 操作按钮 */}
+        <div className="mt-4 flex gap-2">
+          <button
+            type="button"
+            onClick={onPrimary}
+            className="flex-1 rounded-xl bg-lime-400 py-2.5 text-sm font-semibold text-black shadow-[0_4px_18px_rgba(163,230,53,0.25)] transition-all hover:bg-lime-300 hover:shadow-[0_4px_24px_rgba(163,230,53,0.4)]"
+          >
+            {primaryLabel}
+          </button>
+          <button
+            type="button"
+            onClick={onSecondary}
+            className="flex-1 rounded-xl border border-white/10 bg-white/10 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-white/15"
+          >
+            {secondaryLabel}
+          </button>
+        </div>
+      </div>
+    </>
+  )
+}
+
 // 头像 hover 弹出的精简社交卡片：背景图 + 头像(带等级角标) + 用户名 + 签名 +
 // 三栏统计(获赞/粉丝/帖子) + 私信 / 查看主页。数据在首次 hover 时懒加载。
 export default function UserHoverCard({
@@ -114,69 +199,20 @@ export default function UserHoverCard({
         side="top"
         align="start"
         sideOffset={10}
-        className="w-72 overflow-hidden rounded-2xl border border-white/10 bg-[#111114] p-0 text-white shadow-2xl"
+        className="glass-user-card w-72 overflow-hidden rounded-2xl p-0 text-white"
         onClick={(e) => e.stopPropagation()}
         onInteractOutside={() => setOpen(false)}
       >
-        {/* 背景图 Banner */}
-        <div className="relative h-24 w-full">
-          {profile?.background_url ? (
-            <img
-              src={profile.background_url}
-              alt=""
-              className="h-full w-full object-cover"
-            />
-          ) : (
-            <div className="h-full w-full bg-gradient-to-br from-lime-900/40 via-emerald-900/25 to-black/40" />
-          )}
-          <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#111114] via-[#111114]/30 to-transparent" />
-        </div>
-
-        <div className="px-4 pb-4">
-          {/* 头像：叠在 banner 下沿 */}
-          <div className="relative -mt-9 mb-2 inline-block">
-            <img
-              src={avatarUrl || "/logo.png"}
-              alt={username}
-              className="h-16 w-16 rounded-full border-[3px] border-[#111114] object-cover shadow-lg"
-              onError={(e) => {
-                const img = e.currentTarget
-                if (img.src.indexOf("/logo.png") === -1) img.src = "/logo.png"
-              }}
-            />
-          </div>
-
-          {/* 用户名 + 签名 */}
-          <h3 className="truncate text-xl font-bold leading-tight">{username}</h3>
-          <p className="mt-1 line-clamp-2 min-h-[1.25rem] text-sm text-white/50">
-            {profile?.bio || "这个人很神秘，什么都没留下"}
-          </p>
-
-          {/* 三栏统计 */}
-          <div className="mt-4 grid grid-cols-3 gap-2 border-t border-white/10 pt-4">
-            <Stat value={stats?.likes ?? 0} label="获赞" />
-            <Stat value={stats?.followers ?? 0} label="粉丝" />
-            <Stat value={stats?.posts ?? 0} label="帖子" />
-          </div>
-
-          {/* 操作按钮：私信 / 查看主页 */}
-          <div className="mt-4 flex gap-2">
-            <button
-              type="button"
-              onClick={handleDm}
-              className="flex-1 rounded-xl bg-lime-400 py-2.5 text-sm font-semibold text-black transition-colors hover:bg-lime-300"
-            >
-              {isSelf ? "我的主页" : "私信"}
-            </button>
-            <button
-              type="button"
-              onClick={goProfile}
-              className="flex-1 rounded-xl bg-white/10 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-white/15"
-            >
-              查看主页
-            </button>
-          </div>
-        </div>
+        <UserCardBody
+          username={username}
+          avatarUrl={avatarUrl}
+          backgroundUrl={profile?.background_url ?? null}
+          bio={profile?.bio ?? null}
+          stats={stats}
+          primaryLabel={isSelf ? "我的主页" : "私信"}
+          onPrimary={handleDm}
+          onSecondary={goProfile}
+        />
       </HoverCardContent>
     </HoverCard>
   )
