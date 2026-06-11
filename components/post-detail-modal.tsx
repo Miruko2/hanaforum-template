@@ -74,6 +74,10 @@ export default function PostDetailModal({
   // 这次打开是否走 hero（桌面横版 + 手机竖版都走）：有图 + 拿到源矩形与源图 URL。
   // flyTarget（详情图区）由 heroRef 测量：横版 = 左侧图片列，竖版 = 顶部图片区（同一 ref）。
   const heroActive = !!post.image_url && !!sourceRect && !!sourceSrc
+  // 桌面 hero 飞入时模态只做淡入（再叠缩放会和飞入克隆打架、显得乱）；
+  // 其余情况（手机、无图帖、源矩形没拿到）模态走「上浮 + 微缩放」进出场，
+  // 比纯淡入更有进出感，且纯 transform、合成器友好
+  const heroFlight = heroActive && !isMobile
   // 关闭回飞的落点：优先图片区矩形（与源卡图片像素重合、不跳变），回退整卡矩形
   const flyBackTarget = sourceImgRect ?? sourceRect
   // 飞行图飞到目标后置 true → 显示详情真实图、移除飞行图
@@ -105,11 +109,22 @@ export default function PostDetailModal({
   // 回飞条件：本次走 hero、已飞到位（flyDone）、且拿到起止矩形与图源。
   // 飞到位后由回飞元素的 onAnimationComplete 调用真正的 onClose。
   const handleClose = useCallback(() => {
+    // 回飞起点用「关闭瞬间」的详情图矩形重新测量：入场带 y 位移/缩放时，open 时
+    // 量到的矩形有偏差，这里重量一次保证回飞图从像素准确的位置起飞
+    let target = flyTarget
+    const el = heroRef.current
+    if (el) {
+      const r = el.getBoundingClientRect()
+      if (r.width && r.height) {
+        target = { left: r.left, top: r.top, width: r.width, height: r.height }
+        setFlyTarget(target)
+      }
+    }
     // 桌面：飞入克隆已飞到位（flyDone）才回飞；手机：飞入是普通淡入（无 flyDone），
     // 只要量到了起止矩形与图源就回飞（飞回动效手机也保留）。
     const canFlyBack = isMobile
-      ? !!(heroActive && flyTarget && flyBackTarget && sourceSrc)
-      : !!(heroActive && flyDone && flyTarget && sourceRect && sourceSrc)
+      ? !!(heroActive && target && flyBackTarget && sourceSrc)
+      : !!(heroActive && flyDone && target && sourceRect && sourceSrc)
     if (canFlyBack) {
       closedRef.current = false
       setClosing(true)
@@ -191,18 +206,19 @@ export default function PostDetailModal({
   // 右侧/下方的内容块：标题、作者、正文、点赞计数、评论
   const contentBody = (
     <>
-      {/* Title and category */}
+      {/* Title and category —— 内容区 stagger 整体收紧（0.08→0.32s），
+          原来延迟一路排到 0.6s，打开后内容「慢半拍」才出现，不跟手 */}
       <motion.div
         className="flex justify-between items-start gap-3 mb-5"
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, delay: 0.2 }}
+        transition={{ duration: 0.35, delay: 0.08 }}
       >
         <motion.h3
           className="text-2xl md:text-[26px] font-semibold text-white leading-tight"
           initial={{ opacity: 0, x: -20 }}
           animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.5, delay: 0.3 }}
+          transition={{ duration: 0.4, delay: 0.14 }}
         >
           {post.title}
         </motion.h3>
@@ -210,7 +226,7 @@ export default function PostDetailModal({
           className="shrink-0 text-white text-sm font-medium px-3 py-1 rounded-full bg-black/25 border border-white/10"
           initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.5, delay: 0.3 }}
+          transition={{ duration: 0.4, delay: 0.14 }}
         >
           {CATEGORY_LABELS[post.category] || post.category}
         </motion.span>
@@ -221,7 +237,7 @@ export default function PostDetailModal({
         className="flex items-center justify-between mb-5 text-sm text-gray-300"
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, delay: 0.4 }}
+        transition={{ duration: 0.35, delay: 0.2 }}
       >
         <div
           className="flex items-center gap-3 cursor-pointer group/author"
@@ -252,7 +268,7 @@ export default function PostDetailModal({
         className="text-gray-200 text-[16.5px] md:text-base leading-relaxed mb-7 whitespace-pre-line"
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, delay: 0.5 }}
+        transition={{ duration: 0.35, delay: 0.26 }}
       >
         {post.description || post.content}
       </motion.p>
@@ -262,7 +278,7 @@ export default function PostDetailModal({
         className="flex justify-between items-center pt-4 border-t border-white/10"
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, delay: 0.6 }}
+        transition={{ duration: 0.35, delay: 0.32 }}
       >
         <div className="flex items-center space-x-4 text-gray-300 text-sm">
           <LikeButton
@@ -326,7 +342,9 @@ export default function PostDetailModal({
             initial={{ opacity: 0 }}
             animate={{ opacity: closing ? 0 : 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
+            // 回飞关闭时揭幕 0.35s：跟 0.5s 的回飞总时长同步推进（揭幕先行一点点），
+            // 落地时刚好全清；0.2s 会显得背景瞬间变清晰、与回飞脱节。
+            transition={closing ? { duration: 0.35, ease: "easeOut" } : { duration: 0.2 }}
           />
 
           <motion.div
@@ -336,14 +354,34 @@ export default function PostDetailModal({
                 : "relative w-full max-w-4xl mx-4 flex flex-col"
             }
             onClick={(e) => e.stopPropagation()}
-            // 模态框本身只做 opacity 淡入（不再 scale 弹入）——让「图片从卡片飞入」
-            // 的 hero 转场唱主角；模态若也缩放会和 hero 叠加、显得乱。
-            initial={{ opacity: 0 }}
-            animate={{ opacity: closing ? 0 : 1 }}
-            exit={{ opacity: 0, transition: { duration: 0.18, ease: "easeOut" } }}
-            // 关闭回飞时整框（含底部内容区）用更长的 0.7s 明显「逐渐淡出」，跟飞回节奏走，
-            // 避免内容区一下子消失；打开仍 0.28s 淡入。
-            transition={closing ? { duration: 0.7, ease: "easeOut" } : { duration: 0.28, ease: "easeOut" }}
+            // 桌面 hero 飞入时模态只做 opacity 淡入——让「图片从卡片飞入」唱主角，
+            // 模态若也缩放会和 hero 叠加、显得乱；其余路径（手机/无图帖/没拿到源矩形）
+            // 走「上浮 + 微缩放」进出场，纯 transform，比干淡入更有进出感。
+            initial={heroFlight ? { opacity: 0 } : { opacity: 0, y: 18, scale: 0.975 }}
+            animate={
+              closing
+                ? { opacity: 0 }
+                : heroFlight
+                  ? { opacity: 1 }
+                  : { opacity: 1, y: 0, scale: 1 }
+            }
+            exit={
+              heroFlight
+                ? { opacity: 0, transition: { duration: 0.18, ease: "easeOut" } }
+                : {
+                    opacity: 0,
+                    y: 10,
+                    scale: 0.985,
+                    transition: { duration: 0.18, ease: "easeOut" },
+                  }
+            }
+            // 关闭回飞时整框（含底部内容区）0.5s「逐渐淡出」，跟 0.5s 的回飞总时长
+            // （0.08 delay + 0.42 飞行）同步收尾；打开 0.32s 强缓出，上浮收尾轻盈。
+            transition={
+              closing
+                ? { duration: 0.5, ease: "easeOut" }
+                : { duration: 0.32, ease: [0.16, 1, 0.3, 1] }
+            }
             // 手机端缩到 82vh，让模态框周围露出一圈背景（不再"贴满全屏"），
             // 视觉上更像浮起来的卡片；PC 横版维持 90vh 不变
             style={{ maxHeight: isMobile ? "82vh" : "90vh", zIndex: 41 }}
@@ -566,9 +604,9 @@ export default function PostDetailModal({
               height: flyBackTarget.height,
             }}
             // 飞回用缓入缓出（easeInOutCubic）：轻起 → 加速 → 轻落，收拢有重量感、不会
-            // 开头猛缩，尾速趋近 0 → 落回图片区更稳。时长 0.6s 与飞入呼应。
-            // delay 0.12s：让底部内容区先开始渐隐，图片再起飞 → 呼应「飞回之前底部逐渐消失」。
-            transition={{ duration: 0.6, ease: [0.65, 0, 0.35, 1], delay: 0.12 }}
+            // 开头猛缩，尾速趋近 0 → 落回图片区更稳。时长 0.42s：比飞入(0.6s)快一档，
+            // 关闭动作要干脆。delay 0.08s：让底部内容区先开始渐隐，图片再起飞。
+            transition={{ duration: 0.42, ease: [0.65, 0, 0.35, 1], delay: 0.08 }}
             // 落点 = 源卡图片区（flyBackTarget）：图片在那里 object-cover 的裁剪与源卡图片
             // 完全一致 → 像素级无缝。落地即真正关闭：onClose 让父级 isActive=false（源卡整卡
             // 显形 —— 图片区被回飞图无缝接管、不跳变，下方内容区由 PostCard 做浮现入场）、
