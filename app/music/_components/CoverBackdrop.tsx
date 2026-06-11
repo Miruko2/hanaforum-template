@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { usePlayback } from "../_context/PlaybackContext"
+import { usePlaybackWall } from "../_context/PlaybackContext"
 import { neteaseDirectCover } from "../_lib/neteasePic"
 import type { Track } from "../_data/tracks"
 
@@ -28,7 +28,9 @@ type Props = {
 }
 
 export function CoverBackdrop({ lite = false }: Props = {}) {
-  const { currentTrack, getAudioIntensity } = usePlayback()
+  // 墙专用低频上下文：本组件只要 currentTrack + getAudioIntensity，
+  // 不该被 volume / history 等高频 value 重建波及（全屏图层重渲染不便宜）。
+  const { currentTrack, getAudioIntensity } = usePlaybackWall()
 
   const [layerA, setLayerA] = useState<Track | null>(null)
   const [layerB, setLayerB] = useState<Track | null>(null)
@@ -70,17 +72,25 @@ export function CoverBackdrop({ lite = false }: Props = {}) {
   }, [currentTrack, active])
 
   // Audio-reactive pulse — driven entirely by rAF + refs, never re-renders.
+  // 量化到 1% 步进 + 脏检查：原先每帧都写一个新 opacity 字符串（呼吸正弦帧帧不同），
+  // 全屏图层每帧失效；更糟的是底部播放器的 backdrop-filter 压在本层上，背景一变
+  // 就得整面板重模糊。1% 步进肉眼不可辨，却把写入频率从 60/s 压到 ~20/s；
+  // 暂停时 intensity 恒 1 → 脏检查后完全零写入。
   useEffect(() => {
     let mounted = true
     let raf = 0
+    let prevPulse = ""
     const loop = () => {
       if (!mounted) return
       const intensity = getAudioIntensity() // 0..1, paused returns 1 (steady)
       // Map intensity → opacity multiplier. At intensity 1: full base opacity.
       // At intensity 0: dimmed to ~0.55. Sweet spot for "breathing" effect.
-      const pulse = 0.55 + intensity * 0.45
-      if (imgRefA.current) imgRefA.current.style.opacity = String(pulse)
-      if (imgRefB.current) imgRefB.current.style.opacity = String(pulse)
+      const pulse = (0.55 + intensity * 0.45).toFixed(2)
+      if (pulse !== prevPulse) {
+        if (imgRefA.current) imgRefA.current.style.opacity = pulse
+        if (imgRefB.current) imgRefB.current.style.opacity = pulse
+        prevPulse = pulse
+      }
       raf = requestAnimationFrame(loop)
     }
     raf = requestAnimationFrame(loop)

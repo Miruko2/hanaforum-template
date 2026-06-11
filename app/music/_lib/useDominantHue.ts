@@ -106,7 +106,13 @@ export function useDominantHue(coverUrl: string | null | undefined): number | nu
       cache.set(coverUrl, null)
       setHue(null)
     }
-    img.src = apiUrl(`/api/img-proxy?url=${encodeURIComponent(coverUrl)}`)
+    // 取色只采 16×16：网易直链自带 param=WxH 缩图参数时换成 64y64 小图再走代理 ——
+    // 代理拉取/中转的字节数缩 ~40 倍（Vercel egress / 函数耗时双降），色相结果不变。
+    // 缓存键仍用原始 coverUrl，对调用方透明。
+    const sampleUrl = /music\.126\.net/i.test(coverUrl)
+      ? coverUrl.replace(/\bparam=\d+y\d+/, "param=64y64")
+      : coverUrl
+    img.src = apiUrl(`/api/img-proxy?url=${encodeURIComponent(sampleUrl)}`)
 
     return () => {
       cancelled = true

@@ -5,6 +5,7 @@ import { useCallback, useState } from "react"
 import { ListMusic } from "lucide-react"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { PlaybackProvider } from "./_context/PlaybackContext"
+import { PerfHUD } from "./_components/PerfHUD"
 import type { Track } from "./_data/tracks"
 import type { ExpandRect, ExpandTarget } from "./_components/ExpandedCard"
 
@@ -103,6 +104,9 @@ export default function MusicPage() {
         <SourceToggle />
       </div>
       <MusicLibraryEditor open={editorOpen} onClose={() => setEditorOpen(false)} />
+
+      {/* ?perf 性能测量浮层：不带参数时为 null、零成本（真机调优用） */}
+      <PerfHUD />
     </PlaybackProvider>
   )
 }

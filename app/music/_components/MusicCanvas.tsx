@@ -16,7 +16,7 @@ import { Grain } from "./Grain"
 import { useReducedMotion } from "../_lib/useReducedMotion"
 import { useIsMobile } from "../_lib/useIsMobile"
 import { useIsAndroid, useIsAndroidApp } from "../_lib/useIsAndroid"
-import { usePlayback, useTracks } from "../_context/PlaybackContext"
+import { usePlaybackWall, useTracks } from "../_context/PlaybackContext"
 // Toggle between cover-image backdrop (per track) and a single looping video.
 const USE_VIDEO_BACKDROP = true
 
@@ -55,7 +55,7 @@ function PlaybackPresenceProbe({
 }: {
   onChange: (present: boolean) => void
 }) {
-  const { currentTrack } = usePlayback()
+  const { currentTrack } = usePlaybackWall()
   const present = currentTrack != null
   useEffect(() => {
     onChange(present)
@@ -147,7 +147,7 @@ export function MusicCanvas({ onExpand, overlayOpen = false }: Props) {
   const instanceKeysRef = useRef<string>("")
 
   // Playback state lives in PlaybackContext; each MusicCard subscribes
-  // directly via usePlayback(), so the canvas doesn't need to read it.
+  // directly via usePlaybackWall(), so the canvas doesn't need to read it.
 
   // --- viewport size --- //
   useEffect(() => {

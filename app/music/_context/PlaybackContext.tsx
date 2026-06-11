@@ -109,6 +109,29 @@ export function usePlaybackTime(): PlaybackTimeState {
   return useContext(PlaybackTimeCtx)
 }
 
+// ---- 墙专用低频上下文：只含墙上卡片/背景层真正订阅的字段 ----
+// usePlayback 的 value 里混着 volume / history / playMode / isFallback 等：
+// 音量滑块拖动是「每个 pointermove 一次 setState」，若卡片直接订阅 usePlayback，
+// 一次拖动 = 几十张 MusicCard × 每 move 全量重渲染（安卓主线程直接被拖垮）。
+// 这里只挑墙需要的字段单独成 context：value 仅在 切歌 / 播放暂停 / 收藏增减 时
+// 变化 —— 这些时刻卡片本来就该重渲染，其余高频状态全部隔离在外。
+export type PlaybackWallState = {
+  currentTrack: Track | null
+  isPlaying: boolean
+  togglePlay: (id?: string) => void
+  prev: () => void
+  next: () => void
+  isFavorite: (id: string) => boolean
+  toggleFavorite: (id: string) => void
+  getAudioIntensity: () => number
+}
+const PlaybackWallCtx = createContext<PlaybackWallState | null>(null)
+export function usePlaybackWall(): PlaybackWallState {
+  const ctx = useContext(PlaybackWallCtx)
+  if (!ctx) throw new Error("usePlaybackWall must be used inside <PlaybackProvider>")
+  return ctx
+}
+
 // 单独的低频上下文：只承载曲目列表（仅在用户曲目加载/切换时变化）。
 // 重量级的 MusicCanvas 用它、而非 usePlayback —— 避免被 timeupdate 引发的
 // 高频 value 重建波及到每帧渲染。
@@ -744,10 +767,28 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     [tracks, source, setSource, hasUserTracks],
   )
 
+  // 墙专用 value：依赖刻意收窄（见 PlaybackWallCtx 注释）。volume/history/
+  // playMode/时间心跳都不在依赖里，不会触发墙的重渲染。
+  const wallValue = useMemo<PlaybackWallState>(
+    () => ({
+      currentTrack,
+      isPlaying,
+      togglePlay,
+      prev,
+      next,
+      isFavorite,
+      toggleFavorite,
+      getAudioIntensity,
+    }),
+    [currentTrack, isPlaying, togglePlay, prev, next, isFavorite, toggleFavorite, getAudioIntensity],
+  )
+
   return (
     <PlaybackCtx.Provider value={value}>
       <PlaybackTimeCtx.Provider value={timeValue}>
-        <PlaybackTracksCtx.Provider value={tracksCtxValue}>{children}</PlaybackTracksCtx.Provider>
+        <PlaybackWallCtx.Provider value={wallValue}>
+          <PlaybackTracksCtx.Provider value={tracksCtxValue}>{children}</PlaybackTracksCtx.Provider>
+        </PlaybackWallCtx.Provider>
       </PlaybackTimeCtx.Provider>
     </PlaybackCtx.Provider>
   )

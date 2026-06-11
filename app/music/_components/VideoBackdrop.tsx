@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef } from "react"
-import { usePlayback } from "../_context/PlaybackContext"
+import { usePlaybackWall } from "../_context/PlaybackContext"
 
 /**
  * Looping MP4 backdrop. Replaces the per-track CoverBackdrop with a single
@@ -12,7 +12,8 @@ import { usePlayback } from "../_context/PlaybackContext"
  * without user gesture; `playsInline` keeps iOS from going fullscreen.
  */
 export function VideoBackdrop() {
-  const { getAudioIntensity } = usePlayback()
+  // 墙专用低频上下文：只要 getAudioIntensity，隔离 volume/history 等高频重渲染。
+  const { getAudioIntensity } = usePlaybackWall()
   const videoRef = useRef<HTMLVideoElement | null>(null)
 
   // Per-frame opacity pulse via rAF + DOM write (bypasses React).
@@ -25,7 +26,8 @@ export function VideoBackdrop() {
       const intensity = getAudioIntensity() // 0..1, paused returns 1
       // Opacity range tuned for video: a bit higher floor than the cover
       // backdrop, since the video is the only "art" on screen.
-      const pulse = (0.6 + intensity * 0.4).toFixed(3)
+      // 量化到 1% 步进（与 CoverBackdrop 一致）：0.1% 步进等于每帧都变、脏检查形同虚设。
+      const pulse = (0.6 + intensity * 0.4).toFixed(2)
       if (videoRef.current && pulse !== prevOpacity) {
         videoRef.current.style.opacity = pulse
         prevOpacity = pulse

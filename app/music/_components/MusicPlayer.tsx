@@ -153,11 +153,14 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
   )
   const hue = extracted ?? currentTrack?.hue ?? 0
 
-  // Android WebView: reduce blur to avoid ghosting/compositor artifacts
+  // Android WebView（app）：彻底去掉播放器的 backdrop-filter。
+  // 它本来就是 85% 实底灰 + 背后卡片被遮挡（只剩暗化的封面背景），blur 的视觉
+  // 贡献趋近于 0；但代价是真实的 —— 背景呼吸脉冲每变一次，整块面板都要重模糊
+  // 一遍，还给本就脆弱的 WebView 合成器（鬼影史）多压一层。实底加深到 0.92 补偿。
+  // 安卓 Chrome / iOS / 桌面不受影响，保留完整毛玻璃。
   const isAndroidWebView = typeof navigator !== "undefined" &&
     /Android/.test(navigator.userAgent) &&
     /wv|WebView/.test(navigator.userAgent)
-  const blurPx = isAndroidWebView ? 16 : 32
 
   return (
     <div
@@ -177,10 +180,10 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
         }
         style={{
           background: isAndroidWebView
-            ? "rgba(40,40,40,0.85)" // Android: solid-ish fallback to avoid transparent ghost layers
+            ? "rgba(40,40,40,0.92)" // Android app: near-solid（去 blur 后加深补偿，见上方注释）
             : "rgba(255,255,255,0.05)",
-          backdropFilter: `blur(${blurPx}px) saturate(140%)`,
-          WebkitBackdropFilter: `blur(${blurPx}px) saturate(140%)`,
+          backdropFilter: isAndroidWebView ? undefined : "blur(32px) saturate(140%)",
+          WebkitBackdropFilter: isAndroidWebView ? undefined : "blur(32px) saturate(140%)",
           boxShadow:
             "0 20px 60px -10px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.12), inset 0 1px 0 rgba(255,255,255,0.08)",
           // GPU layer for Android to isolate rendering (avoid ghosting)

@@ -4,7 +4,7 @@ import { forwardRef, memo, useRef } from "react"
 import { Pause, Play, Heart, MoreHorizontal, SkipBack, SkipForward } from "lucide-react"
 import type { Track } from "../_data/tracks"
 import type { ExpandRect } from "./ExpandedCard"
-import { usePlayback } from "../_context/PlaybackContext"
+import { usePlaybackWall } from "../_context/PlaybackContext"
 import { TrackCover } from "./TrackCover"
 
 type Props = {
@@ -41,7 +41,9 @@ function MusicCardBase(
   { track, width, height, onExpand, lite = false, android = false }: Props,
   ref: React.ForwardedRef<HTMLDivElement>,
 ) {
-  const { currentTrack, isPlaying: globalPlaying, togglePlay, prev, next, isFavorite, toggleFavorite } = usePlayback()
+  // 墙专用低频上下文：音量拖动 / history / playMode 等高频变化不会再让
+  // 每张可见卡片跟着重渲染（usePlayback 的 value 一变就是全墙 reconcile）。
+  const { currentTrack, isPlaying: globalPlaying, togglePlay, prev, next, isFavorite, toggleFavorite } = usePlaybackWall()
   const isCurrent = currentTrack?.id === track.id
   const isPlaying = isCurrent && globalPlaying
   const fav = isFavorite(track.id)
