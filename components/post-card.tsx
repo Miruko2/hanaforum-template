@@ -38,7 +38,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { usePosts } from "@/contexts/posts-context"
 import { Card } from "@/components/ui/card"
-import { useRouter } from "next/navigation"
+import UserHoverCard from "@/components/user-hover-card"
 
 // useLayoutEffect 在 paint 前同步执行，避免「内容区先以正常态闪现一帧、再开始入场动画」；
 // SSR 无 DOM，退回 useEffect 以消除 React 告警。
@@ -93,7 +93,6 @@ const PostCard = memo(function PostCard({
   const { toast } = useToast()
   const { deletePost } = usePosts()
   const isMobile = useIsMobile()
-  const router = useRouter()
 
   // 计算派生状态 - 确保在所有可能的位置都查找用户名
   const username = post.username || 
@@ -412,33 +411,32 @@ const PostCard = memo(function PostCard({
           </div>
         )}
 
-        {/* 作者头像 - 位于图片与下方内容之间，头像略微上移叠在图片底部，点击进入作者主页 */}
-        <div
-          className={cn(
-            "relative z-10 flex items-center gap-2.5 px-4 cursor-pointer group/author",
-            // 有图片时头像上移叠在图片底边；无图片时正常留白
-            post.image_url ? "-mt-5" : "pt-3"
-          )}
-          onClick={(e) => {
-            e.stopPropagation()
-            router.push(`/user?id=${post.user_id}`)
-          }}
-          title={`查看 ${username} 的主页`}
-        >
-          <img
-            src={avatarUrl || "/logo.png"}
-            alt={username}
-            className="h-10 w-10 rounded-full object-cover border-2 border-white/30 shadow-lg avatar-hover-effect"
-            onError={(e) => {
-              // 头像 URL 失效时回退到站点 logo，避免出现裂图
-              const img = e.currentTarget
-              if (img.src.indexOf("/logo.png") === -1) img.src = "/logo.png"
-            }}
-          />
-          <span className="relative top-3 truncate text-sm font-medium text-white transition-colors group-hover/author:text-lime-400">
-            {username}
-          </span>
-        </div>
+        {/* 作者头像 - 位于图片与下方内容之间，头像略微上移叠在图片底部。
+            hover 头像/用户名弹出精简社交卡片，不再点击跳转。 */}
+        <UserHoverCard userId={post.user_id} fallbackName={username} fallbackAvatar={avatarUrl}>
+          <div
+            className={cn(
+              "relative z-10 flex items-center gap-2.5 px-4 group/author",
+              // 有图片时头像上移叠在图片底边；无图片时正常留白
+              post.image_url ? "-mt-5" : "pt-3"
+            )}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <img
+              src={avatarUrl || "/logo.png"}
+              alt={username}
+              className="h-10 w-10 rounded-full object-cover border-2 border-white/30 shadow-lg avatar-hover-effect cursor-pointer"
+              onError={(e) => {
+                // 头像 URL 失效时回退到站点 logo，避免出现裂图
+                const img = e.currentTarget
+                if (img.src.indexOf("/logo.png") === -1) img.src = "/logo.png"
+              }}
+            />
+            <span className="relative top-3 truncate text-sm font-medium text-white transition-colors group-hover/author:text-lime-400">
+              {username}
+            </span>
+          </div>
+        </UserHoverCard>
 
         {/* 头像与标题之间的分隔线 */}
         <div className="mx-4 mt-2.5 border-t border-white/10" />
