@@ -1,7 +1,8 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { motion, type MotionProps } from "framer-motion"
+import { createPortal } from "react-dom"
+import { motion, AnimatePresence, type MotionProps } from "framer-motion"
 import dynamic from "next/dynamic"
 import { ThumbsUp, MessageSquare } from "lucide-react"
 import type { Post } from "@/lib/types"
@@ -41,8 +42,96 @@ function useIsDesktop(): boolean {
   return desktop
 }
 
-function trackLength(n: number): number {
-  return Math.min(360, Math.max(120, (n - 1) * 42))
+// 时间轴导航最多同时显示的节点数（其余隐藏，避免帖子过多时密密麻麻）。
+// 仿 index.html：以当前激活节点为中心开一个 W 节点的滑动窗口，右侧数字徽章当页码用。
+const NAV_WINDOW = 5
+// 窗口模式下节点间距（固定，窗口内最多 NAV_WINDOW 个点，不再随总数压缩）
+const NODE_GAP = 44
+
+// 计算可见窗口：返回起始全局 index 与窗口长度。activeIdx 尽量居中、两端不越界。
+function navWindow(activeIdx: number, n: number): { start: number; len: number } {
+  const len = Math.min(NAV_WINDOW, n)
+  let start = activeIdx - Math.floor((len - 1) / 2)
+  start = Math.max(0, Math.min(n - len, start))
+  return { start, len }
+}
+
+// 点击数字徽章弹出的「跳转到第 N 条」输入弹窗（仿 index.html 的 jumpModal）。
+// 居中浮层 + 点遮罩/Esc 关闭；回车或「跳转」确认，校验 1..total。
+function JumpModal({
+  total,
+  current,
+  onJump,
+  onClose,
+}: {
+  total: number
+  current: number // 1-based，当前位置（用作 placeholder）
+  onJump: (idx1Based: number) => void
+  onClose: () => void
+}) {
+  const [value, setValue] = useState("")
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    const id = requestAnimationFrame(() => inputRef.current?.focus())
+    return () => cancelAnimationFrame(id)
+  }, [])
+
+  const commit = () => {
+    const v = parseInt(value, 10)
+    if (!isNaN(v) && v >= 1 && v <= total) onJump(v - 1)
+    onClose()
+  }
+
+  return createPortal(
+    <AnimatePresence>
+      <motion.div
+        className="fixed inset-0 z-[9998] flex items-center justify-center bg-black/60 p-4"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.18 }}
+        onClick={onClose}
+      >
+        <motion.div
+          className="flex w-44 flex-col items-center justify-center gap-3 rounded-2xl border border-white/20 bg-white/10 p-4 shadow-[0_24px_70px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.25)] backdrop-blur-2xl"
+          initial={{ opacity: 0, scale: 0.92, y: 12 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.92, y: 12 }}
+          transition={{ type: "spring", stiffness: 380, damping: 28 }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <input
+            ref={inputRef}
+            type="number"
+            min={1}
+            max={total}
+            value={value}
+            placeholder={String(current)}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={(e) => {
+              e.stopPropagation()
+              if (e.key === "Enter") {
+                e.preventDefault()
+                commit()
+              } else if (e.key === "Escape") {
+                e.preventDefault()
+                onClose()
+              }
+            }}
+            className="w-14 rounded-xl border border-white/20 bg-white/5 px-2 py-1 text-center text-sm text-white placeholder:text-white/30 focus:border-lime-400/60 focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+          />
+          <button
+            onClick={commit}
+            className="rounded-full bg-lime-500 px-4 py-1 text-xs font-medium text-black transition-colors hover:bg-lime-400"
+          >
+            跳转
+          </button>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>,
+    document.body,
+  )
 }
 
 // ───────── 共享卡片 ─────────
@@ -147,6 +236,7 @@ function TimelineNode({
 function VerticalTimeline({ items, onOpen }: { items: Post[]; onOpen: (p: Post) => void }) {
   const cardRefs = useRef<(HTMLElement | null)[]>([])
   const [activeIndex, setActiveIndex] = useState(0)
+  const [showJump, setShowJump] = useState(false)
 
   useEffect(() => {
     let ticking = false
@@ -187,9 +277,12 @@ function VerticalTimeline({ items, onOpen }: { items: Post[]; onOpen: (p: Post) 
   }
 
   const n = items.length
-  const trackLen = trackLength(n)
-  const ratio = n <= 1 ? 0 : activeIndex / (n - 1)
+  const { start: navStart, len: navLen } = navWindow(activeIndex, n)
+  const trackLen = (navLen - 1) * NODE_GAP
+  const localActive = activeIndex - navStart
+  const ratio = navLen <= 1 ? 0 : localActive / (navLen - 1)
   const activeTitle = items[activeIndex]?.title || ""
+  const windowItems = items.slice(navStart, navStart + navLen)
 
   return (
     <div className="relative pl-14 sm:pl-0">
@@ -219,9 +312,13 @@ function VerticalTimeline({ items, onOpen }: { items: Post[]; onOpen: (p: Post) 
 
       {n >= 2 && (
         <div className="fixed left-3 top-1/2 z-30 flex -translate-y-1/2 flex-col items-center gap-2 sm:left-5">
-          <div className="rounded-full border border-white/25 bg-gradient-to-b from-white/20 to-white/10 px-3 py-1.5 text-sm font-semibold tabular-nums text-lime-300 shadow-[0_10px_30px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.3)]">
+          <button
+            onClick={() => setShowJump(true)}
+            title="点击跳转到指定条目"
+            className="rounded-full border border-white/25 bg-gradient-to-b from-white/20 to-white/10 px-3 py-1.5 text-sm font-semibold tabular-nums text-lime-300 shadow-[0_10px_30px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.3)] transition-transform hover:scale-105"
+          >
             {activeIndex + 1}
-          </div>
+          </button>
           <div className="relative px-2.5 py-5">
             {/* 仿玻璃层：半透明白渐变 + 边框 + 顶部内高光（与 PC 端一致，竖向不变） */}
             <div className="absolute inset-0 rounded-full border border-white/25 bg-gradient-to-b from-white/20 to-white/10 shadow-[0_10px_30px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.3)]" />
@@ -255,20 +352,32 @@ function VerticalTimeline({ items, onOpen }: { items: Post[]; onOpen: (p: Post) 
                 style={{ height: ratio * trackLen }}
               />
               <div className="relative flex h-full flex-col items-center justify-between">
-                {items.map((p, idx) => (
-                  <TimelineNode
-                    key={p.id}
-                    active={idx === activeIndex}
-                    passed={idx < activeIndex}
-                    onClick={() => jumpTo(idx)}
-                    label={`跳到第 ${idx + 1} 条`}
-                    onGlass
-                  />
-                ))}
+                {windowItems.map((p, i) => {
+                  const idx = navStart + i
+                  return (
+                    <TimelineNode
+                      key={p.id}
+                      active={idx === activeIndex}
+                      passed={idx < activeIndex}
+                      onClick={() => jumpTo(idx)}
+                      label={`跳到第 ${idx + 1} 条`}
+                      onGlass
+                    />
+                  )
+                })}
               </div>
             </div>
           </div>
         </div>
+      )}
+
+      {showJump && (
+        <JumpModal
+          total={n}
+          current={activeIndex + 1}
+          onJump={(idx) => jumpTo(idx)}
+          onClose={() => setShowJump(false)}
+        />
       )}
     </div>
   )
@@ -279,6 +388,7 @@ function HorizontalTimeline({ items, onOpen }: { items: Post[]; onOpen: (p: Post
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const cardRefs = useRef<(HTMLElement | null)[]>([])
   const [activeIndex, setActiveIndex] = useState(0)
+  const [showJump, setShowJump] = useState(false)
 
   // 平滑滚动控制器：维护目标 scrollLeft，每帧用 lerp 缓动逼近，
   // 模拟 index.html 里 ScrollTrigger scrub 的「丝滑」横向滚动手感。
@@ -408,9 +518,12 @@ function HorizontalTimeline({ items, onOpen }: { items: Post[]; onOpen: (p: Post
   }
 
   const n = items.length
-  const trackLen = trackLength(n)
-  const ratio = n <= 1 ? 0 : activeIndex / (n - 1)
+  const { start: navStart, len: navLen } = navWindow(activeIndex, n)
+  const trackLen = (navLen - 1) * NODE_GAP
+  const localActive = activeIndex - navStart
+  const ratio = navLen <= 1 ? 0 : localActive / (navLen - 1)
   const activeTitle = items[activeIndex]?.title || ""
+  const windowItems = items.slice(navStart, navStart + navLen)
 
   return (
     // PC 横版突破容器、占满整屏宽度（full-bleed）
@@ -494,24 +607,40 @@ function HorizontalTimeline({ items, onOpen }: { items: Post[]; onOpen: (p: Post
                   style={{ width: ratio * trackLen }}
                 />
                 <div className="relative flex w-full items-center justify-between">
-                  {items.map((p, idx) => (
-                    <TimelineNode
-                      key={p.id}
-                      active={idx === activeIndex}
-                      passed={idx < activeIndex}
-                      onClick={() => jumpTo(idx)}
-                      label={`跳到第 ${idx + 1} 条`}
-                      onGlass
-                    />
-                  ))}
+                  {windowItems.map((p, i) => {
+                    const idx = navStart + i
+                    return (
+                      <TimelineNode
+                        key={p.id}
+                        active={idx === activeIndex}
+                        passed={idx < activeIndex}
+                        onClick={() => jumpTo(idx)}
+                        label={`跳到第 ${idx + 1} 条`}
+                        onGlass
+                      />
+                    )
+                  })}
                 </div>
               </div>
             </div>
           </div>
-          <div className="rounded-full border border-white/25 bg-gradient-to-b from-white/20 to-white/10 px-3.5 py-3 text-sm font-semibold tabular-nums text-lime-300 shadow-[0_10px_30px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.3)]">
+          <button
+            onClick={() => setShowJump(true)}
+            title="点击跳转到指定条目"
+            className="rounded-full border border-white/25 bg-gradient-to-b from-white/20 to-white/10 px-3.5 py-3 text-sm font-semibold tabular-nums text-lime-300 shadow-[0_10px_30px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.3)] transition-transform hover:scale-105"
+          >
             {activeIndex + 1}
-          </div>
+          </button>
         </div>
+      )}
+
+      {showJump && (
+        <JumpModal
+          total={n}
+          current={activeIndex + 1}
+          onJump={(idx) => jumpTo(idx)}
+          onClose={() => setShowJump(false)}
+        />
       )}
     </div>
   )
