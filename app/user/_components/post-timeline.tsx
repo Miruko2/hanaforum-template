@@ -7,6 +7,7 @@ import dynamic from "next/dynamic"
 import { ThumbsUp, MessageSquare } from "lucide-react"
 import type { Post } from "@/lib/types"
 import { CATEGORY_LABELS } from "@/lib/categories"
+import { postThumbUrl } from "@/lib/post-image-thumb"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useToast } from "@/hooks/use-toast"
 import { useIsMobile } from "@/hooks/use-mobile"
@@ -149,7 +150,10 @@ function TimelineCard({
   enter?: MotionProps
 }) {
   const title = post.title || "无标题"
+  // 方格封面用 640px 缩略图（lib/post-image-thumb 约定）省 egress；
+  // 老帖没回填缩略图时 onError 回退主图
   const cover = post.image_url
+  const coverThumb = postThumbUrl(cover)
   return (
     <div className={className}>
       <motion.button
@@ -161,11 +165,15 @@ function TimelineCard({
         <div className="relative aspect-square w-full overflow-hidden rounded-[1.15rem] bg-black/30">
           {cover ? (
             <img
-              src={cover}
+              src={coverThumb || cover}
               alt={title}
               loading="lazy"
               decoding="async"
               className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
+              onError={(e) => {
+                const img = e.currentTarget
+                if (coverThumb && img.src !== cover) img.src = cover
+              }}
             />
           ) : (
             <div className="grid h-full w-full place-items-center bg-gradient-to-br from-lime-900/30 via-emerald-900/20 to-black/30 text-5xl text-white/20">

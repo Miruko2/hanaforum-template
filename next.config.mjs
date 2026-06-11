@@ -45,11 +45,11 @@ const nextConfig = {
     dangerouslyAllowSVG: true,
     contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;",
     // 安全：之前是 hostname:'**' 接受任意 HTTPS 主机，相当于把 /_next/image
-    // 端点变成开放代理，攻击者能用它去 SSRF / 流量放大。改成显式白名单：
-    // - *.supabase.co：所有 Supabase 项目的 storage URL（头像、帖子图）
-    // - *.music.126.net：网易云音乐封面 CDN（p1/p2/p3/p4.music.126.net）
-    //   /music 页面 MusicCard/ExpandedCard/MusicPlayer 走 next/image 必须放行；
-    //   CoverBackdrop 走原生 <img> 不受影响。useDominantHue 走 /api/img-proxy。
+    // 端点变成开放代理，攻击者能用它去 SSRF / 流量放大。改成显式白名单。
+    // 注（2026-06-11）：Vercel Image Optimization 免费额度爆掉（5K/月）后，帖子图
+    // （post-card-image/cinema-mode/post-timeline）与音乐封面（TrackCover）已全部
+    // 改为原生 <img> 直连（帖子图走 640px 缩略图约定，见 lib/post-image-thumb）。
+    // 白名单保留是为了兜底——若还有零散 next/image 引用这些主机不至于直接报错。
     // 以后接 OAuth 或别的 CDN，往这里加对应 hostname。
     remotePatterns: [
       {

@@ -1,0 +1,30 @@
+name: 回填帖子图缩略图(一次性·手动)
+
+# 给 post-images 桶里的存量帖子主图补 640px 缩略图（`<base>_thumb.webp`，约定见
+# lib/post-image-thumb.ts）。帖子图直连 Supabase 后列表卡片用缩略图省 egress；
+# 新帖由客户端上传时生成，本 workflow 只为历史帖子一次性回填。
+# 只手动触发：先不勾 apply 跑一次看预览，确认后再勾 apply 真传。
+# 复用已配的 Secret：NEXT_PUBLIC_SUPABASE_URL、SUPABASE_SERVICE_ROLE_KEY。
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "真传（勾上）还是仅预览（不勾）"
+        type: boolean
+        default: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # supabase-js 新版 createClient 即初始化 RealtimeClient，需 Node 22+ 原生 WebSocket。
+          node-version: "22"
+      # 脚本只依赖 supabase-js + sharp，单独装即可（sharp 会拉 linux prebuilt 二进制）。
+      - run: npm i @supabase/supabase-js@2 sharp --no-save
+      - run: node scripts/backfill-post-image-thumbs.mjs ${{ inputs.apply && '--apply' || '' }}
+        env:
+          SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

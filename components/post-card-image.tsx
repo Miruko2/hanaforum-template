@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils"
 import type { Post } from "@/lib/types"
 import { ImageOff } from "lucide-react"
 import { useIsMobile } from "@/hooks/use-mobile"
-import Image from "next/image"
+import { postThumbUrl } from "@/lib/post-image-thumb"
 
 interface PostCardImageProps {
   post: Post
@@ -31,18 +31,29 @@ export default function PostCardImage({
   const [imageError, setImageError] = useState(false)
   const [imageLoaded, setImageLoaded] = useState(false)
   const [imageDimensions, setImageDimensions] = useState<{ width: number, height: number, ratio: number } | null>(null)
+  // 缩略图缺失/失效（老帖未回填、GIF 等）时回退主图，再失败才显示错误态
+  const [useFullImage, setUseFullImage] = useState(false)
   const imageRef = useRef<HTMLImageElement>(null)
   const detectedMobile = useIsMobile()
-  
+
   // 使用传入的isMobile参数或通过hook检测到的值
   const isOnMobile = isMobile || detectedMobile
-  
+
   // 检查是否有图片内容或imageContent
   const hasImageContent = !!post.imageContent
-  
-  // 图片质量：详情页与列表页保持同一档，确保「列表图 = 详情图」是同一个 next/image URL，
-  // 详情页直接命中列表已加载的缓存 → hero 飞入即时有图、不闪。高清留给点击后的灯箱原图。
-  const imageQuality = isOnMobile ? 40 : 65
+
+  // 图片直连 Supabase（Vercel 图片优化额度爆掉后 /_next/image 对新图 502，弃用）：
+  // 列表与详情统一加载 640px 缩略图（同一 URL → 详情命中列表缓存、hero 飞入即时
+  // 有图不闪），高清留给点击后的灯箱原图。
+  const thumbUrl = postThumbUrl(post.image_url)
+  const displaySrc = (!useFullImage && thumbUrl) || post.image_url || ""
+
+  // 编辑帖子换图后重置加载/错误态，按新 URL 重新走「缩略图→主图」流程
+  useEffect(() => {
+    setImageError(false)
+    setImageLoaded(false)
+    setUseFullImage(false)
+  }, [post.image_url])
   
   // 计算图片容器的宽高比 - 让图片按真实比例显示，形成自然的瀑布流高低错落
   // 返回 { heightClass, aspectStyle } 二选一：
@@ -97,10 +108,14 @@ export default function PostCardImage({
     )
   }
   
-  // 处理图片加载错误
+  // 处理图片加载错误：先回退主图，主图也挂才进错误态
   const handleError = useCallback(() => {
-    setImageError(true)
-  }, [])
+    if (!useFullImage && thumbUrl) {
+      setUseFullImage(true)
+    } else {
+      setImageError(true)
+    }
+  }, [useFullImage, thumbUrl])
 
   // 如果图片加载出错，显示错误状态
   if (imageError) {
@@ -142,26 +157,21 @@ export default function PostCardImage({
       )}
       style={aspectStyle}
     >
-      <Image
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
         ref={imageRef}
-        src={post.image_url || ""}
+        src={displaySrc}
         alt={post.title || "帖子图片"}
         className={cn(
-          "w-full h-full",
+          "absolute inset-0 w-full h-full m-0",
           imageObjectFit,
-          "animation-optimized",
-          inDetailView && "absolute inset-0 m-0"
+          "animation-optimized"
         )}
-        onLoadingComplete={handleImageLoaded}
+        loading={inDetailView ? "eager" : "lazy"} // 详情页优先加载，列表卡片懒加载
+        decoding="async"
+        draggable={false}
+        onLoad={(e) => handleImageLoaded(e.currentTarget)}
         onError={handleError}
-        quality={imageQuality}
-        sizes={
-          // 详情页（fillParent / inDetailView）与列表页用同一 sizes，配合同一 quality，
-          // 让 next/image 生成同一个 URL，hero 转场复用列表缓存、飞入不闪。
-          "(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
-        }
-        fill
-        priority={inDetailView} // 详情页图片设为优先加载
       />
     </div>
   )

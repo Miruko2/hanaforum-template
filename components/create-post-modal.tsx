@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils"
 import { CATEGORIES } from "@/lib/categories"
 import type { Post } from "@/lib/types"
 import { compressImage } from "@/lib/image-compress"
+import { postThumbName, POST_THUMB_EDGE } from "@/lib/post-image-thumb"
 
 interface CreatePostModalProps {
   onClose: () => void
@@ -152,6 +153,26 @@ export default function CreatePostModal({
       if (error) {
         console.error("图片上传错误详情:", error)
         throw error
+      }
+
+      // 同步传一张 640px 缩略图（路径约定见 lib/post-image-thumb）：列表卡片直连
+      // 缩略图省 Supabase egress，灯箱才开主图。失败不阻断发帖——卡片端会
+      // onError 回退主图，只是该帖费点流量。
+      try {
+        const thumbName = postThumbName(data.path)
+        if (thumbName) {
+          const thumb = await compressImage(file, POST_THUMB_EDGE, 0.8)
+          // compressImage 失败时原样返回 file（passthrough），别把数 MB 原图当缩略图传
+          if (thumb.blob !== file) {
+            await supabase.storage.from("post-images").upload(thumbName, thumb.blob, {
+              cacheControl: "31536000",
+              upsert: false,
+              contentType: thumb.contentType,
+            })
+          }
+        }
+      } catch (thumbErr) {
+        console.warn("缩略图上传失败（不影响发帖）:", thumbErr)
       }
 
       // 获取公共URL - 这里也需要更新存储桶名称

@@ -61,7 +61,15 @@ async function getReferencedFilenames() {
       const idx = url.indexOf(marker)
       if (idx === -1) continue
       const name = decodeURIComponent(url.slice(idx + marker.length).split("?")[0])
-      if (name) referenced.add(name)
+      if (name) {
+        referenced.add(name)
+        // 缩略图与主图同生共死：主图被引用 ⇒ 对应 `<base>_thumb.webp` 也算被引用
+        //（路径约定见 lib/post-image-thumb.ts；gif 无缩略图，多加个名字无害）。
+        // 主图被删帖后，主图+缩略图一起变孤儿、一起被清。
+        const dot = name.lastIndexOf(".")
+        const base = dot > 0 ? name.slice(0, dot) : name
+        referenced.add(`${base}_thumb.webp`)
+      }
     }
     if (data.length < pageSize) break
     from += pageSize

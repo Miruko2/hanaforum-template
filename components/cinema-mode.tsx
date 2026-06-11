@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState, useCallback } from "react"
-import Image from "next/image"
+import { postThumbUrl } from "@/lib/post-image-thumb"
 import { motion } from "framer-motion"
 import type { Post } from "@/lib/types"
 import PostDetailModal from "./post-detail-modal"
@@ -135,6 +135,9 @@ function CinemaCard({ post, onClick }: { post: Post; onClick: () => void }) {
   // 图片加载失败时切换到 fallback：渐变占位 + 大字标题
   // 影院模式默认会过滤掉空 image_url，所以正常路径只处理 CDN/网络失败的兜底
   const [imgError, setImgError] = useState(false)
+  // 直连 Supabase：先试 640px 缩略图（lib/post-image-thumb 约定），缺失/失效回退主图
+  const [useFullImage, setUseFullImage] = useState(false)
+  const thumbUrl = postThumbUrl(post.image_url)
   const showFallback = !post.image_url || imgError
 
   return (
@@ -143,14 +146,18 @@ function CinemaCard({ post, onClick }: { post: Post; onClick: () => void }) {
       className="cinema-card group relative w-full aspect-[3/4] rounded-lg overflow-hidden block text-left border border-white/10"
     >
       {!showFallback ? (
-        <Image
-          src={post.image_url!}
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={(!useFullImage && thumbUrl) || post.image_url!}
           alt={post.title}
-          fill
-          sizes="(max-width: 768px) 40vw, 15vw"
-          quality={55}
-          className="object-cover transition-transform duration-700 group-hover:scale-105"
-          onError={() => setImgError(true)}
+          loading="lazy"
+          decoding="async"
+          draggable={false}
+          className="absolute inset-0 h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
+          onError={() => {
+            if (!useFullImage && thumbUrl) setUseFullImage(true)
+            else setImgError(true)
+          }}
         />
       ) : (
         // 加载失败 fallback：粉紫渐变 + 标题大字，保留"海报感"而非空白
