@@ -111,8 +111,9 @@ export default function LikeButton({
         )}
       </div>
       
-      {/* 计数动画 - 确保数字可见 */}
-      <div className="relative h-5 overflow-visible min-w-[16px]">
+      {/* 计数动画 - 确保数字可见。flex items-center：h-5 容器比 sm 尺寸的 text-xs
+          行高(16px)高 4px，不居中会让数字比图标中心偏高 ~2px */}
+      <div className="relative flex h-5 items-center overflow-visible min-w-[16px]">
         <AnimatePresence mode="wait">
           <motion.span
             key={count}

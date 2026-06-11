@@ -58,12 +58,14 @@ const PostCardActions = memo(function PostCardActions({
         className="py-1 px-2"
       />
 
-      <button 
-        className="flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-black/20 backdrop-blur-sm border border-white/10 text-white/80 hover:bg-white/10 transition-all" 
+      {/* 无底无框，仅 hover 时浮现淡背景；图标尺寸/内边距与 LikeButton(sm) 一致，
+          保证点赞图标、点赞数、评论图标、评论数同一水平线 */}
+      <button
+        className="flex items-center gap-1 px-2 py-1.5 rounded-full text-xs text-white/80 hover:bg-white/15 transition-colors"
         onClick={handleCommentClick}
         aria-label="查看评论"
       >
-        <MessageSquare className="h-3 w-3" />
+        <MessageSquare className="h-4 w-4" />
         <span>{commentsCount}</span>
       </button>
     </div>
