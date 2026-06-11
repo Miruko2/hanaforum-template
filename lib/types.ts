@@ -61,7 +61,7 @@ export interface Comment {
 }
 
 // 通知类型
-export type NotificationType = 'like_post' | 'comment_post' | 'like_comment' | 'post_removed' | 'announcement';
+export type NotificationType = 'like_post' | 'comment_post' | 'like_comment' | 'post_removed' | 'announcement' | 'follow';
 
 // 通知接口
 export interface Notification {

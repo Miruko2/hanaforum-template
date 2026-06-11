@@ -653,7 +653,7 @@ export async function createNotification({
   message,
 }: {
   userId: string;
-  type: 'like_post' | 'comment_post' | 'like_comment';
+  type: 'like_post' | 'comment_post' | 'like_comment' | 'follow';
   postId?: string;
   commentId?: string;
   actorId?: string;

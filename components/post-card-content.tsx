@@ -7,6 +7,7 @@ import PostCardActions from "./post-card-actions"
 import type { Post } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { CATEGORY_LABELS } from "@/lib/categories"
+import { useRouter } from "next/navigation"
 
 interface PostCardContentProps {
   post: Post
@@ -31,6 +32,8 @@ export default function PostCardContent({
   onLike,
   onComment
 }: PostCardContentProps) {
+  const router = useRouter()
+
   // 格式化日期 - 使用useMemo缓存结果
   const formattedDate = useMemo(() => {
     return post.created_at 
@@ -67,7 +70,16 @@ export default function PostCardContent({
       <div className="flex justify-between items-center text-xs text-white/70 gap-2">
         {/* 用户名可能很长（例如纯数字 ID），用 truncate 截断；
             min-w-0 必须有，否则 flex 子项不会缩到内容以下、truncate 失效 */}
-        <span className="truncate min-w-0" title={username}>{username}</span>
+        <span
+          className="truncate min-w-0 cursor-pointer hover:text-lime-400 transition-colors"
+          title={username}
+          onClick={(e) => {
+            e.stopPropagation()
+            router.push(`/user?id=${post.user_id}`)
+          }}
+        >
+          {username}
+        </span>
         <span className="whitespace-nowrap flex-shrink-0" title={new Date(post.created_at).toLocaleString()}>
           {formattedDate}
         </span>

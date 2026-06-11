@@ -7,6 +7,7 @@ import { X, Send, Smile, Users, Hash } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useChatUI } from "@/contexts/chat-ui-context"
+import { useRouter } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
 import styles from "./floating-chat.module.css"
 
@@ -80,8 +81,10 @@ export default function FloatingChat() {
   const { user } = useSimpleAuth()
   const { toast } = useToast()
 
-  // open / 未读红点由导航栏入口共享：本组件只读 open（决定渲染面板）、写 unread（红点数）
-  const { open, setOpen, setUnread } = useChatUI()
+  // open / 未读红点由导航栏入口共享：本组件只读 open（决定渲染面板）、写 unread（红点数）。
+  // pendingDm：外部（社交页「私聊」按钮）请求发起的私聊对象，消费后 clearPendingDm 清掉。
+  const { open, setOpen, setUnread, pendingDm, clearPendingDm } = useChatUI()
+  const router = useRouter()
   const [active, setActive] = useState<Active>({ kind: "hall" })
   const [convs, setConvs] = useState<DmConv[]>([])
   const [messages, setMessages] = useState<DisplayMsg[]>([])
@@ -94,6 +97,10 @@ export default function FloatingChat() {
   // 右键菜单（关闭私聊）
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; convId: string; username: string } | null>(null)
   const ctxMenuRef = useRef<HTMLDivElement>(null)
+
+  // 头像点击菜单（查看主页 / 私聊）
+  const [avatarMenu, setAvatarMenu] = useState<{ x: number; y: number; partner: Partner } | null>(null)
+  const avatarMenuRef = useRef<HTMLDivElement>(null)
 
   // Drag position state - persisted in localStorage
   const [position, setPosition] = useState<PanelPosition | null>(null)
@@ -493,6 +500,18 @@ export default function FloatingChat() {
     setShowStickers(false)
   }, [])
 
+  // 消费外部「向某人发起私聊」请求（社交页 /user 的「私聊」按钮）。
+  // startDmWith 已负责打开面板(setOpen(true))，这里只需切到对应 DM 并清掉请求。
+  useEffect(() => {
+    if (!pendingDm || !myId) return
+    if (pendingDm.id === myId) {
+      clearPendingDm()
+      return
+    }
+    startDm({ id: pendingDm.id, username: pendingDm.username, avatar_url: pendingDm.avatar_url ?? null })
+    clearPendingDm()
+  }, [pendingDm, myId, startDm, clearPendingDm])
+
   // 关闭（删除）一个私聊会话
   const closeDm = useCallback((convId: string) => {
     setConvs((prev) => prev.filter((c) => c.id !== convId))
@@ -518,6 +537,22 @@ export default function FloatingChat() {
       document.removeEventListener("touchstart", handler)
     }
   }, [ctxMenu])
+
+  // 点击/触摸外部关闭头像菜单
+  useEffect(() => {
+    if (!avatarMenu) return
+    const handler = (e: MouseEvent | TouchEvent) => {
+      if (avatarMenuRef.current && !avatarMenuRef.current.contains(e.target as Node)) {
+        setAvatarMenu(null)
+      }
+    }
+    document.addEventListener("mousedown", handler)
+    document.addEventListener("touchstart", handler)
+    return () => {
+      document.removeEventListener("mousedown", handler)
+      document.removeEventListener("touchstart", handler)
+    }
+  }, [avatarMenu])
 
   if (!user) return null
 
@@ -621,8 +656,14 @@ export default function FloatingChat() {
                   <button
                     key={u.id}
                     className={styles.onlineAvatarBtn}
-                    onClick={() => startDm(u)}
-                    title={u.id === user.id ? u.username : `和 ${u.username} 私聊`}
+                    onClick={(e) =>
+                      setAvatarMenu({
+                        x: e.clientX,
+                        y: e.clientY,
+                        partner: { id: u.id, username: u.username, avatar_url: u.avatar_url },
+                      })
+                    }
+                    title={u.username}
                   >
                     <UserAvatar username={u.username} avatarUrl={u.avatar_url} size={22} />
                   </button>
@@ -644,8 +685,14 @@ export default function FloatingChat() {
                         (active.kind === "hall" ? (
                           <button
                             className={styles.avatarBtn}
-                            onClick={() => startDm({ id: m.fromId, username: m.username, avatar_url: m.avatar_url })}
-                            title={`和 ${m.username} 私聊`}
+                            onClick={(e) =>
+                              setAvatarMenu({
+                                x: e.clientX,
+                                y: e.clientY,
+                                partner: { id: m.fromId, username: m.username, avatar_url: m.avatar_url },
+                              })
+                            }
+                            title={m.username}
                           >
                             <UserAvatar username={m.username} avatarUrl={m.avatar_url} size={28} />
                           </button>
@@ -747,6 +794,38 @@ export default function FloatingChat() {
         <button className={styles.ctxMenuItem} onClick={() => closeDm(ctxMenu.convId)}>
           删除会话
         </button>
+      </div>,
+      document.body,
+    )}
+
+    {avatarMenu && createPortal(
+      <div
+        ref={avatarMenuRef}
+        className={styles.ctxMenu}
+        style={{ left: avatarMenu.x, top: avatarMenu.y }}
+      >
+        <button
+          className={styles.ctxMenuItem}
+          onClick={() => {
+            const id = avatarMenu.partner.id
+            setAvatarMenu(null)
+            setOpen(false)
+            router.push(`/user?id=${id}`)
+          }}
+        >
+          查看主页
+        </button>
+        {avatarMenu.partner.id !== myId && (
+          <button
+            className={styles.ctxMenuItem}
+            onClick={() => {
+              startDm(avatarMenu.partner)
+              setAvatarMenu(null)
+            }}
+          >
+            私聊
+          </button>
+        )}
       </div>,
       document.body,
     )}

@@ -4,6 +4,7 @@ import React, { useState, useCallback, useLayoutEffect, useRef } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { X, MessageSquare, Maximize2 } from "lucide-react"
 import { createPortal } from "react-dom"
+import { useRouter } from "next/navigation"
 import type { Post } from "@/lib/types"
 import { Button } from "@/components/ui/button"
 import GlassMorph from "./glass-morph"
@@ -57,6 +58,8 @@ export default function PostDetailModal({
   // 点击详情页图片后，原图在屏幕中心聚焦放大（灯箱）。加载与弹入时序交给
   // ImageLightbox 自己处理：点击立即打开、先显 loading、原图就绪后再弹入，
   // 故这里不再做阻塞式预加载。
+  const router = useRouter()
+
   const [lightboxOpen, setLightboxOpen] = useState(false)
 
   // 是否使用横版布局：桌面端一律走横版
@@ -220,7 +223,11 @@ export default function PostDetailModal({
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, delay: 0.4 }}
       >
-        <div className="flex items-center gap-3">
+        <div
+          className="flex items-center gap-3 cursor-pointer group/author"
+          onClick={() => router.push(`/user?id=${post.user_id}`)}
+          title={`查看 ${username} 的主页`}
+        >
           {avatarUrl ? (
             <img
               src={avatarUrl}
@@ -232,7 +239,7 @@ export default function PostDetailModal({
               {username.charAt(0).toUpperCase()}
             </div>
           )}
-          <span>{username}</span>
+          <span className="group-hover/author:text-lime-400 transition-colors">{username}</span>
         </div>
         <span className="text-xs">
           {post.created_at ? new Date(post.created_at).toLocaleString("zh-CN") : ""}

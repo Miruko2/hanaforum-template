@@ -19,6 +19,7 @@ import {
 } from "@/lib/profiles"
 import ProfileHeader from "./_components/profile-header"
 import ProfileSettingsList from "./_components/profile-settings-list"
+import FollowStats from "./_components/follow-stats"
 
 // 「我的」页 = 编排层：持有页面级状态，handler 薄封装调用 lib/profiles 数据层，
 // 再把状态/回调下发给 Banner 头部与设置菜单。头像、背景图各有一个隐藏文件 input
@@ -274,37 +275,35 @@ export default function ProfilePage() {
         <div className="w-full max-w-lg space-y-6">
           <ProfileHeader
             fallbackLetter={avatarLetter}
-            avatar={{
-              url: avatarUrl,
-              uploading: uploadingAvatar,
-              onClick: handleAvatarClick,
-            }}
-            background={{
-              url: backgroundUrl,
-              uploading: uploadingBackground,
-              onClick: handleBgClick,
-            }}
-            username={{
-              value: username,
-              editing: editingUsername,
-              draft: draftUsername,
-              saving: savingUsername,
-              onDraftChange: setDraftUsername,
-              onStartEdit: handleStartEditUsername,
-              onSave: handleSaveUsername,
-              onCancel: handleCancelEditUsername,
-            }}
-            bio={{
-              value: bio,
-              editing: editingBio,
-              draft: draftBio,
-              saving: savingBio,
-              onDraftChange: setDraftBio,
-              onStartEdit: handleStartEditBio,
-              onSave: handleSaveBio,
-              onCancel: handleCancelEditBio,
+            avatarUrl={avatarUrl}
+            backgroundUrl={backgroundUrl}
+            username={username}
+            bio={bio}
+            edit={{
+              avatar: { uploading: uploadingAvatar, onClick: handleAvatarClick },
+              background: { uploading: uploadingBackground, onClick: handleBgClick },
+              username: {
+                editing: editingUsername,
+                draft: draftUsername,
+                saving: savingUsername,
+                onDraftChange: setDraftUsername,
+                onStartEdit: handleStartEditUsername,
+                onSave: handleSaveUsername,
+                onCancel: handleCancelEditUsername,
+              },
+              bio: {
+                editing: editingBio,
+                draft: draftBio,
+                saving: savingBio,
+                onDraftChange: setDraftBio,
+                onStartEdit: handleStartEditBio,
+                onSave: handleSaveBio,
+                onCancel: handleCancelEditBio,
+              },
             }}
           />
+
+          {user && <FollowStats userId={user.id} />}
 
           <ProfileSettingsList
             onDownload={() => router.push("/download")}

@@ -1,6 +1,6 @@
 "use client"
 
-import { Heart, MessageCircle, Reply, ShieldAlert, Megaphone, Loader2 } from "lucide-react"
+import { Heart, MessageCircle, Reply, ShieldAlert, Megaphone, UserPlus, Loader2 } from "lucide-react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { formatDate, cn } from "@/lib/utils"
 import type { Notification } from "@/lib/types"
@@ -38,6 +38,12 @@ const TYPE_META: Record<
     icon: Megaphone,
     color: "text-lime-400",
     bg: "bg-lime-500/15 border-lime-500/25",
+  },
+  // 被关注
+  follow: {
+    icon: UserPlus,
+    color: "text-sky-400",
+    bg: "bg-sky-500/15 border-sky-500/25",
   },
 }
 

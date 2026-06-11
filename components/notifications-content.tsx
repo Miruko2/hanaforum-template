@@ -76,6 +76,11 @@ export default function NotificationsContent() {
         }
 
         if (!notification.post_id) {
+          // follow 类型：跳到关注者(actor)的社交主页
+          if (notification.type === "follow" && notification.actor_id) {
+            navigateTo(`/user?id=${notification.actor_id}`)
+            return
+          }
           // 没帖子可跳，只做标记已读
           return
         }

@@ -42,10 +42,10 @@ export function validateUsername(raw: string): UsernameCheck {
 
 // ───────── 读 ─────────
 
-// 读自己的资料（username + avatar_url + background_url + bio）。RLS 已限定 auth.uid()=id。
-// 读不到返回 null（上层据此走兜底）。
+// 按 id 读取一份资料（username/avatar/背景/签名）。profiles 的 SELECT 策略允许公开读
+// 这些列（getPosts 等已在用），故「本人页」与「公开页 /user」共用同一实现。
 // ⚠️ select 含 background_url/bio，需先在 Supabase 跑过加列迁移，否则会报 column 不存在。
-export async function getOwnProfile(userId: string): Promise<Profile | null> {
+async function selectProfileById(userId: string): Promise<Profile | null> {
   const { data, error } = await supabase
     .from("profiles")
     .select("id, username, avatar_url, background_url, bio")
@@ -54,6 +54,11 @@ export async function getOwnProfile(userId: string): Promise<Profile | null> {
   if (error || !data) return null
   return data as Profile
 }
+
+// 读「自己」的资料
+export const getOwnProfile = selectProfileById
+// 读「任意用户」的公开资料（社交个人页 /user 用）
+export const getPublicProfile = selectProfileById
 
 // ───────── 写：用户名 ─────────
 

@@ -659,6 +659,31 @@ export const getPostsPaginated = withCache(
   30 // 缓存30秒
 );
 
+// 获取某用户的全部帖子（社交个人页 /user 用）。复用 POST_SELECT + processPostsData；
+// 用户帖子量通常不大，一次拉到上限即可（无需分页）。
+export const getUserPosts = withCache(
+  async (userId: string, limit: number = 100): Promise<Post[]> => {
+    try {
+      const { data, error } = await supabase
+        .from("posts")
+        .select(POST_SELECT)
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(limit);
+      if (error) {
+        console.error("❌ 获取用户帖子失败:", error);
+        return [];
+      }
+      return await processPostsData(data);
+    } catch (error) {
+      console.error("❌ 获取用户帖子失败:", error);
+      return [];
+    }
+  },
+  "user-posts",
+  30,
+);
+
 // 批量拉取 profiles，返回 用户名/头像 映射。
 async function fetchProfileMaps(
   userIds: string[],

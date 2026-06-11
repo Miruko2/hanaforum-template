@@ -10,6 +10,7 @@ import type { Comment } from "@/lib/types"
 import CommentForm from "./comment-form"
 import { checkCommentLiked, likeComment, unlikeComment, getCommentLikesCount, deleteComment } from "@/lib/supabase"
 import { supabase } from "@/lib/supabaseClient"
+import { useRouter } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
 import {
   AlertDialog,
@@ -49,6 +50,8 @@ export default function CommentItem({
   const [isDeleting, setIsDeleting] = useState(false)
   const { user } = useSimpleAuth()
   const { toast } = useToast()
+  const router = useRouter()
+  const goToProfile = () => router.push(`/user?id=${comment.user_id}`)
 
   // 是否本人评论；本人或管理员均可删除（非乐观更新中的临时评论）
   const isAuthor = !!user && user.id === comment.user_id
@@ -191,14 +194,26 @@ export default function CommentItem({
   return (
     <div className={`p-4 rounded-lg bg-black/20 border border-gray-800/50 ${level > 0 ? "ml-6" : ""}`}>
       <div className="flex gap-3">
-        <Avatar className="h-8 w-8 avatar-hover-effect">
-          <AvatarImage src={avatarUrl || "/placeholder.svg"} />
-          <AvatarFallback>{getInitial(displayName)}</AvatarFallback>
-        </Avatar>
+        <button
+          type="button"
+          onClick={goToProfile}
+          aria-label={`查看 ${displayName} 的主页`}
+          className="shrink-0"
+        >
+          <Avatar className="h-8 w-8 avatar-hover-effect cursor-pointer">
+            <AvatarImage src={avatarUrl || "/placeholder.svg"} />
+            <AvatarFallback>{getInitial(displayName)}</AvatarFallback>
+          </Avatar>
+        </button>
 
         <div className="flex-1">
           <div className="flex items-center gap-2">
-            <span className="font-medium text-gray-200">{displayName}</span>
+            <span
+              className="font-medium text-gray-200 cursor-pointer hover:text-lime-400 transition-colors"
+              onClick={goToProfile}
+            >
+              {displayName}
+            </span>
             <span className="text-xs text-gray-500">{formatDate(comment.created_at)}</span>
           </div>
 
