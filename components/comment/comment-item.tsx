@@ -71,8 +71,8 @@ export default function CommentItem({
   // 用户名显示逻辑
   const displayName = comment.user?.username || comment.username || "匿名用户"
 
-  // 头像URL
-  const avatarUrl = comment.user?.avatar_url || `/placeholder.svg?height=32&width=32&query=avatar`
+  // 头像URL：无头像用户统一使用站点 logo 作为默认头像
+  const avatarUrl = comment.user?.avatar_url || "/logo.png"
 
   // 检查用户是否已点赞该评论
   useEffect(() => {
@@ -193,7 +193,7 @@ export default function CommentItem({
 
   return (
     <div className={`p-4 rounded-lg bg-black/20 border border-gray-800/50 ${level > 0 ? "ml-6" : ""}`}>
-      <div className="flex gap-3">
+      <div className="flex gap-3 items-start">
         <button
           type="button"
           onClick={goToProfile}
@@ -201,7 +201,7 @@ export default function CommentItem({
           className="shrink-0"
         >
           <Avatar className="h-8 w-8 avatar-hover-effect cursor-pointer">
-            <AvatarImage src={avatarUrl || "/placeholder.svg"} />
+            <AvatarImage src={avatarUrl || "/logo.png"} />
             <AvatarFallback>{getInitial(displayName)}</AvatarFallback>
           </Avatar>
         </button>
