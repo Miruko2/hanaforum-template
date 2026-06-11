@@ -425,17 +425,16 @@ const PostCard = memo(function PostCard({
           }}
           title={`查看 ${username} 的主页`}
         >
-          {avatarUrl ? (
-            <img
-              src={avatarUrl}
-              alt={username}
-              className="h-10 w-10 rounded-full object-cover border-2 border-white/30 shadow-lg avatar-hover-effect"
-            />
-          ) : (
-            <div className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-white/30 bg-gradient-to-br from-blue-500 to-purple-600 text-sm font-semibold text-white shadow-lg avatar-hover-effect">
-              {username.charAt(0).toUpperCase()}
-            </div>
-          )}
+          <img
+            src={avatarUrl || "/logo.png"}
+            alt={username}
+            className="h-10 w-10 rounded-full object-cover border-2 border-white/30 shadow-lg avatar-hover-effect"
+            onError={(e) => {
+              // 头像 URL 失效时回退到站点 logo，避免出现裂图
+              const img = e.currentTarget
+              if (img.src.indexOf("/logo.png") === -1) img.src = "/logo.png"
+            }}
+          />
           <span className="relative top-3 truncate text-sm font-medium text-white transition-colors group-hover/author:text-lime-400">
             {username}
           </span>

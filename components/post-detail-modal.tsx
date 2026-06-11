@@ -228,17 +228,16 @@ export default function PostDetailModal({
           onClick={() => router.push(`/user?id=${post.user_id}`)}
           title={`查看 ${username} 的主页`}
         >
-          {avatarUrl ? (
-            <img
-              src={avatarUrl}
-              alt={username}
-              className="w-9 h-9 rounded-full object-cover border border-white/20 avatar-hover-effect"
-            />
-          ) : (
-            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-sm font-semibold border border-white/20 avatar-hover-effect">
-              {username.charAt(0).toUpperCase()}
-            </div>
-          )}
+          <img
+            src={avatarUrl || "/logo.png"}
+            alt={username}
+            className="w-9 h-9 rounded-full object-cover border border-white/20 avatar-hover-effect"
+            onError={(e) => {
+              // 头像 URL 失效时回退到站点 logo，避免出现裂图
+              const img = e.currentTarget
+              if (img.src.indexOf("/logo.png") === -1) img.src = "/logo.png"
+            }}
+          />
           <span className="group-hover/author:text-lime-400 transition-colors">{username}</span>
         </div>
         <span className="text-xs">
