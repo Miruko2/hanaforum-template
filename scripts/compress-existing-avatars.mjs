@@ -8,17 +8,21 @@
 // 用法（service role key 只从环境变量读，绝不写进文件 / 仓库 / 前端）：
 //   预览（默认，不改动）：     node scripts/compress-existing-avatars.mjs
 //   真压：                     node scripts/compress-existing-avatars.mjs --apply
-//   真压并删孤儿头像：         node scripts/compress-existing-avatars.mjs --apply --delete-orphans
+//
+// ⚠️ 原 --delete-orphans 已移除：它的孤儿判定只认 profiles.avatar_url，背景图
+//   （2026-06-10 起存同桶的 bg_* 文件）上线后会把全部背景图误判成孤儿删掉。
+//   删孤儿一律改用 scripts/cleanup-orphan-avatars.mjs（引用全集含背景图 +
+//   auth metadata），workflow 见 .github/workflows/cleanup-orphan-avatars.yml。
 //
 // 依赖：@supabase/supabase-js、sharp。Node 22+（supabase-js 新版 createClient 需
 //   原生 WebSocket，Node 20 会崩；见 .github/workflows/compress-avatars.yml 固定 node 22）。
 //
 // 安全护栏：
 //   1. 默认 dry-run，必须 --apply 才真改；
-//   2. 只压「被 profiles.avatar_url 引用」且「≥ SKIP_BELOW」的文件，已小/已压的跳过；
+//   2. 只压「被 profiles 引用的头像」且「≥ SKIP_BELOW」的文件，已小/已压的跳过；
+//      背景图（bg_*）按 1280px 设计上传，不参与 256px 压缩；
 //   3. 压完反而更大则不覆盖；GIF 跳过（避免丢动画）；
-//   4. 孤儿头像默认只报告，需额外 --delete-orphans 才删；
-//   5. 覆盖写回原路径（不改 profiles.avatar_url），contentType 设 image/webp。
+//   4. 覆盖写回原路径（不改 profiles.avatar_url），contentType 设 image/webp。
 
 import { createClient } from "@supabase/supabase-js"
 import sharp from "sharp"
@@ -31,7 +35,6 @@ const QUALITY = 80
 const SKIP_BELOW = 60 * 1024 // 60KB 以下不压（大概率已小 / 已压过）
 const PAGE = 1000
 const APPLY = process.argv.includes("--apply")
-const DELETE_ORPHANS = process.argv.includes("--delete-orphans")
 
 if (!SUPABASE_URL || !SERVICE_KEY) {
   console.error("缺少环境变量 SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY（service role key 只从环境读）")
@@ -45,7 +48,8 @@ const admin = createClient(SUPABASE_URL, SERVICE_KEY, {
 const fmt = (n) =>
   n >= 1048576 ? (n / 1048576).toFixed(2) + "MB" : (n / 1024).toFixed(0) + "KB"
 
-// profiles.avatar_url → 被引用的存储路径集合（形如 <uuid>/<ts>.<ext>）
+// profiles.avatar_url + background_url → 被引用的存储路径集合（形如 <uuid>/<ts>.<ext>）。
+// 背景图也算引用：虽然它不参与压缩，但统计「孤儿」时不能把它误判进去。
 async function getReferencedPaths() {
   const referenced = new Set()
   const marker = `/${BUCKET}/`
@@ -53,18 +57,18 @@ async function getReferencedPaths() {
   for (;;) {
     const { data, error } = await admin
       .from("profiles")
-      .select("avatar_url")
-      .not("avatar_url", "is", null)
+      .select("avatar_url, background_url")
       .range(from, from + PAGE - 1)
     if (error) throw error
     if (!data || data.length === 0) break
     for (const row of data) {
-      const url = row.avatar_url
-      if (typeof url !== "string") continue
-      const idx = url.indexOf(marker)
-      if (idx === -1) continue
-      const path = decodeURIComponent(url.slice(idx + marker.length).split("?")[0])
-      if (path) referenced.add(path)
+      for (const url of [row.avatar_url, row.background_url]) {
+        if (typeof url !== "string") continue
+        const idx = url.indexOf(marker)
+        if (idx === -1) continue
+        const path = decodeURIComponent(url.slice(idx + marker.length).split("?")[0])
+        if (path) referenced.add(path)
+      }
     }
     if (data.length < PAGE) break
     from += PAGE
@@ -136,13 +140,23 @@ async function main() {
 
   const isGif = (f) =>
     f.mimetype === "image/gif" || f.path.toLowerCase().endsWith(".gif")
-  const toCompress = inUse.filter((f) => f.size >= SKIP_BELOW && !isGif(f))
+  // 背景图（bg_*）按 1280px 设计上传（lib/profiles.ts uploadBackground），
+  // 压到 256px 会毁掉 banner 清晰度，排除在压缩之外。
+  const isBackground = (f) => /(^|\/)bg_/.test(f.path)
+  const toCompress = inUse.filter(
+    (f) => f.size >= SKIP_BELOW && !isGif(f) && !isBackground(f),
+  )
   const skipSmall = inUse.length - toCompress.length
   console.log(
-    `[avatars] 待压缩（被引用且 ≥ ${fmt(SKIP_BELOW)}、非 gif）：${toCompress.length} 个；跳过 ${skipSmall} 个（已小 / gif）`,
+    `[avatars] 待压缩（被引用的头像且 ≥ ${fmt(SKIP_BELOW)}、非 gif）：${toCompress.length} 个；跳过 ${skipSmall} 个（已小 / gif / 背景图）`,
   )
+  if (orphans.length) {
+    console.log(
+      `[avatars] 注：孤儿文件请用 scripts/cleanup-orphan-avatars.mjs 清理（本脚本不删）。`,
+    )
+  }
 
-  if (toCompress.length === 0 && !(DELETE_ORPHANS && orphans.length)) {
+  if (toCompress.length === 0) {
     console.log("[avatars] 没有需要处理的文件。")
     return
   }
@@ -152,13 +166,7 @@ async function main() {
     for (const f of toCompress.slice(0, 20)) console.log(`  ${f.path}  ${fmt(f.size)}`)
     const estIn = toCompress.reduce((s, f) => s + f.size, 0)
     console.log(`[avatars] 待压总大小约 ${fmt(estIn)}（压后通常降到原来的 5%~15%）`)
-    if (DELETE_ORPHANS && orphans.length) {
-      console.log(`[avatars] 将删除 ${orphans.length} 个孤儿头像（前 10）：`)
-      for (const f of orphans.slice(0, 10)) console.log(`  ${f.path}  ${fmt(f.size)}`)
-    }
-    console.log(
-      "\n[avatars] 这是预览，未改动。确认无误后加 --apply 真压（要删孤儿再加 --delete-orphans）。",
-    )
+    console.log("\n[avatars] 这是预览，未改动。确认无误后加 --apply 真压。")
     return
   }
 
@@ -205,21 +213,6 @@ async function main() {
   console.log(
     `\n[avatars] 压缩完成：成功 ${done}，失败 ${failed}，压后更大跳过 ${skippedBigger}，共节省 ${fmt(saved)}`,
   )
-
-  if (DELETE_ORPHANS && orphans.length) {
-    let del = 0
-    const paths = orphans.map((f) => f.path)
-    for (let i = 0; i < paths.length; i += 100) {
-      const batch = paths.slice(i, i + 100)
-      const { error } = await admin.storage.from(BUCKET).remove(batch)
-      if (error) {
-        console.error("  删孤儿批次失败:", error.message)
-        continue
-      }
-      del += batch.length
-    }
-    console.log(`[avatars] 删除孤儿头像 ${del}/${orphans.length} 个`)
-  }
 }
 
 main().catch((e) => {

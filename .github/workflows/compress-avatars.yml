@@ -2,16 +2,14 @@ name: 压缩存量头像(一次性·手动)
 
 # 一次性把 avatars 桶里的存量老头像压成 256px webp + 设 1 年缓存，降 Cached Egress。
 # 只手动触发：先不勾 apply 跑一次看预览，确认后再勾 apply 真压。
+# 注：原 delete_orphans 勾选框已移除——其孤儿判定不认背景图(bg_*)，背景图功能
+#     上线后勾它会误删全部背景图。删孤儿改用「清理孤儿头像与背景图(avatars)」workflow。
 # 复用已配的 Secret：NEXT_PUBLIC_SUPABASE_URL、SUPABASE_SERVICE_ROLE_KEY。
 on:
   workflow_dispatch:
     inputs:
       apply:
         description: "真压（勾上）还是仅预览（不勾）"
-        type: boolean
-        default: false
-      delete_orphans:
-        description: "顺带删除孤儿头像（换头像遗留的旧文件）"
         type: boolean
         default: false
 
@@ -26,7 +24,7 @@ jobs:
           node-version: "22"
       # 脚本只依赖 supabase-js + sharp，单独装即可（sharp 会拉 linux prebuilt 二进制）。
       - run: npm i @supabase/supabase-js@2 sharp --no-save
-      - run: node scripts/compress-existing-avatars.mjs ${{ inputs.apply && '--apply' || '' }} ${{ inputs.delete_orphans && '--delete-orphans' || '' }}
+      - run: node scripts/compress-existing-avatars.mjs ${{ inputs.apply && '--apply' || '' }}
         env:
           SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

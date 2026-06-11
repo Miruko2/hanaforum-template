@@ -1,0 +1,33 @@
+name: 清理孤儿头像与背景图(avatars)
+
+# 清理 avatars 桶里换头像/换背景图遗留的孤儿文件（上传逻辑用时间戳文件名配
+# 1 年长缓存，旧文件从不删除）。引用判定 = profiles.avatar_url + background_url
+# + auth metadata，详见 scripts/cleanup-orphan-avatars.mjs 头注。
+# 只手动触发：先用默认 preview 跑一次看日志，确认后再选 delete 真删。
+# 复用已配的 Secret：NEXT_PUBLIC_SUPABASE_URL、SUPABASE_SERVICE_ROLE_KEY。
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "preview = 只预览不删；delete = 真删"
+        type: choice
+        options:
+          - preview
+          - delete
+        default: preview
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # supabase-js 新版 createClient 即初始化 RealtimeClient，需 Node 22+ 原生 WebSocket。
+          node-version: "22"
+      # 脚本只依赖 supabase-js，单独装即可（无需装全项目依赖）
+      - run: npm i @supabase/supabase-js@2 --no-save
+      - run: node scripts/cleanup-orphan-avatars.mjs ${{ inputs.mode == 'delete' && '--delete' || '' }}
+        env:
+          SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
