@@ -46,20 +46,26 @@ export default function NotificationBell({ mobileView = false }: NotificationBel
     return () => setMounted(false)
   }, [])
 
-  // 弹窗打开时锁滚 + 标记已读
+  // 弹窗打开时锁滚 + 标记已读。
+  // ⚠️ 关闭时不在这里立即解锁滚动：解锁让滚动条回归 → 整页同步 reflow/重绘，
+  // 会和退出动画抢同一帧主线程（面板还压着 backdrop-filter 要逐帧重采样背面），
+  // 表现为「退出动画冻住不动、然后才消失」。解锁挪到 AnimatePresence 的
+  // onExitComplete——动画播完、面板已卸载，再让页面重排。
   useEffect(() => {
     if (isOpen) {
       document.body.style.overflow = "hidden"
       if (unreadCount > 0) {
         markAllAsRead().catch(() => {})
       }
-    } else {
-      document.body.style.overflow = ""
     }
+  }, [isOpen, unreadCount, markAllAsRead])
+
+  // 兜底：组件整个卸载（如路由切换）时解锁，避免锁死页面滚动
+  useEffect(() => {
     return () => {
       document.body.style.overflow = ""
     }
-  }, [isOpen, unreadCount, markAllAsRead])
+  }, [])
 
   // 点击通知卡片：弹出帖子详情
   const handleNotificationClick = useCallback(
@@ -168,7 +174,8 @@ export default function NotificationBell({ mobileView = false }: NotificationBel
   }
 
   const modalContent = (
-    <AnimatePresence>
+    // 退出动画完整播完后再解锁滚动（见上方 effect 的注释）
+    <AnimatePresence onExitComplete={() => { document.body.style.overflow = "" }}>
       {isOpen && (
         <motion.div
           key="notif-modal"
@@ -189,8 +196,10 @@ export default function NotificationBell({ mobileView = false }: NotificationBel
             onClick={() => setIsOpen(false)}
           />
 
-          {/* 通知面板：唯一的磨砂层，仅用 transform(scale/y) 动画，
-              不动画自身 opacity，保证 backdrop-filter 始终生效。 */}
+          {/* 通知面板：唯一的磨砂层。opacity/transform 都动画在毛玻璃元素自身上——
+              这是安全的（只有「祖先」opacity<1 才会废掉后代 backdrop-filter，
+              元素自己的 opacity 与 backdrop-filter 可共存，参照首页 .glass-card 入场）。
+              之前退场只缩 3% 不淡出，肉眼读不出动效、像硬切。 */}
           <motion.div
             className="relative w-[95%] max-w-2xl max-h-[85vh] overflow-hidden flex flex-col rounded-2xl border border-white/15 shadow-2xl"
             style={{
@@ -198,9 +207,11 @@ export default function NotificationBell({ mobileView = false }: NotificationBel
               backdropFilter: "blur(24px) saturate(150%)",
               WebkitBackdropFilter: "blur(24px) saturate(150%)",
             }}
-            initial={{ scale: 0.96, y: 8 }}
-            animate={{ scale: 1, y: 0 }}
-            exit={{ scale: 0.97, y: 4 }}
+            initial={{ opacity: 0, scale: 0.96, y: 8 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            // 退出用确定性短 tween：淡出+缩小一起走，时长固定、马上让位
+            //（滚动解锁在 onExitComplete 等着，不与动画抢主线程）
+            exit={{ opacity: 0, scale: 0.94, y: 8, transition: { duration: 0.18, ease: "easeOut" } }}
             transition={{ type: "spring", stiffness: 340, damping: 30, mass: 0.8 }}
             onClick={(e) => e.stopPropagation()}
           >
