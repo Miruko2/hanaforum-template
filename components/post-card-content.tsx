@@ -6,7 +6,6 @@ import { zhCN } from "date-fns/locale"
 import PostCardActions from "./post-card-actions"
 import type { Post } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { CATEGORY_LABELS } from "@/lib/categories"
 import { useRouter } from "next/navigation"
 
 interface PostCardContentProps {
@@ -47,9 +46,8 @@ export default function PostCardContent({
         {post.title}
       </h3>
 
-      <div className="flex justify-between items-center mb-2 pl-0">
-        <span className="text-xs font-medium text-white/90 px-2 py-1 bg-black/25 rounded-full -ml-2">{CATEGORY_LABELS[post.category] || post.category}</span>
-        
+      {/* 分类标签不在列表卡片显示（只在详情页展示），互动数靠右 */}
+      <div className="flex justify-end items-center mb-2">
         <div className="mr-1">
           <PostCardActions
             liked={liked}
@@ -63,7 +61,7 @@ export default function PostCardContent({
       </div>
 
       {/* 帖子正文摘要：全平台（手机/平板/PC）首页列表卡片都不显示。
-          只保留标题 + 分类 + 互动数 + 作者/时间。
+          只保留标题 + 互动数 + 作者/时间。
           完整正文走点开后的详情弹窗（PostDetailModal）。
           理由：避免卡片高度参差不齐影响瀑布流观感，同时减少首页信息密度。 */}
 

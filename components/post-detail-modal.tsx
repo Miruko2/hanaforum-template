@@ -13,7 +13,7 @@ import ImageLightbox from "./image-lightbox"
 import TextualHero from "./textual-hero"
 import CommentList from "./comment/comment-list"
 import LikeButton from "./ui/like-button"
-import { CATEGORY_LABELS } from "@/lib/categories"
+import { CATEGORIES } from "@/lib/categories"
 
 interface PostDetailModalProps {
   post: Post
@@ -65,6 +65,9 @@ export default function PostDetailModal({
   // 是否使用横版布局：桌面端一律走横版
   // （有图 → 左侧图片；无图 → 左侧 TextualHero 文字大标题）
   const useHorizontalLayout = !isMobile
+
+  // 当前帖子的分类定义（中文名 + 装饰符号），脏数据找不到时徽章回退显示原始值
+  const categoryDef = CATEGORIES.find((c) => c.value === post.category)
 
   // hero 转场（飞行克隆）：用一张独立的、全程不透明的飞行图，从点击卡片图的屏幕矩形
   // （sourceRect）飞到详情图位置（heroRef 测量），到位后交接给详情里的真实图。飞行图在
@@ -223,12 +226,18 @@ export default function PostDetailModal({
           {post.title}
         </motion.h3>
         <motion.span
-          className="shrink-0 text-white text-sm font-medium px-3 py-1 rounded-full bg-black/25 border border-white/10"
+          // lime 品牌色玻璃胶囊：淡色底 + 同色描边 + 微辉光，前缀分类装饰符号
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-lime-400/25 bg-lime-400/10 px-3 py-1 text-[13px] font-medium text-lime-300 shadow-[0_0_14px_rgba(163,230,53,0.12),inset_0_1px_0_rgba(255,255,255,0.08)]"
           initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.4, delay: 0.14 }}
         >
-          {CATEGORY_LABELS[post.category] || post.category}
+          {categoryDef?.glyph && (
+            <span aria-hidden className="text-xs leading-none text-lime-400/90">
+              {categoryDef.glyph}
+            </span>
+          )}
+          {categoryDef?.label || post.category}
         </motion.span>
       </motion.div>
 
