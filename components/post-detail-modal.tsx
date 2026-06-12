@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useState, useCallback, useLayoutEffect, useRef } from "react"
-import { motion, AnimatePresence } from "framer-motion"
+import { motion, AnimatePresence, useMotionValue, useTransform, animate } from "framer-motion"
 import { X, MessageSquare, Maximize2 } from "lucide-react"
 import { createPortal } from "react-dom"
 import { useRouter } from "next/navigation"
@@ -14,6 +14,12 @@ import TextualHero from "./textual-hero"
 import CommentList, { prefetchComments } from "./comment/comment-list"
 import LikeButton from "./ui/like-button"
 import { CATEGORIES } from "@/lib/categories"
+
+// 安卓（含 Capacitor WebView）：合成器对 backdrop-filter 的逐帧重采样远弱于
+// iOS/桌面，开/关帖动画期间的玻璃面板与渐进模糊带在安卓上降级（实底/纯渐变）。
+// 必须模块级同步取值（不能用 effect 异步置位的 hook）：驱动 framer-motion
+// initial/样式分支的平台判定若首帧后才翻转，会造成初始状态错位（music 覆盖层踩过）。
+const IS_ANDROID = typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent)
 
 interface PostDetailModalProps {
   post: Post
@@ -91,6 +97,9 @@ export default function PostDetailModal({
   const [closing, setClosing] = useState(false)
   // 回飞落地只触发一次真正 onClose；exit（淡出揭幕）阶段的 onAnimationComplete 不重复触发
   const closedRef = useRef(false)
+  // 回飞图源的自然宽高比（naturalWidth/naturalHeight），关闭瞬间从详情图元素读取。
+  // FlyBackImage 用它按 object-cover 公式精确算起点缩放，保证回飞首帧与详情图像素一致。
+  const flyImgRatioRef = useRef<number | null>(null)
 
   useLayoutEffect(() => {
     if (!isOpen) {
@@ -122,6 +131,12 @@ export default function PostDetailModal({
         target = { left: r.left, top: r.top, width: r.width, height: r.height }
         setFlyTarget(target)
       }
+      // 顺手读详情图的自然宽高比，供回飞图精确复刻 object-cover 裁剪
+      const imgEl = el.querySelector("img")
+      flyImgRatioRef.current =
+        imgEl && imgEl.naturalWidth > 0 && imgEl.naturalHeight > 0
+          ? imgEl.naturalWidth / imgEl.naturalHeight
+          : null
     }
     // 桌面：飞入克隆已飞到位（flyDone）才回飞；手机：飞入是普通淡入（无 flyDone），
     // 只要量到了起止矩形与图源就回飞（飞回动效手机也保留）。
@@ -453,6 +468,10 @@ export default function PostDetailModal({
               borderGlow={true}
               imageRatio={post.image_ratio}
               reduceBlur={isMobile}
+              // 安卓：面板实底化（去 backdrop-filter）。底下已有全屏 blur(10px) 遮罩，
+              // 毛玻璃采样的本来就是模糊画面、观感几乎一致；而面板「上浮+微缩放」入场
+              // 从每帧重采样背景变成纯合成 —— 安卓开/关帖掉帧的主因之一。
+              solid={IS_ANDROID}
             >
               {useHorizontalLayout ? (
                 /* 横版：左图/文字Hero + 右滚动内容，整体高度由外层 maxHeight 控制 */
@@ -544,18 +563,22 @@ export default function PostDetailModal({
                     >
                       {/* 移动端降级：原 4 层 backdrop-filter 渐进模糊并为 1 层，省 3 层全宽
                           实时高斯模糊。单层用 mask 让模糊自上而下淡入，配合下方暗影过渡
-                          「图片 ↔ 卡片」接缝。代价：渐进感略弱，但打开时 GPU 开销大降。 */}
-                      <div
-                        className="absolute inset-0"
-                        style={{
-                          backdropFilter: "blur(8px)",
-                          WebkitBackdropFilter: "blur(8px)",
-                          maskImage:
-                            "linear-gradient(to bottom, transparent 0%, #000 55%, #000 100%)",
-                          WebkitMaskImage:
-                            "linear-gradient(to bottom, transparent 0%, #000 55%, #000 100%)",
-                        }}
-                      />
+                          「图片 ↔ 卡片」接缝。代价：渐进感略弱，但打开时 GPU 开销大降。
+                          安卓再降一档：连这 1 层也去掉（面板入场 transform 期间它每帧
+                          重采样图片区），只留下方暗影渐变压接缝。 */}
+                      {!IS_ANDROID && (
+                        <div
+                          className="absolute inset-0"
+                          style={{
+                            backdropFilter: "blur(8px)",
+                            WebkitBackdropFilter: "blur(8px)",
+                            maskImage:
+                              "linear-gradient(to bottom, transparent 0%, #000 55%, #000 100%)",
+                            WebkitMaskImage:
+                              "linear-gradient(to bottom, transparent 0%, #000 55%, #000 100%)",
+                          }}
+                        />
+                      )}
                       {/* 向下压暗的暗影：顶部 30% 不压暗（保持清亮、不在顶端造第二条边），
                           往下逐渐加深，把图片最底缘压到接近暗卡片，淡化接缝 */}
                       <div
@@ -633,64 +656,151 @@ export default function PostDetailModal({
           </motion.div>
         )}
 
-        {/* hero 回飞图：关闭时详情图从详情位置飞回卡片位置，飞到位后真正 onClose */}
+        {/* hero 回飞图：关闭时详情图从详情位置飞回卡片位置，飞到位后真正 onClose。
+            纯 transform 的 FLIP 实现（见 FlyBackImage）—— 旧版动画 left/top/width/height
+            每帧触发 layout + 整图重栅格化，是安卓关帖掉帧主因。
+            落点 = 源卡图片区（flyBackTarget）：图片在那里 object-cover 的裁剪与源卡图片
+            完全一致 → 像素级无缝。落地即真正关闭：onClose 让父级 isActive=false（源卡整卡
+            显形 —— 图片区被回飞图无缝接管、不跳变，下方内容区由 PostCard 做浮现入场）、
+            isOpen=false（useLayoutEffect 复位 closing/flyTarget → 回飞图卸载）。
+            closedRef 保证只触发一次 onClose。 */}
         {closing && flyTarget && flyBackTarget && sourceSrc && (
-          <motion.div
+          <FlyBackImage
             key="hero-fly-back"
-            className="fixed z-[50] overflow-hidden pointer-events-none select-none bg-black/20"
-            style={{ borderRadius: 14 }}
-            initial={{
-              left: flyTarget.left,
-              top: flyTarget.top,
-              width: flyTarget.width,
-              height: flyTarget.height,
-            }}
-            animate={{
+            from={flyTarget}
+            to={{
               left: flyBackTarget.left,
               top: flyBackTarget.top,
               width: flyBackTarget.width,
               height: flyBackTarget.height,
             }}
-            // 飞回用缓入缓出（easeInOutCubic）：轻起 → 加速 → 轻落，收拢有重量感、不会
-            // 开头猛缩，尾速趋近 0 → 落回图片区更稳。
-            // 移动端：0.3s、无 delay —— 手机上关闭要立等可见地干脆（0.5s 总时长被反馈"不够快"）。
-            // 桌面：0.42s + 0.08s delay（先让底部内容区渐隐、图片再起飞），保持从容收拢。
-            transition={
-              isMobile
-                ? { duration: 0.3, ease: [0.65, 0, 0.35, 1] }
-                : { duration: 0.42, ease: [0.65, 0, 0.35, 1], delay: 0.08 }
-            }
-            // 落点 = 源卡图片区（flyBackTarget）：图片在那里 object-cover 的裁剪与源卡图片
-            // 完全一致 → 像素级无缝。落地即真正关闭：onClose 让父级 isActive=false（源卡整卡
-            // 显形 —— 图片区被回飞图无缝接管、不跳变，下方内容区由 PostCard 做浮现入场）、
-            // isOpen=false（useLayoutEffect 复位 closing/flyTarget → 回飞图卸载）。
-            // closedRef 保证只触发一次 onClose。
-            onAnimationComplete={() => {
+            src={sourceSrc}
+            imgRatio={flyImgRatioRef.current}
+            isMobile={isMobile}
+            title={post.title}
+            username={username}
+            onArrive={() => {
               if (closedRef.current) return
               closedRef.current = true
               onClose()
             }}
-          >
-            <img
-              src={sourceSrc}
-              alt=""
-              draggable={false}
-              className="absolute inset-0 h-full w-full object-cover"
-            />
-            {/* 底部信息条：回飞中淡出 → 落点是图片区（无信息条），与源卡图片严丝合缝对齐 */}
-            <motion.div
-              className="absolute inset-x-0 bottom-0 p-3 bg-gradient-to-t from-black/90 via-black/50 to-transparent"
-              initial={{ opacity: 1 }}
-              animate={{ opacity: 0 }}
-              transition={{ duration: 0.2, ease: "easeOut" }}
-            >
-              <div className="text-white text-[13px] font-semibold truncate">{post.title}</div>
-              <div className="text-white/60 text-[11px] truncate">{username}</div>
-            </motion.div>
-          </motion.div>
+          />
         )}
       </AnimatePresence>
     </>,
     document.body,
+  )
+}
+
+type FlyRect = { left: number; top: number; width: number; height: number }
+
+/**
+ * 回飞图（关闭转场）：纯 transform 的 FLIP 实现。
+ *
+ * 旧版直接动画 left/top/width/height —— 每帧触发该元素的 layout + 整图重栅格化
+ * （图片在每个新尺寸下重绘），安卓上是关帖掉帧主因。本实现：
+ *   · 容器钉死在落点矩形（to），transform 从起点矩形（from）插值回 scale(1)；
+ *   · 内层图片按帧反向缩放 scale(u/sx, u/sy)：容器的非均匀缩放被抵消成均匀缩放 u，
+ *     数学上等价于 object-cover 在每帧窗口下的重新裁剪 —— 画面均匀缩放、不拉伸；
+ *   · u 的起点 u0 按 object-cover 公式精确计算（需图片自然宽高比 imgRatio），
+ *     保证首帧与详情图、末帧与源卡图都像素一致；拿不到比例时退化为 max 近似。
+ * 每帧只改 transform = 纯合成（零 layout / 零 repaint），GPU 纹理上传一次后逐帧缩放。
+ * 底部信息条复用图片的反向缩放（锚定底边）：呈现为「整卡均匀缩小」、文字不拉伸。
+ */
+function FlyBackImage({
+  from,
+  to,
+  src,
+  imgRatio,
+  isMobile,
+  title,
+  username,
+  onArrive,
+}: {
+  from: FlyRect
+  to: FlyRect
+  src: string
+  imgRatio: number | null
+  isMobile: boolean
+  title: string
+  username: string
+  onArrive: () => void
+}) {
+  const progress = useMotionValue(0)
+
+  // 起点矩形相对落点的位移与缩放（transform-origin 取容器左上角）
+  const sx0 = from.width / to.width
+  const sy0 = from.height / to.height
+  const dx0 = from.left - to.left
+  const dy0 = from.top - to.top
+  // 起点画面相对落点 object-cover 的均匀缩放倍率：
+  // coverScale(R) = max(R.w/natW, R.h/natH)，u0 = coverScale(from)/coverScale(to)
+  const u0 = imgRatio
+    ? Math.max(from.width, from.height * imgRatio) /
+      Math.max(to.width, to.height * imgRatio)
+    : Math.max(sx0, sy0)
+
+  const containerTransform = useTransform(progress, (t) => {
+    const sx = sx0 + (1 - sx0) * t
+    const sy = sy0 + (1 - sy0) * t
+    return `translate(${dx0 * (1 - t)}px, ${dy0 * (1 - t)}px) scale(${sx}, ${sy})`
+  })
+  // u/sx ≥ 1 恒成立（u ≥ max(sx,sy)，端点相等、中间线性 → 全程不小于）——
+  // 图片与信息条放大后被容器 overflow:hidden 裁掉边缘，永不露底。
+  const innerTransform = useTransform(progress, (t) => {
+    const sx = sx0 + (1 - sx0) * t
+    const sy = sy0 + (1 - sy0) * t
+    const u = u0 + (1 - u0) * t
+    return `scale(${u / sx}, ${u / sy})`
+  })
+
+  // 挂载即起飞（closing 置位时本组件才挂载；飞行期间矩形不变，依赖留空）。
+  // 飞回用缓入缓出（easeInOutCubic）：轻起 → 加速 → 轻落，收拢有重量感，尾速趋近 0。
+  // 移动端：0.3s、无 delay —— 关闭要立等可见地干脆（0.5s 总时长曾被反馈"不够快"）。
+  // 桌面：0.42s + 0.08s delay（先让底部内容区渐隐、图片再起飞），保持从容收拢。
+  React.useEffect(() => {
+    const controls = animate(progress, 1, {
+      duration: isMobile ? 0.3 : 0.42,
+      delay: isMobile ? 0 : 0.08,
+      ease: [0.65, 0, 0.35, 1],
+      onComplete: onArrive,
+    })
+    return () => controls.stop()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  return (
+    <motion.div
+      className="fixed z-[50] overflow-hidden pointer-events-none select-none bg-black/20"
+      style={{
+        left: to.left,
+        top: to.top,
+        width: to.width,
+        height: to.height,
+        borderRadius: 14,
+        transformOrigin: "0 0",
+        transform: containerTransform,
+        willChange: "transform",
+      }}
+    >
+      <motion.img
+        src={src}
+        alt=""
+        draggable={false}
+        className="absolute inset-0 h-full w-full object-cover"
+        style={{ transform: innerTransform, transformOrigin: "50% 50%" }}
+      />
+      {/* 底部信息条：回飞中淡出 → 落点是图片区（无信息条），与源卡图片严丝合缝对齐 */}
+      <motion.div
+        className="absolute inset-x-0 bottom-0 p-3 bg-gradient-to-t from-black/90 via-black/50 to-transparent"
+        style={{ transform: innerTransform, transformOrigin: "50% 100%" }}
+        initial={{ opacity: 1 }}
+        animate={{ opacity: 0 }}
+        transition={{ duration: 0.2, ease: "easeOut" }}
+      >
+        <div className="text-white text-[13px] font-semibold truncate">{title}</div>
+        <div className="text-white/60 text-[11px] truncate">{username}</div>
+      </motion.div>
+    </motion.div>
   )
 }

@@ -17,6 +17,11 @@ interface GlassMorphProps {
   wideTemplate?: boolean
   /** 移动端降模糊：把毛玻璃 blur 半径整体调低，省 GPU 重采样 */
   reduceBlur?: boolean
+  /** 安卓等弱合成器环境：完全去掉 backdrop-filter，改近实底深色背景。
+   *  适用「面板下方已有全屏模糊遮罩」的场景（如帖子详情弹窗）：毛玻璃采样的
+   *  本来就是已模糊画面，实底观感几乎一致；面板做 transform 进出场时从
+   *  「每帧重采样背景」变成纯合成，低端安卓不再掉帧。 */
+  solid?: boolean
 }
 
 export function GlassMorph({
@@ -31,6 +36,7 @@ export function GlassMorph({
   adaptiveHeight = false,
   wideTemplate = false,
   reduceBlur = false,
+  solid = false,
 }: GlassMorphProps) {
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 })
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 })
@@ -234,27 +240,34 @@ export function GlassMorph({
       style={{
         border: "1px solid",
         borderRadius: "24px",
-        willChange: "transform, backdrop-filter, background, border-color, box-shadow",
+        willChange: solid
+          ? "transform, opacity"
+          : "transform, backdrop-filter, background, border-color, box-shadow",
         transformStyle: "preserve-3d",
-        transform: tiltEffect ? 
+        transform: tiltEffect ?
           `perspective(1000px) rotateX(${springRotateX}deg) rotateY(${springRotateY}deg) translateZ(0)` :
           "translateZ(0)",
         ...adaptiveStyles,
       }}
-      initial={{ 
+      initial={{
         opacity: 0,
-        backdropFilter: `blur(${baseBlur})`,
-        background: `rgba(${dark ? '0, 0, 0' : '255, 255, 255'}, ${baseOpacity})`,
-        borderColor: `rgba(255, 255, 255, ${baseBorderOpacity})`,
-      }}
-      animate={{ 
-        opacity: 1,
-        background: isHovered 
-          ? `rgba(${dark ? '0, 0, 0' : '255, 255, 255'}, ${hoverOpacity})` 
+        background: solid
+          ? "rgba(25, 25, 35, 0.93)"
           : `rgba(${dark ? '0, 0, 0' : '255, 255, 255'}, ${baseOpacity})`,
-        backdropFilter: isHovered ? `blur(${hoverBlur})` : `blur(${baseBlur})`,
-        borderColor: isHovered 
-          ? `rgba(255, 255, 255, ${hoverBorderOpacity})` 
+        borderColor: `rgba(255, 255, 255, ${baseBorderOpacity})`,
+        // solid 模式完全不挂 backdropFilter（连 blur(0) 都不挂 —— filter 属性本身就会建采样层）
+        ...(solid ? {} : { backdropFilter: `blur(${baseBlur})` }),
+      }}
+      animate={{
+        opacity: 1,
+        background: solid
+          ? "rgba(25, 25, 35, 0.93)"
+          : isHovered
+            ? `rgba(${dark ? '0, 0, 0' : '255, 255, 255'}, ${hoverOpacity})`
+            : `rgba(${dark ? '0, 0, 0' : '255, 255, 255'}, ${baseOpacity})`,
+        ...(solid ? {} : { backdropFilter: isHovered ? `blur(${hoverBlur})` : `blur(${baseBlur})` }),
+        borderColor: isHovered
+          ? `rgba(255, 255, 255, ${hoverBorderOpacity})`
           : `rgba(255, 255, 255, ${baseBorderOpacity})`,
         boxShadow: isHovered
           ? `0 10px 30px rgba(0, 0, 0, 0.3), 0 0 20px rgba(255, 255, 255, 0.1)`
