@@ -3864,3 +3864,7 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
 .ptr-root.ptr-android .ptr-corner-loading {
   animation: none;
 }
+/* 霓虹边：模糊半径越大光栅化越贵，安卓收窄（仍有发光感，静帧基本无差别） */
+.ptr-root.ptr-android .ptr-edge {
+  box-shadow: 0 0 12px rgba(255, 45, 120, 0.7);
+}

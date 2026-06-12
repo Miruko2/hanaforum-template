@@ -164,9 +164,14 @@ export default function PageRibbonTransition() {
   if (!active) return null
 
   const { card, dir, phase } = active
-  // 小字行滚完整短语，大字行只滚「单词 + 符号」。repeat 足够长保证宽屏下不滚穿
-  const phrase = `${card.word}  ${card.mark}  ${card.jp}  •  ${card.word}  ${card.mark}  ${card.cn}  •  `.repeat(14)
-  const bigPhrase = `${card.word}  ${card.mark}  `.repeat(12)
+  // 小字行滚完整短语，大字行只滚「单词 + 符号」。
+  // 安卓走静态行（不滚动），只需铺满一屏宽，重复串大幅缩短 —— 省掉超长文本的
+  // 布局/光栅化（滑动首帧卡顿主因之一），视觉静帧无差别。
+  // 非安卓仍走滚动，repeat 足够长保证宽屏下不滚穿。
+  const phraseRepeat = isAndroidRuntime ? 6 : 14
+  const bigRepeat = isAndroidRuntime ? 3 : 12
+  const phrase = `${card.word}  ${card.mark}  ${card.jp}  •  ${card.word}  ${card.mark}  ${card.cn}  •  `.repeat(phraseRepeat)
+  const bigPhrase = `${card.word}  ${card.mark}  `.repeat(bigRepeat)
 
   return createPortal(
     <div
