@@ -136,7 +136,7 @@ export default function FollowStats({ userId }: FollowStatsProps) {
               </button>
             </div>
 
-            <div className="max-h-[55vh] overflow-y-auto -mx-2 px-2">
+            <div className="max-h-[55vh] overflow-y-auto overscroll-contain -mx-2 px-2">
               {listLoading ? (
                 <div className="py-12 text-center text-sm text-white/50">加载中...</div>
               ) : !list || list.length === 0 ? (
