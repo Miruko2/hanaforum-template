@@ -42,6 +42,7 @@ const PostItem = memo(function PostItem({
   onClose,
   onPostUpdated,
   onPostDeleted,
+  cheapEnter,
 }: {
   post: Post
   isActive: boolean
@@ -52,13 +53,29 @@ const PostItem = memo(function PostItem({
   onClose: () => void
   onPostUpdated?: (postId: string, updates: Partial<Post>) => void
   onPostDeleted?: (postId: string) => void
+  /** 安卓（含鸿蒙）：允许滚动重播入场动画，但重播用廉价的 transform+opacity，
+   *  不重算 filter:blur。其它平台 false：首次 blur「雾中浮现」后不再重播。 */
+  cheapEnter: boolean
 }) {
-  // 每次进入视口都重新触发入场动画。离开视口后再进来，视觉上会重播"雾中浮现"
+  // triggerOnce 恒为 false：所有端都保留「滚出再滚回重播入场动画」的原始行为。
+  // 安卓与其它端的差异只在「重播用什么动画」（见下方 isReplay）：安卓重播用廉价
+  // transform 动画，其它端重播仍是 blur 雾中浮现，完全不改动。
   const { ref, inView } = useInView({
     threshold: 0.05,
     // 提前一点触发，让动画不会等到卡片完全进入视口
     rootMargin: "100px 0px",
+    triggerOnce: false,
   })
+
+  // 安卓重播判定：首次进入视口仍走 blur「雾中浮现」；此后滚出再滚回的重播，
+  // 改用纯 transform+opacity 的廉价动画（postEnterCheapReveal），避免滚动时
+  // 反复重算高斯模糊拖垮安卓 GPU。playedOnceRef 在渲染期直接判定，避免
+  // 「先 blur 一帧再切廉价」的闪烁。
+  const playedOnceRef = useRef(false)
+  useEffect(() => {
+    if (cheapEnter && inView) playedOnceRef.current = true
+  }, [cheapEnter, inView])
+  const isReplay = cheapEnter && inView && playedOnceRef.current
 
   const visible = inView
 
@@ -68,7 +85,7 @@ const PostItem = memo(function PostItem({
   return (
     <div
       ref={ref}
-      className={`post-card-container post-enter ${visible ? "post-enter-visible" : ""}`}
+      className={`post-card-container post-enter ${cheapEnter ? "cv-auto" : ""} ${visible ? "post-enter-visible" : ""} ${isReplay ? "post-enter-replay" : ""}`}
     >
       <PostCard
         post={post}
@@ -101,6 +118,15 @@ export default function VirtualPostList({
   const mountedRef = useRef(true)
   const [activePostIdInternal, setActivePostIdInternal] = useState<string | null>(null)
   const savedScrollRef = useRef(0)
+
+  // 是否安卓/鸿蒙：仅用于挑选入场动画策略（重播用廉价 transform 动画）。
+  // 客户端挂载后探测；SSR/首帧按 false（非安卓）渲染，避免水合不一致。
+  const [cheapEnter, setCheapEnter] = useState(false)
+  useEffect(() => {
+    if (typeof navigator !== "undefined" && /Android|Harmony/i.test(navigator.userAgent)) {
+      setCheapEnter(true)
+    }
+  }, [])
 
   // 底部哨兵，进入视口就触发加载下一页
   const [loadMoreRef, inView] = useInView({
@@ -200,6 +226,7 @@ export default function VirtualPostList({
               onClose={handlePostClose}
               onPostUpdated={onPostUpdated}
               onPostDeleted={onPostDeleted}
+              cheapEnter={cheapEnter}
             />
           )
         })}

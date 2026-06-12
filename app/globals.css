@@ -380,6 +380,30 @@ body {
   }
 }
 
+/* 安卓滚动重播：用纯 transform+opacity（合成器友好、不重算像素）替代昂贵的
+   filter:blur 雾中浮现。卡片首次入场仍走上面的 blur 动画；只有「滚出视口再滚回」
+   的重播才命中这里 —— 由 virtual-post-list.tsx 在第二次进入视口时打上
+   .post-enter-replay（仅安卓/鸿蒙）。这样滚动时屏内卡片不再反复重算高斯模糊。
+   选择器多带一个类，特异性高于上面的 blur 规则，从而覆盖雾态与动画。 */
+.post-enter-replay.post-enter .glass-card {
+  filter: none;
+  transform: translateY(14px) scale(0.985);
+  will-change: transform, opacity;
+}
+.post-enter-replay.post-enter-visible .glass-card {
+  animation: postEnterCheapReveal 0.55s cubic-bezier(0.23, 1, 0.32, 1) forwards;
+}
+@keyframes postEnterCheapReveal {
+  0% {
+    opacity: 0;
+    transform: translateY(14px) scale(0.985);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 /* hero 关闭回飞落地后：源卡内容区（图片下方）登场动效，柔化「内容突现」。
    图片区已由回飞图像素级无缝接管，这里让下方文字卡各行「从上到下依次、带高斯模糊」
    浮现：标题 → 分类/互动 → 作者/时间 逐行渐入。
@@ -1627,6 +1651,17 @@ body.modal-open {
   height: auto;
   /* 确保这个容器不会影响卡片样式，只做定位用 */
   contain: layout style;
+}
+
+/* 安卓专属性能：让浏览器跳过「视口外」卡片的布局/绘制/backdrop-filter 合成。
+   首页不做窗口化、所有已加载帖子全在 DOM，大量毛玻璃卡同屏 + 屏外全量绘制
+   是安卓滚动掉帧的主因。content-visibility:auto 只渲染视口附近的卡片。
+   contain-intrinsic-size 给未渲染卡片占位高度，auto 关键字会记住卡片上次渲染
+   的真实高度，最大限度避免滚动条抖动。
+   仅在安卓由 virtual-post-list.tsx 打上 .cv-auto；PC / iOS 不加，行为完全不变。 */
+.post-card-container.cv-auto {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 420px;
 }
 
 .post-card {
