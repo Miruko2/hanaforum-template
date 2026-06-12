@@ -1,6 +1,6 @@
 "use client"
 
-import { Suspense, useEffect, useMemo, useState, type ReactNode } from "react"
+import { Suspense, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -24,6 +24,7 @@ import CategoryMenu from "@/components/category-menu"
 import { useCinemaMode } from "@/contexts/cinema-mode-context"
 import { useChatUI } from "@/contexts/chat-ui-context"
 import { isValidCategory, CATEGORIES } from "@/lib/categories"
+import { navigateWithFlip, ringDirection } from "@/lib/view-transition-nav"
 import { Clapperboard, Zap, Music } from "lucide-react"
 
 // Navigation 内用 useSearchParams 读 ?category=xxx 高亮分类；
@@ -38,6 +39,8 @@ function NavigationContent() {
   const [catExpanded, setCatExpanded] = useState(false)
   const [mounted, setMounted] = useState(false)
   const [isScrolled, setIsScrolled] = useState(false)
+  // 首页下滑收起导航栏、上滑出现；其他页面常驻
+  const [navHidden, setNavHidden] = useState(false)
   // 当前激活的分类（仅用于 CategoryMenu 的高亮态）— useSearchParams 自动跟随 URL
   const activeCategory = useMemo(() => {
     const raw = searchParams?.get("category") || null
@@ -88,6 +91,21 @@ function NavigationContent() {
   }, [user?.id])
 
   // activeCategory 已通过 useSearchParams 自动跟随 URL，无需手动同步
+
+  // 主导航环（首页/弹幕墙/音乐/个人中心）之间的跳转走 3D 翻页转场，
+  // 方向按环上顺序判定；环外路径（管理/登录等）退化为普通 push。
+  const flipNav = (href: string) => {
+    const dir = ringDirection(pathname || "", href)
+    if (dir) navigateWithFlip(router, href, dir)
+    else router.push(href)
+  }
+
+  // 桌面 Link 点击改走翻页转场；保留 href 以支持中键/新标签/SEO
+  const handleFlipLink = (e: MouseEvent, href: string) => {
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+    e.preventDefault()
+    flipNav(href)
+  }
 
   // 切换影院模式。如果当前不在首页，则先跳转到首页并带上 ?cinema=1，
   // CinemaModeProvider 会消费这个参数并开启影院模式。
@@ -158,10 +176,24 @@ function NavigationContent() {
   useEffect(() => {
     if (!mounted) return
 
+    // 切页时先恢复可见，避免上一页隐藏状态带到新页
+    setNavHidden(false)
+    let lastY = window.scrollY
+
     const handleScroll = () => {
-      // 仅更新视觉状态（滚动一定距离后背景加深）。导航栏不再随向下滚动隐藏——
-      // 聊天入口现在挂在导航栏上，必须全站、各滚动位置都可达（用户需求）。
-      setIsScrolled(window.scrollY > 50)
+      const y = window.scrollY
+      // 视觉状态：滚动一定距离后背景加深
+      setIsScrolled(y > 50)
+      // 仅首页：下滑收起、上滑出现（带 6px 抖动死区）；其他页面常驻
+      if (pathname === "/") {
+        const dy = y - lastY
+        if (y < 80) setNavHidden(false)
+        else if (dy > 6) setNavHidden(true)
+        else if (dy < -6) setNavHidden(false)
+      } else {
+        setNavHidden(false)
+      }
+      lastY = y
     }
 
     // 添加节流优化，避免过度触发
@@ -178,7 +210,7 @@ function NavigationContent() {
 
     window.addEventListener('scroll', throttledHandleScroll, { passive: true })
     return () => window.removeEventListener('scroll', throttledHandleScroll)
-  }, [mounted])
+  }, [mounted, pathname])
 
   if (!mounted) {
     // 返回一个占位符，避免水合不匹配
@@ -202,13 +234,13 @@ function NavigationContent() {
     active: boolean
     onClick: () => void
   }[] = [
-    { key: "home", icon: <Home className="h-5 w-5" />, zh: "首页", en: "HOME", tone: "lime", active: pathname === "/", onClick: () => { router.push("/"); closeMobileMenu() } },
-    { key: "live", icon: <Zap className="h-5 w-5" />, zh: "弹幕墙", en: "DANMAKU", tone: "pink", active: pathname === "/live", onClick: () => { router.push("/live"); closeMobileMenu() } },
+    { key: "home", icon: <Home className="h-5 w-5" />, zh: "首页", en: "HOME", tone: "lime", active: pathname === "/", onClick: () => { flipNav("/"); closeMobileMenu() } },
+    { key: "live", icon: <Zap className="h-5 w-5" />, zh: "弹幕墙", en: "DANMAKU", tone: "pink", active: pathname === "/live", onClick: () => { flipNav("/live"); closeMobileMenu() } },
     { key: "cinema", icon: <Clapperboard className="h-5 w-5" />, zh: cinemaMode ? "退出影院" : "影院模式", en: "CINEMA", tone: "pink", active: cinemaMode, onClick: () => { toggleCinemaMode(); closeMobileMenu() } },
-    { key: "music", icon: <Music className="h-5 w-5" />, zh: "音乐", en: "MUSIC", tone: "pink", active: pathname === "/music", onClick: () => { router.push("/music"); closeMobileMenu() } },
+    { key: "music", icon: <Music className="h-5 w-5" />, zh: "音乐", en: "MUSIC", tone: "pink", active: pathname === "/music", onClick: () => { flipNav("/music"); closeMobileMenu() } },
   ]
   if (user) {
-    actionCards.push({ key: "profile", icon: <User className="h-5 w-5" />, zh: "个人中心", en: "PROFILE", tone: "lime", active: pathname === "/profile", onClick: () => { router.push("/profile"); closeMobileMenu() } })
+    actionCards.push({ key: "profile", icon: <User className="h-5 w-5" />, zh: "个人中心", en: "PROFILE", tone: "lime", active: pathname === "/profile", onClick: () => { flipNav("/profile"); closeMobileMenu() } })
   }
   if (isAdmin) {
     actionCards.push({ key: "admin", icon: <Settings className="h-5 w-5" />, zh: "管理", en: "ADMIN", tone: "lime", active: pathname === "/admin", onClick: () => { router.push("/admin"); closeMobileMenu() } })
@@ -219,8 +251,11 @@ function NavigationContent() {
   }
 
   return (
+    // 注意：这里不能加 view-transition-name —— 它会让 header 变成 backdrop root，
+    // 内部 backdrop-blur 采不到页面背景、毛玻璃失效。转场时导航栏随整面墙一起翻。
     <header className={cn(
-      "fixed top-4 left-4 right-4 z-40 max-w-6xl mx-auto transition-transform duration-300 ease-in-out translate-y-0"
+      "fixed top-4 left-4 right-4 z-40 max-w-6xl mx-auto transition-transform duration-300 ease-in-out",
+      navHidden ? "-translate-y-[150%]" : "translate-y-0"
     )}>
       <div className={cn(
         "bg-black/20 backdrop-blur-lg border border-white/10 rounded-2xl px-6 shadow-lg transition-all duration-300",
@@ -228,7 +263,7 @@ function NavigationContent() {
       )}>
         <div className="flex h-16 items-center justify-between">
           <div className="flex items-center">
-            <Link href="/" className="text-xl font-bold text-lime-400 mr-8">
+            <Link href="/" onClick={(e) => handleFlipLink(e, "/")} className="text-xl font-bold text-lime-400 mr-8">
               论坛
             </Link>
 
@@ -236,6 +271,7 @@ function NavigationContent() {
             <nav className="hidden md:flex space-x-2 items-center">
               <Link
                 href="/"
+                onClick={(e) => handleFlipLink(e, "/")}
                 className={cn(
                   "px-4 py-2 text-sm font-medium rounded-xl transition-all duration-200",
                   pathname === "/"
@@ -253,6 +289,7 @@ function NavigationContent() {
               <Link
                 href="/live"
                 title="弹幕墙"
+                onClick={(e) => handleFlipLink(e, "/live")}
                 className={cn(
                   "flex items-center justify-center h-9 w-9 rounded-xl transition-all duration-200",
                   pathname === "/live"
@@ -281,6 +318,7 @@ function NavigationContent() {
               <Link
                 href="/music"
                 title="音乐"
+                onClick={(e) => handleFlipLink(e, "/music")}
                 className={cn(
                   "flex items-center justify-center h-9 w-9 rounded-xl transition-all duration-200",
                   pathname === "/music"
@@ -307,6 +345,7 @@ function NavigationContent() {
               {user && (
                 <Link
                   href="/profile"
+                  onClick={(e) => handleFlipLink(e, "/profile")}
                   className={cn(
                     "px-4 py-2 text-sm font-medium rounded-xl transition-all duration-200",
                     pathname === "/profile"

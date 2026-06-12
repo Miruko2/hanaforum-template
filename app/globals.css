@@ -3401,3 +3401,63 @@ body.modal-open {
   -webkit-backdrop-filter: none !important;
   background-color: rgba(0, 0, 0, 0.8) !important;
 }
+
+/* ============================================================
+   页面立方体转场（View Transitions API）—— 整面墙翻面
+   --------------------------------------------------------
+   lib/view-transition-nav.ts 在定向导航（主导航环左右切换）时给
+   html 置 data-pt="next|prev" 并调 startViewTransition：浏览器把
+   新旧页面各截成一张 GPU 快照，动画只跑两张纹理的 transform ——
+   移动端开销远低于两页同时实时渲染。
+   · 几何：把两页当成立方体的两个相邻面。旋转轴在屏幕后方半个
+     屏宽处（transform-origin 的 z = -50vw = 立方体中心），新旧页
+     同步各转 90°，公共棱始终咬合 —— 整面墙转过来的效果；
+   · perspective 挂在 image-pair 容器上让两面共享同一相机，
+     不需要 preserve-3d（安卓上 preserve-3d 有扁平化跳位坑）；
+   · 旋转露出的边角由 ::view-transition 兜底壁纸填充，看到的是
+     静止壁纸而不是已就位的新页面，保住转体错觉。
+   ============================================================ */
+
+/* 转场兜底层：与 app/layout.tsx 的 BG_IMAGE 保持同一张图 */
+html[data-pt]::view-transition {
+  background: #0a0a0a url("/mos-background.webp") center center / cover no-repeat;
+}
+
+/* 共享相机：两个面用同一个透视消失点，立方体才不散架 */
+html[data-pt]::view-transition-image-pair(root) {
+  perspective: 1400px;
+}
+
+html[data-pt]::view-transition-old(root),
+html[data-pt]::view-transition-new(root) {
+  /* 旋转轴在屏幕中心后方半个屏宽（立方体中心） */
+  transform-origin: 50% 50% -50vw;
+  animation-duration: 0.5s;
+  animation-timing-function: cubic-bezier(0.45, 0.05, 0.25, 1);
+  animation-fill-mode: both;
+}
+
+/* 去右侧页面（next）：立方体向左转，旧页转到左侧面、新页从右侧面转正 */
+html[data-pt="next"]::view-transition-old(root) { animation-name: pt-cube-out-next; }
+html[data-pt="next"]::view-transition-new(root) { animation-name: pt-cube-in-next; }
+
+/* 回左侧页面（prev）：方向镜像 */
+html[data-pt="prev"]::view-transition-old(root) { animation-name: pt-cube-out-prev; }
+html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-prev; }
+
+@keyframes pt-cube-out-next {
+  from { transform: rotateY(0deg); }
+  to   { transform: rotateY(-90deg); }
+}
+@keyframes pt-cube-in-next {
+  from { transform: rotateY(90deg); }
+  to   { transform: rotateY(0deg); }
+}
+@keyframes pt-cube-out-prev {
+  from { transform: rotateY(0deg); }
+  to   { transform: rotateY(90deg); }
+}
+@keyframes pt-cube-in-prev {
+  from { transform: rotateY(-90deg); }
+  to   { transform: rotateY(0deg); }
+}
