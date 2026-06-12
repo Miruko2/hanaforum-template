@@ -13,9 +13,9 @@ import {
 } from "@/lib/view-transition-nav"
 
 // 二次元游戏风转场（绝区零式 MG 遮罩）：覆盖 → 换页 → 揭开。
-// 三层斜切色块交错扫屏（粉 → 白 → 黑主板），主板上巨型镂空描边文字
-// 交错方向滚动、网点纹理、速度线横飞、标题卡弹入。
-// 样式见 globals.css 的 .ptr-* 段。
+// 三层斜切色块交错扫屏（粉 → 白 → 黑主板），主板上胶片绶带交错滚动、
+// 巨型镂空描边文字交错滚动、网点/斜百叶窗、速度线横飞、
+// 标题逐字砸入 + RGB 残影。样式见 globals.css 的 .ptr-* 段。
 // 全程仅 transform/opacity 动画，安卓 WebView 安全。
 
 // 时序常量（ms）。三层扫屏 = 单层 0.28s + 0.06s 级联延迟，
@@ -27,7 +27,7 @@ import {
 // 定时器只做 animationend 丢失（切后台等）的兜底。
 const COVER_MS = 400 // 理论覆盖时长（黑主板 0.12s delay + 0.28s）
 const COVER_FALLBACK_MS = COVER_MS + 500
-const MIN_HOLD_MS = 360 // 满屏后最短停留（标题卡弹入需要露脸时间）
+const MIN_HOLD_MS = 440 // 满屏后最短停留（标题逐字砸入 + 落位残影闪需要露脸时间）
 const REVEAL_MS = 400 // 三层依次扫出
 const REVEAL_FALLBACK_MS = REVEAL_MS + 500
 // 路由 commit 兜底。低端安卓上重页面 commit 可超 1s，放宽避免
@@ -195,6 +195,13 @@ export default function PageRibbonTransition() {
   const bigRepeat = isAndroidRuntime ? 3 : 12
   const phrase = `${card.word}  ${card.mark}  ${card.jp}  •  ${card.word}  ${card.mark}  ${card.cn}  •  `.repeat(phraseRepeat)
   const bigPhrase = `${card.word}  ${card.mark}  `.repeat(bigRepeat)
+  // 胶片绶带带内内容：图标 + 单词 + 编号 + 日文交替，黑字印在粉带上
+  const bandPhrase = `${card.mark}  ${card.word}  ★  ${card.no}  ◆  ${card.jp}  ✦  `.repeat(isAndroidRuntime ? 5 : 10)
+  // 标题逐字砸入：字母 i 的延迟 = 0.3s + i*0.04s，单字时长 0.16s。
+  // --ptr-land = 末字落位时刻，RGB 残影闪 / 镂空回声盖章都从这一刻起跑。
+  // 这三个数值与 globals.css 的 .ptr-letter 动画参数强同步，改动须两边一起。
+  const letters = Array.from(card.word)
+  const landDelay = 0.3 + (letters.length - 1) * 0.04 + 0.16
 
   return createPortal(
     <div
@@ -229,6 +236,19 @@ export default function PageRibbonTransition() {
           {showDecor && (
             <>
               <div className="ptr-halftone" />
+              {/* 胶片绶带（参考绝区零）：实色带身 + 上下排冲孔 + 帧分隔线 +
+                  带内图标文字，三条斜向交错反向持续滚动（1/3 向左、2 向右），
+                  垫在文字行下，出场随主板扫出。冲孔/分隔线是静态背景渐变，
+                  滚动走合成线程（同文字行模式），安卓保留 */}
+              <div className="ptr-band ptr-band-1">
+                <span className="ptr-band-text">{bandPhrase}</span>
+              </div>
+              <div className="ptr-band ptr-band-2">
+                <span className="ptr-band-text">{bandPhrase}</span>
+              </div>
+              <div className="ptr-band ptr-band-3">
+                <span className="ptr-band-text">{bandPhrase}</span>
+              </div>
               <div className="ptr-rows">
                 {Array.from({ length: ROW_COUNT }, (_, i) => i + 1).map((n) => (
                   <div key={n} className={`ptr-row ptr-row-${n}`}>
@@ -244,11 +264,21 @@ export default function PageRibbonTransition() {
         {showDecor && (
           <>
             <div className="ptr-mark">{card.mark}</div>
-            <div className="ptr-title">
+            <div className="ptr-title" style={{ "--ptr-land": `${landDelay}s` } as CSSProperties}>
               <div className="ptr-title-word">
+                {/* DOM 顺序即叠放：回声/残影垫底，实心主字最后绘制盖在中间 */}
                 <span className="ptr-title-echo">{card.word}</span>
-                <span className="ptr-title-main">{card.word}</span>
+                <span className="ptr-title-ghost ptr-title-ghost-c">{card.word}</span>
+                <span className="ptr-title-ghost ptr-title-ghost-m">{card.word}</span>
+                <span className="ptr-title-main">
+                  {letters.map((ch, i) => (
+                    <span key={i} className="ptr-letter" style={{ "--ptr-i": i } as CSSProperties}>
+                      {ch}
+                    </span>
+                  ))}
+                </span>
               </div>
+              <div className="ptr-title-hazard" />
               <div className="ptr-title-chip">
                 <span>{card.jp}</span>
                 <i />
