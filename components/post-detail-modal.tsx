@@ -174,20 +174,10 @@ export default function PostDetailModal({
     if (isOpen) prefetchComments(post.id).catch(() => {})
   }, [isOpen, post.id])
 
-  // 手机端：入场动画期间先不挂评论区（CommentList 挂载即拉评论 + 建实时订阅，
-  // 是开场最重的主线程活，低端安卓上会和入场动画抢帧）。350ms 后再挂载 ——
-  // 此刻入场动画（0.32s）刚收尾，评论区自带 0.4s 淡入接上，肉眼几乎无感。
-  // 桌面由 hero 飞入的 flyDone 门控（见下方渲染条件），不走这个计时器。
-  const [mobileCommentsReady, setMobileCommentsReady] = useState(false)
-  React.useEffect(() => {
-    if (!isOpen) {
-      setMobileCommentsReady(false)
-      return
-    }
-    if (!isMobile) return
-    const t = setTimeout(() => setMobileCommentsReady(true), 350)
-    return () => clearTimeout(t)
-  }, [isOpen, isMobile])
+  // 手机端评论区改为打开即挂载（不再延迟 350ms）：之前延迟挂载会让卡片先以
+  // 「无评论区」的矮高度出现，350ms 后评论区带缓存内容挂上、高度猛地撑高，
+  // 视觉上就是「帖子先矮后突兀拔高」。打开即挂载后高度一开始就完整，评论区
+  // 自带的 0.4s 淡入是 opacity/位移动画、不影响布局高度，所以不会再跳高。
 
   // 预热灯箱原图：详情页一打开，就在浏览器空闲时后台预下载原图（post.image_url，
   // 与灯箱用的是同一条直链）。这样首次点击放大可直接命中 HTTP 缓存、无需等待加载
@@ -342,10 +332,10 @@ export default function PostDetailModal({
         </div>
       </motion.div>
 
-      {/* Comments 延迟挂载：CommentList 会拉取评论 + 建实时订阅，是开场最重的主线程活儿。
-          桌面：hero 飞入到位（flyDone）再挂载，不和飞入克隆抢主线程；
-          手机：入场动画收尾后（mobileCommentsReady，350ms）再挂载，安卓不再开场掉帧。 */}
-      {(isMobile ? mobileCommentsReady : !heroActive || flyDone) && (
+      {/* Comments 挂载时机：
+          手机：打开即挂载，卡片高度一开始就完整，避免「先矮后拔高」；
+          桌面：hero 飞入到位（flyDone）再挂载，不和飞入克隆抢主线程。 */}
+      {(isMobile || !heroActive || flyDone) && (
         <motion.div
           className="mt-6"
           initial={{ opacity: 0, y: 10 }}
