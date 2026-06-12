@@ -23,6 +23,40 @@ interface OptimisticComment extends Comment {
   tempId?: string
 }
 
+// 模块级评论缓存：按 postId 缓存上次拉取/订阅到的评论树。
+// 作用：再次打开同一帖子时立即显示上次的评论（stale-while-revalidate），
+// 后台 fetchComments 拉最新覆盖，消除「打开帖子后要等一会评论才出现」的空窗。
+// 进程内存级别（一关 app 就清），实时订阅会持续把它刷新成最新。
+const commentCache = new Map<string, Comment[]>()
+// 缓存写入时间：刚被 prefetch 写入（仍新鲜）就不再静默重拉一次，省一半评论请求
+const commentCacheAt = new Map<string, number>()
+const CACHE_FRESH_MS = 10_000
+// 进行中的评论请求按 postId 去重：打开帖子瞬间的 prefetch 与组件挂载后的首次拉取
+// 共享同一个网络请求，不会重复打 Supabase
+const inflightComments = new Map<string, Promise<Comment[]>>()
+
+function setCommentCache(postId: string, data: Comment[]) {
+  commentCache.set(postId, data)
+  commentCacheAt.set(postId, Date.now())
+}
+
+// 在「点开帖子」的瞬间调用（PostCard 激活时）：评论请求与开帖动画并行进行，
+// 等 CommentList 真正挂载（移动端延迟 350ms 让路动画 / 桌面等 hero 飞入完成）时
+// 数据多半已在缓存 → 评论区直接带内容出现，不闪「加载评论中」。
+// 失败无妨：挂载后 fetchComments 自带重试地正常拉取。
+export function prefetchComments(postId: string): Promise<Comment[]> {
+  const existing = inflightComments.get(postId)
+  if (existing) return existing
+  const p = getComments(postId)
+    .then((data) => {
+      setCommentCache(postId, data)
+      return data
+    })
+    .finally(() => inflightComments.delete(postId))
+  inflightComments.set(postId, p)
+  return p
+}
+
 // 从评论树中递归移除指定 id 的评论（连同其子树）。
 // 后端 delete_comment 会级联删除所有后代回复，这里同步把整棵子树摘掉。
 function removeCommentById(list: Comment[], commentId: string): Comment[] {
@@ -40,9 +74,9 @@ export default function CommentList({
   onCommentAdded,
   isAdmin = false
 }: CommentListProps) {
-  const [comments, setComments] = useState<Comment[]>([])
+  const [comments, setComments] = useState<Comment[]>(() => commentCache.get(postId) ?? [])
   const [optimisticComments, setOptimisticComments] = useState<OptimisticComment[]>([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(() => !commentCache.has(postId))
   const [error, setError] = useState<string | null>(null)
   const [isConnected, setIsConnected] = useState(true)
   const { user } = useSimpleAuth()
@@ -65,9 +99,10 @@ export default function CommentList({
         setTimeout(() => reject(new Error('获取评论超时')), 8000)
       )
       
-      const commentsPromise = getComments(postId)
+      // 走 prefetchComments：若打开帖子时的预取仍在途，复用同一个请求
+      const commentsPromise = prefetchComments(postId)
       const commentsData = await Promise.race([commentsPromise, timeout]) as Comment[]
-      
+
       // 只处理最后一次请求的结果
       if (fetchId === fetchIdRef.current) {
         setComments(commentsData)
@@ -112,6 +147,7 @@ export default function CommentList({
       setComments(prevComments => {
         // 如果数组长度不同，说明有变化
         if (prevComments.length !== newComments.length) {
+          setCommentCache(postId, newComments)
           return newComments
         }
         
@@ -121,6 +157,7 @@ export default function CommentList({
           !prevCommentsMap.has(c.id) || prevCommentsMap.get(c.id) !== c.content
         )
         
+        if (hasChanges) setCommentCache(postId, newComments)
         return hasChanges ? newComments : prevComments
       })
       
@@ -164,7 +201,21 @@ export default function CommentList({
   // 初始化和订阅管理
   useEffect(() => {
     if (postId) {
-      fetchComments()
+      // stale-while-revalidate：有缓存就先秒显上次的评论、后台静默刷新（不闪 loading）；
+      // 没缓存才走带 loading 的首次拉取。处理 modal 内切换帖子（postId 变化）的情形。
+      const cached = commentCache.get(postId)
+      if (cached) {
+        setComments(cached)
+        setLoading(false)
+        // 缓存是刚刚 prefetch 写入的（新鲜期内）就不再重复拉一次；
+        // 之后的变化由实时订阅接管
+        if (Date.now() - (commentCacheAt.get(postId) ?? 0) > CACHE_FRESH_MS) {
+          fetchComments(false)
+        }
+      } else {
+        setComments([])
+        fetchComments(true)
+      }
       const unsubscribe = setupSubscription()
       
       return () => {

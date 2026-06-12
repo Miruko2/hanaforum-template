@@ -11,7 +11,7 @@ import GlassMorph from "./glass-morph"
 import PostCardImage from "./post-card-image"
 import ImageLightbox from "./image-lightbox"
 import TextualHero from "./textual-hero"
-import CommentList from "./comment/comment-list"
+import CommentList, { prefetchComments } from "./comment/comment-list"
 import LikeButton from "./ui/like-button"
 import { CATEGORIES } from "@/lib/categories"
 
@@ -150,6 +150,14 @@ export default function PostDetailModal({
       setLightboxOpen(false)
     }
   }, [isOpen])
+
+  // 打开瞬间预取评论：网络请求与入场动画并行，评论区挂载（移动端 350ms 后 /
+  // 桌面 hero 飞入后）时数据多半已在缓存 → 直接带内容出现，不闪「加载评论中」。
+  // PostCard 入口在 chunk 加载前就预取过了（in-flight 去重、零重复请求），
+  // 这里兜住其余入口：个人主页时间线、影院模式、通知铃铛、通知页。
+  React.useEffect(() => {
+    if (isOpen) prefetchComments(post.id).catch(() => {})
+  }, [isOpen, post.id])
 
   // 手机端：入场动画期间先不挂评论区（CommentList 挂载即拉评论 + 建实时订阅，
   // 是开场最重的主线程活，低端安卓上会和入场动画抢帧）。350ms 后再挂载 ——

@@ -15,7 +15,7 @@ import PostCardContent from "@/components/post-card-content"
 import PostCardActions from "@/components/post-card-actions"
 import { cn } from "@/lib/utils"
 import { useIsMobile } from "@/hooks/use-mobile"
-import CommentList from "./comment/comment-list"
+import CommentList, { prefetchComments } from "./comment/comment-list"
 import LikeButton from "./ui/like-button"
 import dynamic from "next/dynamic"
 const PostDetailModal = dynamic(() => import("./post-detail-modal"), { ssr: false })
@@ -127,8 +127,13 @@ const PostCard = memo(function PostCard({
   // 关闭动画 / 再次打开行为与之前完全一致。
   const [modalEverOpened, setModalEverOpened] = useState(false)
   useEffect(() => {
-    if (isActive) setModalEverOpened(true)
-  }, [isActive])
+    if (isActive) {
+      setModalEverOpened(true)
+      // 点开瞬间预取评论：网络请求与弹窗 chunk 加载、开帖动画并行，
+      // 评论区挂载时数据多半已就位 → 不再闪「加载评论中」。失败静默，挂载后正常拉取兜底。
+      prefetchComments(post.id).catch(() => {})
+    }
+  }, [isActive, post.id])
 
   // hero 关闭返回检测：isActive 由「开 → 关」、且本次走过桌面 hero（量到源图）时，
   // 触发源卡内容区登场动画。时机正好落在回飞图落地、源卡整卡显形的那一刻。
