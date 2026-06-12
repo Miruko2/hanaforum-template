@@ -30,7 +30,11 @@ interface CreatePostModalProps {
 
 // 客户端压缩函数已抽到 @/lib/image-compress（帖子图与头像共用），见顶部 import。
 
-export default function CreatePostModal({
+/**
+ * 表单本体（无外壳）：标题/分类/内容/图片 + 提交逻辑。
+ * 首页发帖走果冻形变面板（floating-action-button），编辑帖子走下方的 CreatePostModal 外壳。
+ */
+export function CreatePostForm({
   onClose,
   onPostCreated,
   editPost,
@@ -45,63 +49,11 @@ export default function CreatePostModal({
   const [imageFile, setImageFile] = useState<File | null>(null)
   // 记录用户是否主动移除了原图，以便提交时把 image_url 置空
   const [imageCleared, setImageCleared] = useState(false)
-  const [isMounted, setIsMounted] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const modalRef = useRef<HTMLDivElement>(null)
-  const previousOverflow = useRef<string>("")
   const { user } = useSimpleAuth()
   const { toast } = useToast()
   const [imageRatio, setImageRatio] = useState<number>(editPost?.image_ratio || 0.75)
-  const [isMobile, setIsMobile] = useState(false)
-
-  // 客户端挂载检查
-  useEffect(() => {
-    setIsMounted(true)
-    // 保存当前overflow值并锁定背景滚动
-    previousOverflow.current = document.body.style.overflow
-    document.body.style.overflow = "hidden"
-    document.body.style.touchAction = "none" // 防止移动端滚动
-
-    // Check if the device is mobile
-    const mobileCheck = () => {
-      return window.innerWidth <= 768
-    }
-
-    setIsMobile(mobileCheck())
-
-    // 使用防抖处理窗口大小变化事件
-    let resizeTimeout: NodeJS.Timeout
-    const handleResize = () => {
-      clearTimeout(resizeTimeout)
-      resizeTimeout = setTimeout(() => {
-        setIsMobile(window.innerWidth < 768)
-      }, 100)
-    }
-
-    window.addEventListener("resize", handleResize)
-
-    return () => {
-      setIsMounted(false)
-      // 恢复背景滚动
-      document.body.style.overflow = previousOverflow.current
-      document.body.style.touchAction = ""
-      window.removeEventListener("resize", handleResize)
-      clearTimeout(resizeTimeout)
-    }
-  }, [])
-
-  // 监听ESC键关闭模态框
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        onClose()
-      }
-    }
-
-    window.addEventListener("keydown", handleKeyDown)
-    return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [onClose])
 
   // 处理图片上传
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -333,38 +285,16 @@ export default function CreatePostModal({
     fileInputRef.current?.click()
   }
 
-  if (!isMounted) return null
-
-  // Improve mobile experience for the modal
-  return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-md" />
-
-      <div
-        ref={modalRef}
-        className="relative max-w-2xl w-full max-h-[90vh] overflow-y-auto m-4 rounded-2xl animate-in fade-in zoom-in duration-300"
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          maxHeight: isMobile ? "85vh" : "90vh",
-          // width 交给 tailwind 的 w-full + max-w-2xl 控制；
-          // 只在移动端用内联 width 避开 16px 边距
-          ...(isMobile ? { width: "calc(100% - 32px)" } : {}),
-          background: "rgba(255, 255, 255, 0.07)",
-          backdropFilter: "blur(24px) saturate(150%)",
-          WebkitBackdropFilter: "blur(24px) saturate(150%)",
-          border: "1px solid rgba(255, 255, 255, 0.15)",
-          boxShadow: "0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1)",
-        }}
+  return (
+    <>
+      {/* 关闭按钮 */}
+      <button
+        className="absolute top-3 right-3 z-10 rounded-full bg-black/50 p-2 text-white hover:bg-black/70 hover:text-white/80 transition-colors duration-300"
+        onClick={onClose}
+        disabled={isSubmitting}
       >
-        {/* 关闭按钮 */}
-        <button
-          className="absolute top-3 right-3 z-10 rounded-full bg-black/50 p-1.5 text-white hover:bg-black/70 hover:text-white/80 transition-colors duration-300"
-          onClick={onClose}
-          disabled={isSubmitting}
-          style={{ padding: isMobile ? "10px" : "6px" }} // Larger touch target on mobile
-        >
-          <X className="h-5 w-5" />
-        </button>
+        <X className="h-5 w-5" />
+      </button>
 
         <div className="p-5">
           <h3 className="text-xl font-semibold text-white mb-5">{isEditMode ? "编辑帖子" : "创建新帖子"}</h3>
@@ -497,6 +427,83 @@ export default function CreatePostModal({
             </div>
           </div>
         </div>
+    </>
+  )
+}
+
+/**
+ * 旧外壳：portal + 遮罩 + 玻璃面板 + 滚动锁 + ESC。
+ * 帖子编辑模式（post-card）仍走这里；首页新建帖子已改为果冻形变面板。
+ */
+export default function CreatePostModal(props: CreatePostModalProps) {
+  const { onClose } = props
+  const [isMounted, setIsMounted] = useState(false)
+  const [isMobile, setIsMobile] = useState(false)
+  const previousOverflow = useRef<string>("")
+
+  useEffect(() => {
+    setIsMounted(true)
+    // 保存当前overflow值并锁定背景滚动
+    previousOverflow.current = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    document.body.style.touchAction = "none" // 防止移动端滚动
+
+    setIsMobile(window.innerWidth <= 768)
+
+    // 使用防抖处理窗口大小变化事件
+    let resizeTimeout: NodeJS.Timeout
+    const handleResize = () => {
+      clearTimeout(resizeTimeout)
+      resizeTimeout = setTimeout(() => {
+        setIsMobile(window.innerWidth < 768)
+      }, 100)
+    }
+
+    window.addEventListener("resize", handleResize)
+
+    return () => {
+      // 恢复背景滚动
+      document.body.style.overflow = previousOverflow.current
+      document.body.style.touchAction = ""
+      window.removeEventListener("resize", handleResize)
+      clearTimeout(resizeTimeout)
+    }
+  }, [])
+
+  // 监听ESC键关闭模态框
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose()
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [onClose])
+
+  if (!isMounted) return null
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-md" />
+
+      <div
+        className="relative max-w-2xl w-full max-h-[90vh] overflow-y-auto m-4 rounded-2xl animate-in fade-in zoom-in duration-300"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          maxHeight: isMobile ? "85vh" : "90vh",
+          // width 交给 tailwind 的 w-full + max-w-2xl 控制；
+          // 只在移动端用内联 width 避开 16px 边距
+          ...(isMobile ? { width: "calc(100% - 32px)" } : {}),
+          background: "rgba(255, 255, 255, 0.07)",
+          backdropFilter: "blur(24px) saturate(150%)",
+          WebkitBackdropFilter: "blur(24px) saturate(150%)",
+          border: "1px solid rgba(255, 255, 255, 0.15)",
+          boxShadow: "0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1)",
+        }}
+      >
+        <CreatePostForm {...props} />
       </div>
     </div>,
     document.body,
