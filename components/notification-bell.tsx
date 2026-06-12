@@ -14,6 +14,7 @@ import NotificationCard from "@/components/notification-card"
 import PostDetailModal from "@/components/post-detail-modal"
 import AnnouncementModal from "@/components/announcement-modal"
 import { getPost, likePost, unlikePost, checkUserLiked, getAnnouncement } from "@/lib/supabase"
+import { useRouter } from "next/navigation"
 import type { Notification, Post } from "@/lib/types"
 
 interface NotificationBellProps {
@@ -26,6 +27,7 @@ export default function NotificationBell({ mobileView = false }: NotificationBel
   const { user, isAdmin } = useSimpleAuth()
   const { toast } = useToast()
   const isMobile = useIsMobile()
+  const router = useRouter()
 
   const [isOpen, setIsOpen] = useState(false)
   const [mounted, setMounted] = useState(false)
@@ -91,7 +93,15 @@ export default function NotificationBell({ mobileView = false }: NotificationBel
           return
         }
 
-        if (!notification.post_id) return
+        if (!notification.post_id) {
+          // follow 类型：跳到关注者(actor)的社交主页（先关铃铛弹窗）
+          if (notification.type === "follow" && notification.actor_id) {
+            setIsOpen(false)
+            router.push(`/user?id=${notification.actor_id}`)
+            return
+          }
+          return
+        }
 
         setLoadingPostId(notification.id)
         const post = await getPost(notification.post_id)
@@ -130,7 +140,7 @@ export default function NotificationBell({ mobileView = false }: NotificationBel
         setLoadingPostId(null)
       }
     },
-    [markAsRead, user, toast],
+    [markAsRead, user, toast, router],
   )
 
   const handleModalLike = useCallback(

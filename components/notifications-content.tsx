@@ -6,6 +6,7 @@ import { useNotifications } from "@/contexts/notification-context"
 import { Button } from "@/components/ui/button"
 import { Loader2, MailX } from "lucide-react"
 import { navigateTo } from "@/lib/app-navigation"
+import { useRouter } from "next/navigation"
 import type { Notification, Post } from "@/lib/types"
 import Container from "@/components/container"
 import PostDetailModal from "@/components/post-detail-modal"
@@ -25,6 +26,7 @@ export default function NotificationsContent() {
   const { notifications, unreadCount, isLoading, markAsRead, markAllAsRead } = useNotifications()
   const { toast } = useToast()
   const isMobile = useIsMobile()
+  const router = useRouter()
   const [error, setError] = useState<string | null>(null)
 
   // 帖子详情模态框状态
@@ -78,7 +80,7 @@ export default function NotificationsContent() {
         if (!notification.post_id) {
           // follow 类型：跳到关注者(actor)的社交主页
           if (notification.type === "follow" && notification.actor_id) {
-            navigateTo(`/user?id=${notification.actor_id}`)
+            router.push(`/user?id=${notification.actor_id}`)
             return
           }
           // 没帖子可跳，只做标记已读
@@ -126,7 +128,7 @@ export default function NotificationsContent() {
         setLoadingPostId(null)
       }
     },
-    [markAsRead, user, toast],
+    [markAsRead, user, toast, router],
   )
 
   // 模态框里的点赞交互（沿用首页 PostCard 的乐观更新套路）
