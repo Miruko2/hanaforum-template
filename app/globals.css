@@ -3485,7 +3485,53 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
   /* 布局/绘制完全自包含：遮罩后面新页面挂载引发的失效不会波及覆盖层，
      覆盖层的持续动画也不回头打扰页面（安卓低端机收益明显） */
   contain: strict;
-  --ptr-pink: #ff2d78;
+  /* 主题色变量组（默认 = 粉）。每次转场由组件随机挂 .ptr-theme-* 换色，
+     颜色在遮罩挂载光栅化时一次定死 —— 换色零额外渲染开销。
+     -rgb 三元组供 rgba(var(),a) 调透明度（兼容旧 WebView，不依赖 color-mix）：
+     accent=主色 / soft=浅色 / paper=白层纸色 / flash-c=满屏闪色 /
+     split=RGB 残影冷色 / panel-a,b,c=黑主板径向渐变三档 */
+  --ptr-accent: #ff2d78;
+  --ptr-accent-rgb: 255, 45, 120;
+  --ptr-soft-rgb: 255, 109, 168;
+  --ptr-paper: #fff3f9;
+  --ptr-flash-c: #ffe1ef;
+  --ptr-split: #29e0ff;
+  --ptr-panel-a: #221019;
+  --ptr-panel-b: #120712;
+  --ptr-panel-c: #09040a;
+}
+.ptr-theme-purple {
+  --ptr-accent: #a85cff;
+  --ptr-accent-rgb: 168, 92, 255;
+  --ptr-soft-rgb: 199, 148, 255;
+  --ptr-paper: #f7f2ff;
+  --ptr-flash-c: #ecdfff;
+  --ptr-split: #2dffc8;
+  --ptr-panel-a: #1c1026;
+  --ptr-panel-b: #110a1c;
+  --ptr-panel-c: #08040f;
+}
+.ptr-theme-green {
+  --ptr-accent: #2ee36b;
+  --ptr-accent-rgb: 46, 227, 107;
+  --ptr-soft-rgb: 122, 240, 166;
+  --ptr-paper: #f0fdf4;
+  --ptr-flash-c: #dcffe8;
+  --ptr-split: #29b6ff;
+  --ptr-panel-a: #0f2017;
+  --ptr-panel-b: #08150e;
+  --ptr-panel-c: #030a06;
+}
+.ptr-theme-yellow {
+  --ptr-accent: #ffd428;
+  --ptr-accent-rgb: 255, 212, 40;
+  --ptr-soft-rgb: 255, 231, 122;
+  --ptr-paper: #fffbeb;
+  --ptr-flash-c: #fff3c4;
+  --ptr-split: #ff4fd8;
+  --ptr-panel-a: #221d0e;
+  --ptr-panel-b: #161106;
+  --ptr-panel-c: #0a0703;
 }
 
 /* 合成稳定性（治闪动/鬼影，非减配）：对所有「跑 transform 动画」的层显式
@@ -3549,15 +3595,15 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
   transform: skewX(-10deg);
 }
 .ptr-wipe-a .ptr-wipe-fill {
-  background: linear-gradient(105deg, #ff2d78, #ff6aa9 60%, #ff2d78);
+  background: linear-gradient(105deg, var(--ptr-accent), rgb(var(--ptr-soft-rgb)) 60%, var(--ptr-accent));
 }
 .ptr-wipe-b .ptr-wipe-fill {
-  background: #fff3f9;
+  background: var(--ptr-paper);
 }
 
-/* 黑主板：近黑底，巨型文字/纹理都被它裁切 */
+/* 黑主板：近黑底（随主题微调色相），巨型文字/纹理都被它裁切 */
 .ptr-panel {
-  background: radial-gradient(130% 100% at 50% 40%, #221019 0%, #120712 55%, #09040a 100%);
+  background: radial-gradient(130% 100% at 50% 40%, var(--ptr-panel-a) 0%, var(--ptr-panel-b) 55%, var(--ptr-panel-c) 100%);
   overflow: hidden;
 }
 
@@ -3566,7 +3612,7 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
   position: absolute;
   inset: 0;
   background-image:
-    radial-gradient(circle, rgba(255, 109, 168, 0.16) 1.2px, transparent 1.3px),
+    radial-gradient(circle, rgba(var(--ptr-soft-rgb), 0.16) 1.2px, transparent 1.3px),
     repeating-linear-gradient(
       -55deg,
       rgba(255, 255, 255, 0.04) 0,
@@ -3602,7 +3648,8 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
       transparent 5px,
       transparent 150px
     ),
-    linear-gradient(180deg, rgba(255, 77, 141, 0.92), rgba(255, 45, 120, 0.92));
+    linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0) 55%),
+    linear-gradient(180deg, rgba(var(--ptr-accent-rgb), 0.92), rgba(var(--ptr-accent-rgb), 0.92));
 }
 /* 上下两排冲孔 */
 .ptr-band::before,
@@ -3739,15 +3786,15 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
   top: 19%;
   height: 7%;
   font-size: clamp(14px, 2.4vw, 24px);
-  color: rgba(244, 114, 182, 0.6);
+  color: rgba(var(--ptr-soft-rgb), 0.6);
   animation: ptr-row-slide-rev 5s linear infinite;
 }
-/* 主镂空行：粉描边大字，落在屏幕中带、从标题卡背后穿过 */
+/* 主镂空行：主题色描边大字，落在屏幕中带、从标题卡背后穿过 */
 .ptr-row-3 {
   top: 27%;
   height: 24%;
   font-size: clamp(80px, 17vw, 190px);
-  -webkit-text-stroke: 2.5px rgba(255, 45, 120, 0.75);
+  -webkit-text-stroke: 2.5px rgba(var(--ptr-accent-rgb), 0.75);
   color: transparent;
   animation: ptr-row-slide-rev 6.5s linear infinite;
 }
@@ -3770,7 +3817,7 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
   top: 82%;
   height: 7%;
   font-size: clamp(14px, 2.4vw, 24px);
-  color: rgba(236, 72, 153, 0.55);
+  color: rgba(var(--ptr-soft-rgb), 0.55);
   animation: ptr-row-slide-rev 6s linear infinite;
 }
 
@@ -3782,7 +3829,7 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
   font-size: clamp(260px, 68vh, 640px);
   line-height: 1;
   font-weight: 900;
-  -webkit-text-stroke: 2px rgba(255, 45, 120, 0.4);
+  -webkit-text-stroke: 2px rgba(var(--ptr-accent-rgb), 0.4);
   color: transparent;
   user-select: none;
   will-change: transform;
@@ -3854,11 +3901,11 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
   animation: ptr-ghost-flick 0.22s linear var(--ptr-land) both;
 }
 .ptr-title-ghost-c {
-  color: #29e0ff;
+  color: var(--ptr-split);
   transform: translate(-0.045em, 0.03em);
 }
 .ptr-title-ghost-m {
-  color: var(--ptr-pink);
+  color: var(--ptr-accent);
   transform: translate(0.045em, -0.02em);
 }
 @keyframes ptr-ghost-flick {
@@ -3873,8 +3920,8 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
   position: relative;
   color: #fff;
   text-shadow:
-    0.045em 0.045em 0 var(--ptr-pink),
-    0.09em 0.09em 0 rgba(255, 45, 120, 0.35);
+    0.045em 0.045em 0 var(--ptr-accent),
+    0.09em 0.09em 0 rgba(var(--ptr-accent-rgb), 0.35);
 }
 
 /* 斜纹 hazard 装饰条：标题与副标签之间，静态条纹背景零逐帧开销，
@@ -3884,10 +3931,10 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
   height: clamp(7px, 1.4vw, 11px);
   background: repeating-linear-gradient(
     -55deg,
-    var(--ptr-pink) 0,
-    var(--ptr-pink) 10px,
-    rgba(255, 45, 120, 0.16) 10px,
-    rgba(255, 45, 120, 0.16) 20px
+    var(--ptr-accent) 0,
+    var(--ptr-accent) 10px,
+    rgba(var(--ptr-accent-rgb), 0.16) 10px,
+    rgba(var(--ptr-accent-rgb), 0.16) 20px
   );
   transform-origin: left center;
   animation: ptr-hazard-in 0.26s cubic-bezier(0.2, 1, 0.3, 1) 0.52s both;
@@ -3903,7 +3950,7 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
   align-items: center;
   gap: 0.8em;
   padding: 0.42em 1.3em;
-  background: var(--ptr-pink);
+  background: var(--ptr-accent);
   color: #14060e;
   font-size: clamp(12px, 3vw, 18px);
   font-weight: 800;
@@ -3932,7 +3979,7 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
   font-style: italic;
   line-height: 1;
   color: #fff;
-  text-shadow: 0.08em 0.08em 0 rgba(255, 45, 120, 0.8);
+  text-shadow: 0.08em 0.08em 0 rgba(var(--ptr-accent-rgb), 0.8);
   animation: ptr-fade-in 0.25s ease-out 0.4s both;
 }
 .ptr-corner-no > em {
@@ -3948,7 +3995,7 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
   font-size: clamp(11px, 2.8vw, 15px);
   font-weight: 800;
   letter-spacing: 0.32em;
-  color: rgba(255, 109, 168, 0.9);
+  color: rgba(var(--ptr-soft-rgb), 0.9);
   animation: ptr-blink 0.8s linear 0.4s infinite both;
 }
 @keyframes ptr-fade-in {
@@ -3967,8 +4014,8 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
   bottom: -12%;
   width: clamp(6px, 1.2vw, 14px);
   transform: skewX(-10deg);
-  background: linear-gradient(180deg, #ff2d78, #ff8fc0 50%, #ff2d78);
-  box-shadow: 0 0 32px rgba(255, 45, 120, 0.7);
+  background: linear-gradient(180deg, var(--ptr-accent), rgb(var(--ptr-soft-rgb)) 50%, var(--ptr-accent));
+  box-shadow: 0 0 32px rgba(var(--ptr-accent-rgb), 0.7);
 }
 .ptr-edge-left { left: -25%; }
 .ptr-edge-right { right: -25%; }
@@ -3994,11 +4041,11 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
   to   { transform: translate3d(calc(-180vw * var(--ptr-x)), 0, 0); }
 }
 .ptr-streak-1 { top: 9%;  width: 34vw; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.95), transparent); animation-duration: 0.55s; }
-.ptr-streak-2 { top: 22%; width: 20vw; background: linear-gradient(90deg, transparent, rgba(255, 109, 168, 0.9), transparent); animation-duration: 0.7s; animation-delay: 0.18s; }
+.ptr-streak-2 { top: 22%; width: 20vw; background: linear-gradient(90deg, transparent, rgba(var(--ptr-soft-rgb), 0.9), transparent); animation-duration: 0.7s; animation-delay: 0.18s; }
 .ptr-streak-3 { top: 41%; width: 28vw; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.8), transparent); animation-duration: 0.62s; animation-delay: 0.34s; }
-.ptr-streak-4 { top: 58%; width: 16vw; height: 2px; background: linear-gradient(90deg, transparent, rgba(255, 45, 120, 0.95), transparent); animation-duration: 0.5s; animation-delay: 0.1s; }
+.ptr-streak-4 { top: 58%; width: 16vw; height: 2px; background: linear-gradient(90deg, transparent, rgba(var(--ptr-accent-rgb), 0.95), transparent); animation-duration: 0.5s; animation-delay: 0.1s; }
 .ptr-streak-5 { top: 74%; width: 30vw; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.85), transparent); animation-duration: 0.74s; animation-delay: 0.26s; }
-.ptr-streak-6 { top: 88%; width: 22vw; height: 2px; background: linear-gradient(90deg, transparent, rgba(255, 109, 168, 0.85), transparent); animation-duration: 0.58s; animation-delay: 0.44s; }
+.ptr-streak-6 { top: 88%; width: 22vw; height: 2px; background: linear-gradient(90deg, transparent, rgba(var(--ptr-soft-rgb), 0.85), transparent); animation-duration: 0.58s; animation-delay: 0.44s; }
 
 /* ---------- 满屏冲击闪 ---------- */
 /* 黑主板落位瞬间一次低透明度闪光（挂载后只跑一次，phase 切换不重启） */
@@ -4006,7 +4053,7 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: #ffe1ef;
+  background: var(--ptr-flash-c);
   opacity: 0;
   animation: ptr-flash 0.26s ease-out 0.38s both;
 }
@@ -4034,5 +4081,5 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
 }
 /* 霓虹边：模糊半径越大光栅化越贵，安卓收窄（仍有发光感，静帧基本无差别） */
 .ptr-root.ptr-android .ptr-edge {
-  box-shadow: 0 0 12px rgba(255, 45, 120, 0.7);
+  box-shadow: 0 0 12px rgba(var(--ptr-accent-rgb), 0.7);
 }

@@ -58,6 +58,11 @@ const CARDS: Record<string, RibbonCard> = {
 
 const FALLBACK_CARD: RibbonCard = { word: "HANA", jp: "ホタル", cn: "萤火虫", no: "??", mark: "✦" }
 
+// 转场主题色：每次转场随机挑一色（排除上一次用过的，连续转场必换色）。
+// 颜色本体全在 globals.css 的 .ptr-theme-* 变量块，这里只挑名字，零额外渲染开销。
+const THEMES = ["pink", "purple", "green", "yellow"] as const
+type ThemeName = (typeof THEMES)[number]
+
 // 主板上的巨型文字行数与速度线条数（布局/配色见 globals.css 的 .ptr-row-N / .ptr-streak-N）
 const ROW_COUNT = 6
 const STREAK_COUNT = 6
@@ -66,6 +71,7 @@ interface ActiveState {
   dir: FlipDirection
   phase: "cover" | "reveal"
   card: RibbonCard
+  theme: ThemeName
 }
 
 export default function PageRibbonTransition() {
@@ -84,6 +90,7 @@ export default function PageRibbonTransition() {
   // 转场代际：兜底定时器可能比「动画正常结束 + 冷却」更晚触发，
   // 过期定时器若打进下一次转场会把新覆盖层中途卸载，按代际作废
   const genRef = useRef(0)
+  const lastThemeRef = useRef<ThemeName | null>(null)
   const hrefRef = useRef("")
   const timersRef = useRef<number[]>([])
   const routerRef = useRef(router)
@@ -148,7 +155,10 @@ export default function PageRibbonTransition() {
       // 安卓先把装饰压住，和 setActive 同批提交 → 遮罩首帧只挂 3 层扫屏（轻），
       // 装饰交给下方 effect 推迟一帧再上，避开起手帧的布局/光栅化高峰
       if (isAndroidRuntime) setDecorReady(false)
-      setActive({ dir, phase: "cover", card: CARDS[href] ?? FALLBACK_CARD })
+      const pool = THEMES.filter((t) => t !== lastThemeRef.current)
+      const theme = pool[Math.floor(Math.random() * pool.length)]
+      lastThemeRef.current = theme
+      setActive({ dir, phase: "cover", card: CARDS[href] ?? FALLBACK_CARD, theme })
       timersRef.current.push(
         window.setTimeout(() => {
           if (gen === genRef.current) proceedCover()
@@ -184,7 +194,7 @@ export default function PageRibbonTransition() {
 
   if (!active) return null
 
-  const { card, dir, phase } = active
+  const { card, dir, phase, theme } = active
   // 装饰是否可挂载：非安卓恒真（同步渲染）；安卓等首帧扫屏起手后两帧才放，
   // 把巨型文字行的布局/光栅化挪离起手帧，换取扫屏滑动的丝滑起手。
   const showDecor = !isAndroidRuntime || decorReady
@@ -205,7 +215,7 @@ export default function PageRibbonTransition() {
 
   return createPortal(
     <div
-      className={`ptr-root${isAndroidRuntime ? " ptr-android" : ""}`}
+      className={`ptr-root ptr-theme-${theme}${isAndroidRuntime ? " ptr-android" : ""}`}
       data-phase={phase}
       // --ptr-x：1 = 去环上下一页（从右扫入、向左扫出），-1 反向
       style={{ "--ptr-x": dir === "next" ? 1 : -1 } as CSSProperties}
