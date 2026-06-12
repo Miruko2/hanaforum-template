@@ -1,8 +1,12 @@
 "use client"
 
-// 页面级 3D 翻页转场（View Transitions API）。
-// 浏览器把新旧页面截成 GPU 快照做转场动画（样式见 globals.css 的 html[data-pt] 段），
-// 动画只跑两张纹理的 transform，移动端开销远低于两页同时实时渲染。
+// 页面切换转场调度。
+// 默认走「丝带标题卡」遮罩转场（components/page-ribbon-transition.tsx）：
+// 覆盖 → 换页 → 揭开。换页发生在全屏遮蔽的瞬间，路由提交的延迟被遮罩吸收，
+// 用户永远看不到加载中间态；且不依赖 View Transitions API，
+// 老 WebView / iOS Safari 17- 也有完整动画。
+// 立方体转场（View Transitions 快照翻转，样式见 globals.css 的 html[data-pt] 段）
+// 保留为备选，把 TRANSITION_MODE 改成 "cube" 即可切回。
 
 import type { useRouter } from "next/navigation"
 
@@ -12,13 +16,17 @@ type DocumentWithVT = Document & {
   startViewTransition?: (update: () => Promise<void>) => { finished: Promise<void> }
 }
 
+export type TransitionMode = "ribbon" | "cube"
+// as 断言保住联合类型：直接写字面量会被 TS 收窄、后面的分支比较报「无重叠」
+export const TRANSITION_MODE = "ribbon" as TransitionMode
+
 // 是否支持 View Transitions（Chrome/Edge/安卓 WebView 111+、Safari 18+）。
 // 模块级同步取值：驱动渲染分支的能力判定不能放 effect（首帧翻转会错位）。
 export const supportsViewTransition =
   typeof document !== "undefined" &&
   typeof (document as DocumentWithVT).startViewTransition === "function"
 
-// startViewTransition 回调要等新路由 commit 才能结束「旧页快照冻结」；
+// 转场要等新路由 commit 才能进入揭开阶段；
 // PageTransition 在 pathname 变化的 layout effect 里调 notifyRouteCommitted 放行。
 let pendingResolve: (() => void) | null = null
 
@@ -29,29 +37,89 @@ export function notifyRouteCommitted() {
   }
 }
 
+// 等待下一次路由 commit；超时兜底放行，慢网/异常时不至于卡死转场
+export function waitForRouteCommit(timeoutMs: number): Promise<void> {
+  return new Promise<void>((resolve) => {
+    let done = false
+    const finish = () => {
+      if (done) return
+      done = true
+      if (pendingResolve === finish) pendingResolve = null
+      resolve()
+    }
+    pendingResolve = finish
+    setTimeout(finish, timeoutMs)
+  })
+}
+
 export type FlipDirection = "next" | "prev"
 
-// 主导航环：左右滑动 / 翻页方向都按这个顺序判定
-export const PAGE_RING = ["/", "/live", "/music", "/profile"] as const
+// "/cinema" 是虚拟环位：实际路由是首页 + 影院模式开。
+// 转场执行器（page-ribbon-transition）负责把它落成「push("/") + setCinemaMode(true)」；
+// 各种普通 push 兜底走 ?cinema=1 深链（CinemaModeProvider 消费）。
+export const CINEMA_RING_PATH = "/cinema"
 
-// 两个路径都在环上且不同时返回翻页方向，否则 null（调用方退化为普通 push）
+// 当前所在环位：首页 + 影院模式开 = 虚拟影院位
+export function effectiveRingPath(pathname: string, cinemaOn: boolean): string {
+  return pathname === "/" && cinemaOn ? CINEMA_RING_PATH : pathname
+}
+
+// 虚拟环位翻译成真实可 push 的 href（转场不可用时的兜底）
+function toRealHref(href: string): string {
+  return href === CINEMA_RING_PATH ? "/?cinema=1" : href
+}
+
+// 滑动切页环：首页 ⇄ 弹幕墙 ⇄ 影院 ⇄ 个人中心。
+// music 不在环上 —— 它整面画布是横向拖拽交互，没法支持滑动翻页，只走导航栏。
+export const PAGE_RING = ["/", "/live", CINEMA_RING_PATH, "/profile"] as const
+
+// 方向判定顺序：在环的基础上保留 music（导航栏点击进出 music 仍带方向转场）
+const NAV_ORDER = ["/", "/live", CINEMA_RING_PATH, "/music", "/profile"] as const
+
+// 两个路径都在导航序上且不同时返回翻页方向，否则 null（调用方退化为普通 push）
 export function ringDirection(fromPath: string, toPath: string): FlipDirection | null {
-  const ring = PAGE_RING as readonly string[]
-  const from = ring.indexOf(fromPath)
-  const to = ring.indexOf(toPath)
+  const order = NAV_ORDER as readonly string[]
+  const from = order.indexOf(fromPath)
+  const to = order.indexOf(toPath)
   if (from === -1 || to === -1 || from === to) return null
   return to > from ? "next" : "prev"
 }
 
-// 带 3D 翻页转场的导航；不支持 VT / 偏好减少动效 / 页面不可见时退化为普通 push
-export function navigateWithFlip(router: AppRouter, href: string, dir: FlipDirection) {
-  const doc = document as DocumentWithVT
+// ===== 丝带转场执行器：覆盖层组件挂载时注册自己 =====
+type RibbonNavigator = (href: string, dir: FlipDirection) => void
+let ribbonNavigator: RibbonNavigator | null = null
+
+export function registerRibbonNavigator(fn: RibbonNavigator): () => void {
+  ribbonNavigator = fn
+  return () => {
+    if (ribbonNavigator === fn) ribbonNavigator = null
+  }
+}
+
+// 统一入口：带方向的页面切换转场。
+// 偏好减少动效 / 页面不可见 → 普通 push；丝带执行器未挂载 → 落到立方体路径
+// （其内部对不支持 VT 的浏览器再退化为普通 push）。
+export function navigateWithTransition(router: AppRouter, href: string, dir: FlipDirection) {
+  if (typeof window === "undefined") return
   if (
-    !supportsViewTransition ||
-    typeof doc.startViewTransition !== "function" ||
     window.matchMedia("(prefers-reduced-motion: reduce)").matches ||
     document.visibilityState === "hidden"
   ) {
+    router.push(toRealHref(href))
+    return
+  }
+  if (TRANSITION_MODE === "ribbon" && ribbonNavigator) {
+    ribbonNavigator(href, dir)
+    return
+  }
+  navigateWithFlip(router, toRealHref(href), dir)
+}
+
+// 立方体 3D 翻页（View Transitions API）：浏览器把新旧页面截成 GPU 快照做转场，
+// 动画只跑两张纹理的 transform。不支持 VT 时退化为普通 push。
+export function navigateWithFlip(router: AppRouter, href: string, dir: FlipDirection) {
+  const doc = document as DocumentWithVT
+  if (!supportsViewTransition || typeof doc.startViewTransition !== "function") {
     router.push(href)
     return
   }
@@ -60,12 +128,10 @@ export function navigateWithFlip(router: AppRouter, href: string, dir: FlipDirec
   root.dataset.pt = dir
 
   const vt = doc.startViewTransition(() => {
-    const committed = new Promise<void>((resolve) => {
-      pendingResolve = resolve
-    })
-    router.push(href)
     // 兜底：800ms 内路由没 commit（慢网/异常）也放行动画，避免页面长时间冻结
-    return Promise.race([committed, new Promise<void>((r) => setTimeout(r, 800))])
+    const committed = waitForRouteCommit(800)
+    router.push(href)
+    return committed
   })
 
   vt.finished.finally(() => {

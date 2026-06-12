@@ -7,6 +7,7 @@ import { PostsProvider } from "@/contexts/posts-context"
 import { CinemaModeProvider } from "@/contexts/cinema-mode-context"
 import PageTransition from "@/components/page-transition"
 import PageSwipe from "@/components/page-swipe"
+import PageRibbonTransition from "@/components/page-ribbon-transition"
 import RouteWarmup from "@/components/route-warmup"
 import Script from "next/script"
 import dynamic from "next/dynamic"
@@ -94,8 +95,9 @@ export function Providers({ children }: { children: ReactNode }) {
             {/* 全站浮动聊天室：放在 PageTransition 外，不随页面切换动画消失 */}
             <FloatingChatMount />
 
-            {/* 触屏左右轻扫切页（带 3D 翻页转场）+ 空闲时预热邻页 chunk */}
+            {/* 触屏左右轻扫切页 + 丝带标题卡转场覆盖层 + 空闲时预热邻页 chunk */}
             <PageSwipe />
+            <PageRibbonTransition />
             <RouteWarmup />
             </ChatUIProvider>
             </CinemaModeProvider>

@@ -24,7 +24,12 @@ import CategoryMenu from "@/components/category-menu"
 import { useCinemaMode } from "@/contexts/cinema-mode-context"
 import { useChatUI } from "@/contexts/chat-ui-context"
 import { isValidCategory, CATEGORIES } from "@/lib/categories"
-import { navigateWithFlip, ringDirection } from "@/lib/view-transition-nav"
+import {
+  CINEMA_RING_PATH,
+  effectiveRingPath,
+  navigateWithTransition,
+  ringDirection,
+} from "@/lib/view-transition-nav"
 import { Clapperboard, Zap, Music } from "lucide-react"
 
 // Navigation 内用 useSearchParams 读 ?category=xxx 高亮分类；
@@ -47,7 +52,7 @@ function NavigationContent() {
     return isValidCategory(raw) ? raw : null
   }, [searchParams])
   // 影院模式由 CinemaModeProvider 统一管理（替代之前的 CustomEvent 总线）
-  const { cinemaMode, toggleCinemaMode: ctxToggleCinemaMode } = useCinemaMode()
+  const { cinemaMode } = useCinemaMode()
   // 聊天室入口：读未读数显示红点、点击打开面板（与 floating-chat 共享状态）
   const { setOpen: setChatOpen, unread: chatUnread } = useChatUI()
   // 用户头像
@@ -92,12 +97,17 @@ function NavigationContent() {
 
   // activeCategory 已通过 useSearchParams 自动跟随 URL，无需手动同步
 
-  // 主导航环（首页/弹幕墙/音乐/个人中心）之间的跳转走 3D 翻页转场，
-  // 方向按环上顺序判定；环外路径（管理/登录等）退化为普通 push。
+  // 是否正处于影院视图（影院状态只在首页生效）
+  const inCinema = cinemaMode && pathname === "/"
+
+  // 主导航（首页/弹幕墙/影院/音乐/个人中心）之间的跳转走标题卡遮罩转场，
+  // 方向按导航序判定；环外路径（管理/登录等）退化为普通 push。
+  // 当前在首页 + 影院开 = 处在虚拟影院环位，方向以它为起点算。
   const flipNav = (href: string) => {
-    const dir = ringDirection(pathname || "", href)
-    if (dir) navigateWithFlip(router, href, dir)
-    else router.push(href)
+    const dir = ringDirection(effectiveRingPath(pathname || "", cinemaMode), href)
+    if (dir) navigateWithTransition(router, href, dir)
+    // 虚拟影院位没有真实路由，普通 push 兜底走 ?cinema=1 深链
+    else router.push(href === CINEMA_RING_PATH ? "/?cinema=1" : href)
   }
 
   // 桌面 Link 点击改走翻页转场；保留 href 以支持中键/新标签/SEO
@@ -107,14 +117,10 @@ function NavigationContent() {
     flipNav(href)
   }
 
-  // 切换影院模式。如果当前不在首页，则先跳转到首页并带上 ?cinema=1，
-  // CinemaModeProvider 会消费这个参数并开启影院模式。
+  // 切换影院模式：和滑动切页一样走带方向的遮罩转场
+  // （进影院 = 去虚拟影院环位，退影院 = 回首页环位）
   const toggleCinemaMode = () => {
-    if (pathname !== "/") {
-      router.push("/?cinema=1")
-      return
-    }
-    ctxToggleCinemaMode()
+    flipNav(inCinema ? "/" : CINEMA_RING_PATH)
   }
 
   // 关闭移动端浮层菜单（同时收起二级分类）
@@ -234,9 +240,9 @@ function NavigationContent() {
     active: boolean
     onClick: () => void
   }[] = [
-    { key: "home", icon: <Home className="h-5 w-5" />, zh: "首页", en: "HOME", tone: "lime", active: pathname === "/", onClick: () => { flipNav("/"); closeMobileMenu() } },
+    { key: "home", icon: <Home className="h-5 w-5" />, zh: "首页", en: "HOME", tone: "lime", active: pathname === "/" && !inCinema, onClick: () => { flipNav("/"); closeMobileMenu() } },
     { key: "live", icon: <Zap className="h-5 w-5" />, zh: "弹幕墙", en: "DANMAKU", tone: "pink", active: pathname === "/live", onClick: () => { flipNav("/live"); closeMobileMenu() } },
-    { key: "cinema", icon: <Clapperboard className="h-5 w-5" />, zh: cinemaMode ? "退出影院" : "影院模式", en: "CINEMA", tone: "pink", active: cinemaMode, onClick: () => { toggleCinemaMode(); closeMobileMenu() } },
+    { key: "cinema", icon: <Clapperboard className="h-5 w-5" />, zh: inCinema ? "退出影院" : "影院模式", en: "CINEMA", tone: "pink", active: inCinema, onClick: () => { toggleCinemaMode(); closeMobileMenu() } },
     { key: "music", icon: <Music className="h-5 w-5" />, zh: "音乐", en: "MUSIC", tone: "pink", active: pathname === "/music", onClick: () => { flipNav("/music"); closeMobileMenu() } },
   ]
   if (user) {
@@ -274,7 +280,7 @@ function NavigationContent() {
                 onClick={(e) => handleFlipLink(e, "/")}
                 className={cn(
                   "px-4 py-2 text-sm font-medium rounded-xl transition-all duration-200",
-                  pathname === "/"
+                  pathname === "/" && !inCinema
                     ? "bg-lime-400/20 text-lime-400 shadow-lg"
                     : "text-gray-300 hover:text-lime-400 hover:bg-white/10",
                 )}
@@ -303,10 +309,10 @@ function NavigationContent() {
               {/* 影院模式切换 */}
               <button
                 onClick={toggleCinemaMode}
-                title={cinemaMode ? "退出影院模式" : "影院模式"}
+                title={inCinema ? "退出影院模式" : "影院模式"}
                 className={cn(
                   "flex items-center justify-center h-9 w-9 rounded-xl transition-all duration-200",
-                  cinemaMode
+                  inCinema
                     ? "bg-pink-400/20 text-pink-400 shadow-lg"
                     : "text-gray-300 hover:text-pink-400 hover:bg-white/10",
                 )}

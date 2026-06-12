@@ -3461,3 +3461,377 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
   from { transform: rotateY(-90deg); }
   to   { transform: rotateY(0deg); }
 }
+
+/* ============================================================
+   二次元游戏风转场（绝区零式 MG 遮罩：覆盖 → 换页 → 揭开）
+   --------------------------------------------------------
+   结构见 components/page-ribbon-transition.tsx。三层斜切色块
+   交错扫屏（粉 → 白 → 黑主板），级联延迟 0.06s、单层 0.28s，
+   末层 0.12s 延迟 → 满屏点 0.4s，改动须与组件 COVER_MS /
+   REVEAL_MS 同步。主板上巨型镂空描边文字交错滚动 + 半调网点 +
+   扫描线 + 速度线横飞 + 标题卡回弹弹入。
+   全程仅 transform/opacity 动画 —— 无 backdrop-filter / filter /
+   preserve-3d / clip-path，安卓 WebView 安全。
+   --ptr-x：1 = 去环上下一页（从右扫入、向左扫出），-1 反向镜像。
+   ============================================================ */
+
+.ptr-root {
+  position: fixed;
+  inset: 0;
+  z-index: 20000; /* 盖过聊天(9999)/公告(10000)等一切浮层，转场期间拦截全部交互 */
+  overflow: hidden;
+  pointer-events: auto;
+  /* 布局/绘制完全自包含：遮罩后面新页面挂载引发的失效不会波及覆盖层，
+     覆盖层的持续动画也不回头打扰页面（安卓低端机收益明显） */
+  contain: strict;
+  --ptr-pink: #ff2d78;
+}
+
+/* ---------- 三层交错扫屏 ---------- */
+/* 外层只动 translateX（唯一合成属性），斜切由内层静态 skew 承担 */
+.ptr-wipe {
+  position: absolute;
+  inset: 0;
+  will-change: transform;
+}
+.ptr-root[data-phase="cover"] .ptr-wipe {
+  animation: ptr-wipe-in 0.28s cubic-bezier(0.7, 0, 0.2, 1) both;
+}
+.ptr-root[data-phase="reveal"] .ptr-wipe {
+  animation: ptr-wipe-out 0.28s cubic-bezier(0.7, 0, 0.2, 1) both;
+}
+/* 扫入：粉领跑 → 白 → 黑主板殿后；扫出反序：黑板先走，
+   粉白两条在它身后依次露脸再追走，形成拖尾彩条 */
+.ptr-root[data-phase="cover"] .ptr-wipe-a { animation-delay: 0s; }
+.ptr-root[data-phase="cover"] .ptr-wipe-b { animation-delay: 0.06s; }
+.ptr-root[data-phase="cover"] .ptr-wipe-main { animation-delay: 0.12s; }
+.ptr-root[data-phase="reveal"] .ptr-wipe-main { animation-delay: 0s; }
+.ptr-root[data-phase="reveal"] .ptr-wipe-b { animation-delay: 0.06s; }
+.ptr-root[data-phase="reveal"] .ptr-wipe-a { animation-delay: 0.12s; }
+
+@keyframes ptr-wipe-in {
+  from { transform: translateX(calc(140% * var(--ptr-x))); }
+  to   { transform: translateX(0); }
+}
+@keyframes ptr-wipe-out {
+  from { transform: translateX(0); }
+  to   { transform: translateX(calc(-140% * var(--ptr-x))); }
+}
+
+/* 斜切色块本体：四周出血保证斜边转角不漏底 */
+.ptr-wipe-fill,
+.ptr-panel {
+  position: absolute;
+  top: -12%;
+  bottom: -12%;
+  left: -25%;
+  right: -25%;
+  transform: skewX(-10deg);
+}
+.ptr-wipe-a .ptr-wipe-fill {
+  background: linear-gradient(105deg, #ff2d78, #ff6aa9 60%, #ff2d78);
+}
+.ptr-wipe-b .ptr-wipe-fill {
+  background: #fff3f9;
+}
+
+/* 黑主板：近黑底，巨型文字/纹理都被它裁切 */
+.ptr-panel {
+  background: radial-gradient(130% 100% at 50% 40%, #221019 0%, #120712 55%, #09040a 100%);
+  overflow: hidden;
+}
+
+/* 半调网点纹理：静态、随主板移动 */
+.ptr-halftone {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, rgba(255, 109, 168, 0.16) 1.2px, transparent 1.3px);
+  background-size: 16px 16px;
+}
+
+/* 粗百叶窗扫描线：压在文字上增加胶片感 */
+.ptr-scanlines {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: repeating-linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0.2),
+    rgba(0, 0, 0, 0.2) 2px,
+    transparent 2px,
+    transparent 6px
+  );
+}
+
+/* ---------- 巨型镂空文字行 ---------- */
+/* 容器先抵消主板 skew 再旋转（乘积 = 纯 rotate，字形不被剪切变形） */
+.ptr-rows {
+  position: absolute;
+  inset: -30%;
+  transform: skewX(10deg) rotate(-12deg);
+}
+
+/* 单行：200% 宽自身滚动，被主板 overflow:hidden 裁切。
+   转场存活 <1.3s，滚动永远跑不完一圈，无需关心循环接缝 */
+.ptr-row {
+  position: absolute;
+  left: -50%;
+  right: -50%;
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+  overflow: hidden;
+  will-change: transform;
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  user-select: none;
+}
+.ptr-row > span {
+  flex-shrink: 0;
+  padding: 0 1.5rem;
+}
+
+@keyframes ptr-row-slide {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+@keyframes ptr-row-slide-rev {
+  from { transform: translateX(-50%); }
+  to   { transform: translateX(0); }
+}
+
+/* 奇数行 = 巨型镂空描边大字，偶数行 = 实心小字短语，方向交错 */
+.ptr-row-1 {
+  top: 0%;
+  height: 18%;
+  font-size: clamp(56px, 12vw, 130px);
+  -webkit-text-stroke: 2px rgba(255, 255, 255, 0.3);
+  color: transparent;
+  animation: ptr-row-slide 7s linear infinite;
+}
+.ptr-row-2 {
+  top: 19%;
+  height: 7%;
+  font-size: clamp(14px, 2.4vw, 24px);
+  color: rgba(244, 114, 182, 0.6);
+  animation: ptr-row-slide-rev 5s linear infinite;
+}
+/* 主镂空行：粉描边大字，落在屏幕中带、从标题卡背后穿过 */
+.ptr-row-3 {
+  top: 27%;
+  height: 24%;
+  font-size: clamp(80px, 17vw, 190px);
+  -webkit-text-stroke: 2.5px rgba(255, 45, 120, 0.75);
+  color: transparent;
+  animation: ptr-row-slide-rev 6s linear infinite;
+}
+.ptr-row-4 {
+  top: 52%;
+  height: 7%;
+  font-size: clamp(14px, 2.4vw, 24px);
+  color: rgba(255, 255, 255, 0.42);
+  animation: ptr-row-slide 4.5s linear infinite;
+}
+.ptr-row-5 {
+  top: 60%;
+  height: 20%;
+  font-size: clamp(64px, 14vw, 150px);
+  -webkit-text-stroke: 2px rgba(255, 255, 255, 0.42);
+  color: transparent;
+  animation: ptr-row-slide 8s linear infinite;
+}
+.ptr-row-6 {
+  top: 82%;
+  height: 7%;
+  font-size: clamp(14px, 2.4vw, 24px);
+  color: rgba(236, 72, 153, 0.55);
+  animation: ptr-row-slide-rev 5.5s linear infinite;
+}
+
+/* ---------- 巨型水印符号 ---------- */
+.ptr-mark {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  font-size: clamp(260px, 68vh, 640px);
+  line-height: 1;
+  font-weight: 900;
+  -webkit-text-stroke: 2px rgba(255, 45, 120, 0.4);
+  color: transparent;
+  user-select: none;
+  will-change: transform;
+  animation: ptr-mark-drift 2.6s cubic-bezier(0.2, 0.6, 0.3, 1) both;
+}
+@keyframes ptr-mark-drift {
+  from { opacity: 0; transform: translate(-50%, -50%) rotate(-10deg) scale(0.9); }
+  20%  { opacity: 1; }
+  to   { opacity: 1; transform: translate(-50%, -50%) rotate(8deg) scale(1.05); }
+}
+
+/* ---------- 标题卡 ---------- */
+/* 黑主板落位（0.4s 满屏点）后弹入：放大斜插 → 回弹定格在 -2° */
+.ptr-title {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(10px, 2.4vw, 20px);
+  will-change: transform;
+  animation: ptr-title-pop 0.32s cubic-bezier(0.2, 1.5, 0.4, 1) 0.34s both;
+}
+@keyframes ptr-title-pop {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(1.7) rotate(5deg); }
+  to   { opacity: 1; transform: translate(-50%, -50%) scale(1) rotate(-2deg); }
+}
+
+.ptr-title-word {
+  position: relative;
+  font-size: clamp(48px, 14vw, 130px);
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  white-space: nowrap;
+}
+/* 镂空回声：错位放大的描边重影 */
+.ptr-title-echo {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-0.05em, -0.07em) scale(1.06);
+  -webkit-text-stroke: 2px rgba(255, 255, 255, 0.4);
+  color: transparent;
+}
+/* 实心主字：贴纸式硬偏移双重投影 */
+.ptr-title-main {
+  position: relative;
+  color: #fff;
+  text-shadow:
+    0.045em 0.045em 0 var(--ptr-pink),
+    0.09em 0.09em 0 rgba(255, 45, 120, 0.35);
+}
+
+/* 副标签：粉底黑字斜切小条，标题落位后顺滑动方向滑入 */
+.ptr-title-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.8em;
+  padding: 0.42em 1.3em;
+  background: var(--ptr-pink);
+  color: #14060e;
+  font-size: clamp(12px, 3vw, 18px);
+  font-weight: 800;
+  letter-spacing: 0.28em;
+  transform: skewX(-10deg);
+  box-shadow: 0.25em 0.25em 0 rgba(255, 255, 255, 0.22);
+  animation: ptr-chip-in 0.3s cubic-bezier(0.2, 1.2, 0.4, 1) 0.46s both;
+}
+.ptr-title-chip > i {
+  width: 1px;
+  align-self: stretch;
+  background: rgba(20, 6, 14, 0.55);
+}
+@keyframes ptr-chip-in {
+  from { opacity: 0; transform: skewX(-10deg) translateX(calc(36px * var(--ptr-x))); }
+  to   { opacity: 1; transform: skewX(-10deg) translateX(0); }
+}
+
+/* ---------- 角标 ---------- */
+.ptr-corner-no {
+  position: absolute;
+  top: max(4.5%, env(safe-area-inset-top));
+  right: 6%;
+  font-size: clamp(28px, 7vw, 56px);
+  font-weight: 900;
+  font-style: italic;
+  line-height: 1;
+  color: #fff;
+  text-shadow: 0.08em 0.08em 0 rgba(255, 45, 120, 0.8);
+  animation: ptr-fade-in 0.25s ease-out 0.4s both;
+}
+.ptr-corner-no > em {
+  font-size: 0.42em;
+  color: rgba(255, 255, 255, 0.55);
+  text-shadow: none;
+  margin-left: 0.3em;
+}
+.ptr-corner-loading {
+  position: absolute;
+  bottom: max(5%, env(safe-area-inset-bottom));
+  left: 6%;
+  font-size: clamp(11px, 2.8vw, 15px);
+  font-weight: 800;
+  letter-spacing: 0.32em;
+  color: rgba(255, 109, 168, 0.9);
+  animation: ptr-blink 0.8s linear 0.4s infinite both;
+}
+@keyframes ptr-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes ptr-blink {
+  0%, 55% { opacity: 1; }
+  56%, 100% { opacity: 0.25; }
+}
+
+/* 主板两侧描边条：与主板同高同斜角，只在扫动途中露脸 */
+.ptr-edge {
+  position: absolute;
+  top: -12%;
+  bottom: -12%;
+  width: clamp(6px, 1.2vw, 14px);
+  transform: skewX(-10deg);
+  background: linear-gradient(180deg, #ff2d78, #ff8fc0 50%, #ff2d78);
+  box-shadow: 0 0 32px rgba(255, 45, 120, 0.7);
+}
+.ptr-edge-left { left: -25%; }
+.ptr-edge-right { right: -25%; }
+
+/* ---------- 速度线 ---------- */
+.ptr-streaks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+/* 基线 transform = 飞行起点（动画 delay 期间停在屏外不露脸） */
+.ptr-streak {
+  position: absolute;
+  left: -45vw;
+  height: 3px;
+  border-radius: 2px;
+  transform: translateX(calc(180vw * var(--ptr-x)));
+  will-change: transform;
+  animation: ptr-streak-fly 0.6s linear infinite;
+}
+@keyframes ptr-streak-fly {
+  from { transform: translateX(calc(180vw * var(--ptr-x))); }
+  to   { transform: translateX(calc(-180vw * var(--ptr-x))); }
+}
+.ptr-streak-1 { top: 9%;  width: 34vw; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.95), transparent); animation-duration: 0.55s; }
+.ptr-streak-2 { top: 22%; width: 20vw; background: linear-gradient(90deg, transparent, rgba(255, 109, 168, 0.9), transparent); animation-duration: 0.7s; animation-delay: 0.18s; }
+.ptr-streak-3 { top: 41%; width: 28vw; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.8), transparent); animation-duration: 0.62s; animation-delay: 0.34s; }
+.ptr-streak-4 { top: 58%; width: 16vw; height: 2px; background: linear-gradient(90deg, transparent, rgba(255, 45, 120, 0.95), transparent); animation-duration: 0.5s; animation-delay: 0.1s; }
+.ptr-streak-5 { top: 74%; width: 30vw; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.85), transparent); animation-duration: 0.74s; animation-delay: 0.26s; }
+.ptr-streak-6 { top: 88%; width: 22vw; height: 2px; background: linear-gradient(90deg, transparent, rgba(255, 109, 168, 0.85), transparent); animation-duration: 0.58s; animation-delay: 0.44s; }
+
+/* ---------- 满屏冲击闪 ---------- */
+/* 黑主板落位瞬间一次低透明度闪光（挂载后只跑一次，phase 切换不重启） */
+.ptr-flash {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: #ffe1ef;
+  opacity: 0;
+  animation: ptr-flash 0.26s ease-out 0.38s both;
+}
+@keyframes ptr-flash {
+  0% { opacity: 0; }
+  35% { opacity: 0.22; }
+  100% { opacity: 0; }
+}
