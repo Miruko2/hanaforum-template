@@ -307,7 +307,6 @@ export default function ProfilePage() {
 
           <ProfileSettingsList
             onDownload={() => router.push("/download")}
-            onNotifications={() => router.push("/notifications")}
             onSignOut={handleSignOut}
           />
         </div>
