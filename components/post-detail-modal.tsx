@@ -371,9 +371,13 @@ export default function PostDetailModal({
             initial={{ opacity: 0 }}
             animate={{ opacity: closing ? 0 : 1 }}
             exit={{ opacity: 0 }}
-            // 回飞关闭时揭幕 0.35s：跟 0.5s 的回飞总时长同步推进（揭幕先行一点点），
-            // 落地时刚好全清；0.2s 会显得背景瞬间变清晰、与回飞脱节。
-            transition={closing ? { duration: 0.35, ease: "easeOut" } : { duration: 0.2 }}
+            // 回飞关闭时揭幕跟回飞总时长同步推进（揭幕先行一点点），落地时刚好全清：
+            // 移动端回飞 0.3s → 揭幕 0.24s；桌面回飞 0.5s → 揭幕 0.35s。
+            transition={
+              closing
+                ? { duration: isMobile ? 0.24 : 0.35, ease: "easeOut" }
+                : { duration: 0.2 }
+            }
           />
 
           <motion.div
@@ -408,11 +412,11 @@ export default function PostDetailModal({
                     transition: { duration: 0.18, ease: "easeOut" },
                   }
             }
-            // 关闭回飞时整框（含底部内容区）0.5s「逐渐淡出」，跟 0.5s 的回飞总时长
-            // （0.08 delay + 0.42 飞行）同步收尾；打开 0.32s 强缓出，上浮收尾轻盈。
+            // 关闭回飞时整框（含底部内容区）「逐渐淡出」，与回飞总时长同步收尾：
+            // 移动端 0.3s、桌面 0.5s（0.08 delay + 0.42 飞行）；打开 0.32s 强缓出，上浮收尾轻盈。
             transition={
               closing
-                ? { duration: 0.5, ease: "easeOut" }
+                ? { duration: isMobile ? 0.3 : 0.5, ease: "easeOut" }
                 : { duration: 0.32, ease: [0.16, 1, 0.3, 1] }
             }
             // 手机端缩到 82vh，让模态框周围露出一圈背景（不再"贴满全屏"），
@@ -640,9 +644,14 @@ export default function PostDetailModal({
               height: flyBackTarget.height,
             }}
             // 飞回用缓入缓出（easeInOutCubic）：轻起 → 加速 → 轻落，收拢有重量感、不会
-            // 开头猛缩，尾速趋近 0 → 落回图片区更稳。时长 0.42s：比飞入(0.6s)快一档，
-            // 关闭动作要干脆。delay 0.08s：让底部内容区先开始渐隐，图片再起飞。
-            transition={{ duration: 0.42, ease: [0.65, 0, 0.35, 1], delay: 0.08 }}
+            // 开头猛缩，尾速趋近 0 → 落回图片区更稳。
+            // 移动端：0.3s、无 delay —— 手机上关闭要立等可见地干脆（0.5s 总时长被反馈"不够快"）。
+            // 桌面：0.42s + 0.08s delay（先让底部内容区渐隐、图片再起飞），保持从容收拢。
+            transition={
+              isMobile
+                ? { duration: 0.3, ease: [0.65, 0, 0.35, 1] }
+                : { duration: 0.42, ease: [0.65, 0, 0.35, 1], delay: 0.08 }
+            }
             // 落点 = 源卡图片区（flyBackTarget）：图片在那里 object-cover 的裁剪与源卡图片
             // 完全一致 → 像素级无缝。落地即真正关闭：onClose 让父级 isActive=false（源卡整卡
             // 显形 —— 图片区被回飞图无缝接管、不跳变，下方内容区由 PostCard 做浮现入场）、
