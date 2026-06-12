@@ -3571,12 +3571,14 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
   transform: skewX(10deg) rotate(-12deg);
 }
 
-/* 单行：200% 宽自身滚动，被主板 overflow:hidden 裁切。
-   转场存活 <1.3s，滚动永远跑不完一圈，无需关心循环接缝 */
+/* 单行：150% 宽自身滚动，被主板 overflow:hidden 裁切。
+   行宽收着点 —— 行越宽 GPU 纹理越大，连续快滑时安卓光栅化压力大。
+   行是透明文字无底色，慢网极端停留下文字滚出边角也不可见。
+   转场通常存活 <1.3s，滚动跑不完一圈，无需关心循环接缝 */
 .ptr-row {
   position: absolute;
-  left: -50%;
-  right: -50%;
+  left: -25%;
+  right: -25%;
   display: flex;
   align-items: center;
   white-space: nowrap;
@@ -3610,7 +3612,7 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
   font-size: clamp(56px, 12vw, 130px);
   -webkit-text-stroke: 2px rgba(255, 255, 255, 0.3);
   color: transparent;
-  animation: ptr-row-slide 7s linear infinite;
+  animation: ptr-row-slide 6s linear infinite;
 }
 .ptr-row-2 {
   top: 19%;
@@ -3626,14 +3628,14 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
   font-size: clamp(80px, 17vw, 190px);
   -webkit-text-stroke: 2.5px rgba(255, 45, 120, 0.75);
   color: transparent;
-  animation: ptr-row-slide-rev 6s linear infinite;
+  animation: ptr-row-slide-rev 6.5s linear infinite;
 }
 .ptr-row-4 {
   top: 52%;
   height: 7%;
   font-size: clamp(14px, 2.4vw, 24px);
   color: rgba(255, 255, 255, 0.42);
-  animation: ptr-row-slide 4.5s linear infinite;
+  animation: ptr-row-slide 5.5s linear infinite;
 }
 .ptr-row-5 {
   top: 60%;
@@ -3641,14 +3643,14 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
   font-size: clamp(64px, 14vw, 150px);
   -webkit-text-stroke: 2px rgba(255, 255, 255, 0.42);
   color: transparent;
-  animation: ptr-row-slide 8s linear infinite;
+  animation: ptr-row-slide 7.5s linear infinite;
 }
 .ptr-row-6 {
   top: 82%;
   height: 7%;
   font-size: clamp(14px, 2.4vw, 24px);
   color: rgba(236, 72, 153, 0.55);
-  animation: ptr-row-slide-rev 5.5s linear infinite;
+  animation: ptr-row-slide-rev 6s linear infinite;
 }
 
 /* ---------- 巨型水印符号 ---------- */

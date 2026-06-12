@@ -19,10 +19,22 @@ import {
 
 // 时序常量（ms）。三层扫屏 = 单层 0.28s + 0.06s 级联延迟，
 // 改动须与 globals.css 的 ptr-wipe-in/out 时长和 delay 同步。
-const COVER_MS = 400 // 最后一层（黑主板）完全遮蔽屏幕
+//
+// 关键：换页/卸载由黑主板的 animationend 驱动，而不是定时器。
+// 主线程繁忙（连续快滑、新页面水合中）时 CSS 动画会比 JS 定时器晚开跑，
+// 定时器准点换页会在屏幕没遮严时露出换页瞬间 → 概率性闪屏（安卓最明显）。
+// 定时器只做 animationend 丢失（切后台等）的兜底。
+const COVER_MS = 400 // 理论覆盖时长（黑主板 0.12s delay + 0.28s）
+const COVER_FALLBACK_MS = COVER_MS + 500
 const MIN_HOLD_MS = 360 // 满屏后最短停留（标题卡弹入需要露脸时间）
 const REVEAL_MS = 400 // 三层依次扫出
-const COMMIT_TIMEOUT_MS = 800 // 路由 commit 兜底
+const REVEAL_FALLBACK_MS = REVEAL_MS + 500
+// 路由 commit 兜底。低端安卓上重页面 commit 可超 1s，放宽避免
+// 揭开时露出"换到一半"的旧页面；遮罩上动画常驻，多停留不显卡死
+const COMMIT_TIMEOUT_MS = 1500
+// 转场结束后的冷却：连续快滑时给新页面水合 / GPU 纹理回收留喘息，
+// 冷却期内的滑动静默忽略（比排队叠加恶化要好）
+const COOLDOWN_MS = 260
 
 // 每页文案：英文名 + 日文 + 中文 + 编号 + 水印符号
 interface RibbonCard {
@@ -59,51 +71,84 @@ export default function PageRibbonTransition() {
   const pathname = usePathname()
   const { setCinemaMode } = useCinemaMode()
   const [active, setActive] = useState<ActiveState | null>(null)
-  // 转场进行中锁：动画期间忽略重复触发（覆盖层本身也拦截一切指针事件）
+  // 转场进行中锁：动画 + 冷却期间忽略重复触发（覆盖层本身也拦截一切指针事件）
   const runningRef = useRef(false)
+  // 各阶段只执行一次（animationend 与兜底定时器谁先到谁推进）
+  const coveredRef = useRef(false)
+  const revealedRef = useRef(false)
+  // 转场代际：兜底定时器可能比「动画正常结束 + 冷却」更晚触发，
+  // 过期定时器若打进下一次转场会把新覆盖层中途卸载，按代际作废
+  const genRef = useRef(0)
+  const hrefRef = useRef("")
   const timersRef = useRef<number[]>([])
   const routerRef = useRef(router)
   routerRef.current = router
   const pathRef = useRef(pathname)
   pathRef.current = pathname
 
-  const start = useCallback((href: string, dir: FlipDirection) => {
-    if (runningRef.current) return
-    runningRef.current = true
-    setActive({ dir, phase: "cover", card: CARDS[href] ?? FALLBACK_CARD })
+  // 揭开收尾：卸载覆盖层，短冷却后才接受下一次转场
+  const finishReveal = useCallback(() => {
+    if (revealedRef.current || !runningRef.current) return
+    revealedRef.current = true
+    setActive(null)
+    timersRef.current.push(
+      window.setTimeout(() => {
+        runningRef.current = false
+      }, COOLDOWN_MS),
+    )
+  }, [])
 
-    const coverTimer = window.setTimeout(() => {
-      // 满屏瞬间换页；揭开要等「路由 commit + 最短停留」二者齐备。
-      // "/cinema" 是虚拟环位 = 首页 + 影院模式；去首页则显式关影院。
-      // 已在首页时进出影院没有路由变化，跳过 commit 等待（否则白等 800ms 超时），
-      // 视图切换由 React 状态驱动，MIN_HOLD + 双 rAF 足以覆盖首绘。
-      const wantCinema = href === CINEMA_RING_PATH
-      const targetPath = wantCinema ? "/" : href
-      const sameRoute = targetPath === pathRef.current
-      const committed = sameRoute ? Promise.resolve() : waitForRouteCommit(COMMIT_TIMEOUT_MS)
-      const held = new Promise<void>((resolve) => {
-        timersRef.current.push(window.setTimeout(resolve, MIN_HOLD_MS))
-      })
-      if (wantCinema) setCinemaMode(true)
-      else if (targetPath === "/") setCinemaMode(false)
-      if (!sameRoute) routerRef.current.push(targetPath)
-      void Promise.all([committed, held]).then(() => {
-        // 再等两帧，让新页面在遮罩后完成首绘，避免揭开时露出未绘制的底
-        requestAnimationFrame(() =>
-          requestAnimationFrame(() => {
-            setActive((cur) => (cur ? { ...cur, phase: "reveal" } : cur))
-            timersRef.current.push(
-              window.setTimeout(() => {
-                setActive(null)
-                runningRef.current = false
-              }, REVEAL_MS + 80),
-            )
-          }),
-        )
-      })
-    }, COVER_MS)
-    timersRef.current.push(coverTimer)
-  }, [setCinemaMode])
+  // 满屏后：换页 → 等「路由 commit + 最短停留」→ 双 rAF 等首绘 → 进入揭开
+  const proceedCover = useCallback(() => {
+    if (coveredRef.current || !runningRef.current) return
+    coveredRef.current = true
+    const href = hrefRef.current
+    // "/cinema" 是虚拟环位 = 首页 + 影院模式；去首页则显式关影院。
+    // 已在首页时进出影院没有路由变化，跳过 commit 等待（否则白等超时），
+    // 视图切换由 React 状态驱动，MIN_HOLD + 双 rAF 足以覆盖首绘。
+    const wantCinema = href === CINEMA_RING_PATH
+    const targetPath = wantCinema ? "/" : href
+    const sameRoute = targetPath === pathRef.current
+    const committed = sameRoute ? Promise.resolve() : waitForRouteCommit(COMMIT_TIMEOUT_MS)
+    const held = new Promise<void>((resolve) => {
+      timersRef.current.push(window.setTimeout(resolve, MIN_HOLD_MS))
+    })
+    if (wantCinema) setCinemaMode(true)
+    else if (targetPath === "/") setCinemaMode(false)
+    if (!sameRoute) routerRef.current.push(targetPath)
+    const gen = genRef.current
+    void Promise.all([committed, held]).then(() => {
+      // 再等两帧，让新页面在遮罩后完成首绘，避免揭开时露出未绘制的底
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          setActive((cur) => (cur ? { ...cur, phase: "reveal" } : cur))
+          timersRef.current.push(
+            window.setTimeout(() => {
+              if (gen === genRef.current) finishReveal()
+            }, REVEAL_FALLBACK_MS),
+          )
+        }),
+      )
+    })
+  }, [setCinemaMode, finishReveal])
+
+  const start = useCallback(
+    (href: string, dir: FlipDirection) => {
+      if (runningRef.current) return
+      runningRef.current = true
+      coveredRef.current = false
+      revealedRef.current = false
+      hrefRef.current = href
+      const gen = ++genRef.current
+      setActive({ dir, phase: "cover", card: CARDS[href] ?? FALLBACK_CARD })
+      timersRef.current.push(
+        window.setTimeout(() => {
+          if (gen === genRef.current) proceedCover()
+        }, COVER_FALLBACK_MS),
+      )
+    },
+    [proceedCover],
+  )
 
   useEffect(() => {
     const unregister = registerRibbonNavigator(start)
@@ -129,14 +174,27 @@ export default function PageRibbonTransition() {
       style={{ "--ptr-x": dir === "next" ? 1 : -1 } as CSSProperties}
       aria-hidden
     >
-      {/* 三层交错扫屏：DOM 顺序即叠放顺序（粉底层 → 白中层 → 黑主板顶层） */}
-      <div className="ptr-wipe ptr-wipe-a">
+      {/* 三层交错扫屏：DOM 顺序即叠放顺序（粉底层 → 白中层 → 黑主板顶层）。
+          粉层扫出最晚结束（0.12s delay）= 整组揭开完成 */}
+      <div
+        className="ptr-wipe ptr-wipe-a"
+        onAnimationEnd={(e) => {
+          if (e.animationName === "ptr-wipe-out") finishReveal()
+        }}
+      >
         <div className="ptr-wipe-fill" />
       </div>
       <div className="ptr-wipe ptr-wipe-b">
         <div className="ptr-wipe-fill" />
       </div>
-      <div className="ptr-wipe ptr-wipe-main">
+      {/* 黑主板扫入最晚结束（0.12s delay）= 屏幕真正遮严，此刻才换页。
+          子元素动画（标题弹入等）会冒泡上来，按 animationName 过滤 */}
+      <div
+        className="ptr-wipe ptr-wipe-main"
+        onAnimationEnd={(e) => {
+          if (e.animationName === "ptr-wipe-in") proceedCover()
+        }}
+      >
         <div className="ptr-panel">
           <div className="ptr-halftone" />
           <div className="ptr-rows">
