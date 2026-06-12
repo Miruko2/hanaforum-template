@@ -27,46 +27,55 @@ export default function FollowStats({ userId }: FollowStatsProps) {
   const [counts, setCounts] = useState({ followers: 0, following: 0 })
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<Tab>("followers")
-  const [list, setList] = useState<FollowUser[]>([])
-  const [listLoading, setListLoading] = useState(false)
+  // 名单缓存：undefined = 尚未取过(显示加载中)，数组 = 已有数据(可直接展示)
+  const [cache, setCache] = useState<Record<Tab, FollowUser[] | undefined>>({
+    followers: undefined,
+    following: undefined,
+  })
 
-  useEffect(() => {
-    let alive = true
-    getFollowCounts(userId).then((c) => {
-      if (alive) setCounts(c)
-    })
-    return () => {
-      alive = false
-    }
-  }, [userId])
-
-  const loadList = useCallback(
+  // 拉取某个名单并写入缓存（用于预取 + 打开时静默刷新）
+  const fetchList = useCallback(
     async (which: Tab) => {
-      setListLoading(true)
-      setList([])
-      const data = which === "followers" ? await getFollowers(userId) : await getFollowing(userId)
-      setList(data)
-      setListLoading(false)
+      const data =
+        which === "followers" ? await getFollowers(userId) : await getFollowing(userId)
+      setCache((prev) => ({ ...prev, [which]: data }))
     },
     [userId],
   )
 
+  // 进入页面就并发取计数 + 预取两个名单，打开弹窗即时显示
+  useEffect(() => {
+    let alive = true
+    setCache({ followers: undefined, following: undefined })
+    getFollowCounts(userId).then((c) => {
+      if (alive) setCounts(c)
+    })
+    void fetchList("followers")
+    void fetchList("following")
+    return () => {
+      alive = false
+    }
+  }, [userId, fetchList])
+
   const openWith = (which: Tab) => {
     setTab(which)
     setOpen(true)
-    void loadList(which)
+    void fetchList(which) // 后台静默刷新，缓存已有则不影响展示
   }
 
   const switchTab = (which: Tab) => {
     if (which === tab) return
     setTab(which)
-    void loadList(which)
+    void fetchList(which)
   }
 
   const goProfile = (id: string) => {
     setOpen(false)
     router.push(`/user?id=${id}`)
   }
+
+  const list = cache[tab]
+  const listLoading = list === undefined
 
   return (
     <>
@@ -130,7 +139,7 @@ export default function FollowStats({ userId }: FollowStatsProps) {
             <div className="max-h-[55vh] overflow-y-auto -mx-2 px-2">
               {listLoading ? (
                 <div className="py-12 text-center text-sm text-white/50">加载中...</div>
-              ) : list.length === 0 ? (
+              ) : !list || list.length === 0 ? (
                 <div className="py-12 text-center text-sm text-white/50">
                   {tab === "followers" ? "还没有粉丝" : "还没有关注任何人"}
                 </div>
