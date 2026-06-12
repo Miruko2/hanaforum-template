@@ -3487,6 +3487,23 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
   --ptr-pink: #ff2d78;
 }
 
+/* 合成稳定性（治闪动/鬼影，非减配）：对所有「跑 transform 动画」的层显式
+   关背面渲染。安卓 WebView 在位移动画下若图层不是稳定 3D 合成层，会出现
+   子像素重影、上一帧纹理残留、起始瞬间闪一下；配合各 keyframes 的 translate3d，
+   backface-visibility:hidden 是其标准解 —— 纯合成提示、视觉零变化，iOS 同样受益。
+   仅 opacity 动画或静态元素不在此列（加了无益，反而可能多裂图层）。 */
+.ptr-wipe,
+.ptr-row,
+.ptr-mark,
+.ptr-title,
+.ptr-title-chip,
+.ptr-streak {
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+  -webkit-transform-style: flat;
+  transform-style: flat;
+}
+
 /* ---------- 三层交错扫屏 ---------- */
 /* 外层只动 translateX（唯一合成属性），斜切由内层静态 skew 承担 */
 .ptr-wipe {
@@ -3510,12 +3527,12 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
 .ptr-root[data-phase="reveal"] .ptr-wipe-a { animation-delay: 0.12s; }
 
 @keyframes ptr-wipe-in {
-  from { transform: translateX(calc(140% * var(--ptr-x))); }
-  to   { transform: translateX(0); }
+  from { transform: translate3d(calc(140% * var(--ptr-x)), 0, 0); }
+  to   { transform: translate3d(0, 0, 0); }
 }
 @keyframes ptr-wipe-out {
-  from { transform: translateX(0); }
-  to   { transform: translateX(calc(-140% * var(--ptr-x))); }
+  from { transform: translate3d(0, 0, 0); }
+  to   { transform: translate3d(calc(-140% * var(--ptr-x)), 0, 0); }
 }
 
 /* 斜切色块本体：四周出血保证斜边转角不漏底 */
@@ -3597,12 +3614,12 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
 }
 
 @keyframes ptr-row-slide {
-  from { transform: translateX(0); }
-  to   { transform: translateX(-50%); }
+  from { transform: translate3d(0, 0, 0); }
+  to   { transform: translate3d(-50%, 0, 0); }
 }
 @keyframes ptr-row-slide-rev {
-  from { transform: translateX(-50%); }
-  to   { transform: translateX(0); }
+  from { transform: translate3d(-50%, 0, 0); }
+  to   { transform: translate3d(0, 0, 0); }
 }
 
 /* 奇数行 = 巨型镂空描边大字，偶数行 = 实心小字短语，方向交错 */
@@ -3668,9 +3685,9 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
   animation: ptr-mark-drift 2.6s cubic-bezier(0.2, 0.6, 0.3, 1) both;
 }
 @keyframes ptr-mark-drift {
-  from { opacity: 0; transform: translate(-50%, -50%) rotate(-10deg) scale(0.9); }
+  from { opacity: 0; transform: translate3d(-50%, -50%, 0) rotate(-10deg) scale(0.9); }
   20%  { opacity: 1; }
-  to   { opacity: 1; transform: translate(-50%, -50%) rotate(8deg) scale(1.05); }
+  to   { opacity: 1; transform: translate3d(-50%, -50%, 0) rotate(8deg) scale(1.05); }
 }
 
 /* ---------- 标题卡 ---------- */
@@ -3687,8 +3704,8 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
   animation: ptr-title-pop 0.32s cubic-bezier(0.2, 1.5, 0.4, 1) 0.34s both;
 }
 @keyframes ptr-title-pop {
-  from { opacity: 0; transform: translate(-50%, -50%) scale(1.7) rotate(5deg); }
-  to   { opacity: 1; transform: translate(-50%, -50%) scale(1) rotate(-2deg); }
+  from { opacity: 0; transform: translate3d(-50%, -50%, 0) scale(1.7) rotate(5deg); }
+  to   { opacity: 1; transform: translate3d(-50%, -50%, 0) scale(1) rotate(-2deg); }
 }
 
 .ptr-title-word {
@@ -3740,8 +3757,8 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
   background: rgba(20, 6, 14, 0.55);
 }
 @keyframes ptr-chip-in {
-  from { opacity: 0; transform: skewX(-10deg) translateX(calc(36px * var(--ptr-x))); }
-  to   { opacity: 1; transform: skewX(-10deg) translateX(0); }
+  from { opacity: 0; transform: skewX(-10deg) translate3d(calc(36px * var(--ptr-x)), 0, 0); }
+  to   { opacity: 1; transform: skewX(-10deg) translate3d(0, 0, 0); }
 }
 
 /* ---------- 角标 ---------- */
@@ -3807,13 +3824,13 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
   left: -45vw;
   height: 3px;
   border-radius: 2px;
-  transform: translateX(calc(180vw * var(--ptr-x)));
+  transform: translate3d(calc(180vw * var(--ptr-x)), 0, 0);
   will-change: transform;
   animation: ptr-streak-fly 0.6s linear infinite;
 }
 @keyframes ptr-streak-fly {
-  from { transform: translateX(calc(180vw * var(--ptr-x))); }
-  to   { transform: translateX(calc(-180vw * var(--ptr-x))); }
+  from { transform: translate3d(calc(180vw * var(--ptr-x)), 0, 0); }
+  to   { transform: translate3d(calc(-180vw * var(--ptr-x)), 0, 0); }
 }
 .ptr-streak-1 { top: 9%;  width: 34vw; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.95), transparent); animation-duration: 0.55s; }
 .ptr-streak-2 { top: 22%; width: 20vw; background: linear-gradient(90deg, transparent, rgba(255, 109, 168, 0.9), transparent); animation-duration: 0.7s; animation-delay: 0.18s; }
