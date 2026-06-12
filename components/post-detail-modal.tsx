@@ -385,10 +385,10 @@ export default function PostDetailModal({
             animate={{ opacity: closing ? 0 : 1 }}
             exit={{ opacity: 0 }}
             // 回飞关闭时揭幕跟回飞总时长同步推进（揭幕先行一点点），落地时刚好全清：
-            // 移动端回飞 0.3s → 揭幕 0.24s；桌面回飞 0.5s → 揭幕 0.35s。
+            // 移动端回飞 0.18s → 揭幕 0.15s；桌面回飞 0.3s → 揭幕 0.22s。
             transition={
               closing
-                ? { duration: isMobile ? 0.24 : 0.35, ease: "easeOut" }
+                ? { duration: isMobile ? 0.15 : 0.22, ease: "easeOut" }
                 : { duration: 0.2 }
             }
           />
@@ -426,10 +426,10 @@ export default function PostDetailModal({
                   }
             }
             // 关闭回飞时整框（含底部内容区）「逐渐淡出」，与回飞总时长同步收尾：
-            // 移动端 0.3s、桌面 0.5s（0.08 delay + 0.42 飞行）；打开 0.32s 强缓出，上浮收尾轻盈。
+            // 移动端 0.18s、桌面 0.3s（0.04 delay + 0.26 飞行）；打开 0.32s 强缓出，上浮收尾轻盈。
             transition={
               closing
-                ? { duration: isMobile ? 0.3 : 0.5, ease: "easeOut" }
+                ? { duration: isMobile ? 0.18 : 0.3, ease: "easeOut" }
                 : { duration: 0.32, ease: [0.16, 1, 0.3, 1] }
             }
             // 手机端缩到 82vh，让模态框周围露出一圈背景（不再"贴满全屏"），
@@ -746,12 +746,12 @@ function FlyBackImage({
 
   // 挂载即起飞（closing 置位时本组件才挂载；飞行期间矩形不变，依赖留空）。
   // 飞回用缓入缓出（easeInOutCubic）：轻起 → 加速 → 轻落，收拢有重量感，尾速趋近 0。
-  // 移动端：0.3s、无 delay —— 关闭要立等可见地干脆（0.5s 总时长曾被反馈"不够快"）。
-  // 桌面：0.42s + 0.08s delay（先让底部内容区渐隐、图片再起飞），保持从容收拢。
+  // 移动端：0.18s、无 delay —— 关闭要立等可见地干脆利落。
+  // 桌面：0.26s + 0.04s delay（先让底部内容区渐隐、图片再起飞），快速收拢。
   React.useEffect(() => {
     const controls = animate(progress, 1, {
-      duration: isMobile ? 0.3 : 0.42,
-      delay: isMobile ? 0 : 0.08,
+      duration: isMobile ? 0.18 : 0.26,
+      delay: isMobile ? 0 : 0.04,
       ease: [0.65, 0, 0.35, 1],
       onComplete: onArrive,
     })
@@ -786,7 +786,7 @@ function FlyBackImage({
         style={{ transform: innerTransform, transformOrigin: "50% 100%" }}
         initial={{ opacity: 1 }}
         animate={{ opacity: 0 }}
-        transition={{ duration: 0.2, ease: "easeOut" }}
+        transition={{ duration: 0.13, ease: "easeOut" }}
       >
         <div className="text-white text-[13px] font-semibold truncate">{title}</div>
         <div className="text-white/60 text-[11px] truncate">{username}</div>
