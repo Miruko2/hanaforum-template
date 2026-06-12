@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation"
 import { useCinemaMode } from "@/contexts/cinema-mode-context"
 import {
   CINEMA_RING_PATH,
+  isAndroidRuntime,
   registerRibbonNavigator,
   waitForRouteCommit,
   type FlipDirection,
@@ -33,8 +34,9 @@ const REVEAL_FALLBACK_MS = REVEAL_MS + 500
 // 揭开时露出"换到一半"的旧页面；遮罩上动画常驻，多停留不显卡死
 const COMMIT_TIMEOUT_MS = 1500
 // 转场结束后的冷却：连续快滑时给新页面水合 / GPU 纹理回收留喘息，
-// 冷却期内的滑动静默忽略（比排队叠加恶化要好）
-const COOLDOWN_MS = 260
+// 冷却期内的滑动静默忽略（比排队叠加恶化要好）。
+// 安卓 WebView 合成器回收慢，冷却拉长，避免上一程图层未释放就叠下一程 → 鬼影/卡顿。
+const COOLDOWN_MS = isAndroidRuntime ? 480 : 260
 
 // 每页文案：英文名 + 日文 + 中文 + 编号 + 水印符号
 interface RibbonCard {
@@ -168,7 +170,7 @@ export default function PageRibbonTransition() {
 
   return createPortal(
     <div
-      className="ptr-root"
+      className={`ptr-root${isAndroidRuntime ? " ptr-android" : ""}`}
       data-phase={phase}
       // --ptr-x：1 = 去环上下一页（从右扫入、向左扫出），-1 反向
       style={{ "--ptr-x": dir === "next" ? 1 : -1 } as CSSProperties}
@@ -227,12 +229,16 @@ export default function PageRibbonTransition() {
         <div className="ptr-edge ptr-edge-left" />
         <div className="ptr-edge ptr-edge-right" />
       </div>
-      {/* 速度线：压在一切之上横飞 */}
-      <div className="ptr-streaks">
-        {Array.from({ length: STREAK_COUNT }, (_, i) => i + 1).map((n) => (
-          <span key={n} className={`ptr-streak ptr-streak-${n}`} />
-        ))}
-      </div>
+      {/* 速度线：压在一切之上横飞。
+          安卓上这是常驻无限动画的重灾区（6 条独立合成图层持续光栅化），
+          连续快滑时最易引发鬼影/卡顿，故安卓精简渲染时整组不挂载。 */}
+      {!isAndroidRuntime && (
+        <div className="ptr-streaks">
+          {Array.from({ length: STREAK_COUNT }, (_, i) => i + 1).map((n) => (
+            <span key={n} className={`ptr-streak ptr-streak-${n}`} />
+          ))}
+        </div>
+      )}
       {/* 满屏瞬间的冲击闪光（低透明度，挂载后只跑一次） */}
       <div className="ptr-flash" />
     </div>,

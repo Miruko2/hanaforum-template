@@ -26,6 +26,13 @@ export const supportsViewTransition =
   typeof document !== "undefined" &&
   typeof (document as DocumentWithVT).startViewTransition === "function"
 
+// 安卓 WebView 的合成器对「大量常驻图层 + 持续动画」很敏感：连续快滑时图层
+// 频繁创建/销毁会跟不上 GPU 纹理回收，表现为闪屏 / 鬼影 / 卡顿。转场组件据此
+// 在安卓上走精简渲染（去掉常驻无限动画图层、降低图层数、拉长冷却）。
+// 模块级同步取值：要在首次渲染遮罩时就决定渲染分支，不能放进 effect。
+export const isAndroidRuntime =
+  typeof navigator !== "undefined" && /android/i.test(navigator.userAgent)
+
 // 转场要等新路由 commit 才能进入揭开阶段；
 // PageTransition 在 pathname 变化的 layout effect 里调 notifyRouteCommitted 放行。
 let pendingResolve: (() => void) | null = null
