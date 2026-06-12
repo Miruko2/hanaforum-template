@@ -94,11 +94,17 @@ const config: Config = {
             boxShadow: "0 6px 18px -2px rgba(250, 204, 21, 0.55)",
           },
         },
+        // 高斯模糊渐入：用于切换标签时名单条目入场
+        "blur-in": {
+          "0%": { opacity: "0", filter: "blur(10px)", transform: "translateY(6px)" },
+          "100%": { opacity: "1", filter: "blur(0)", transform: "translateY(0)" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
         "jelly-pulse": "jelly-pulse 1s ease-in-out infinite",
+        "blur-in": "blur-in 0.45s ease-out both",
       },
       screens: {
         xs: "480px",

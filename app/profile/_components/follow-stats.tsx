@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { X } from "lucide-react"
@@ -74,6 +74,24 @@ export default function FollowStats({ userId }: FollowStatsProps) {
     router.push(`/user?id=${id}`)
   }
 
+  // 移动端左右滑动切换标签：向右滑 → 关注，向左滑 → 粉丝
+  const touchStart = useRef<{ x: number; y: number } | null>(null)
+  const onTouchStart = (e: React.TouchEvent) => {
+    const t = e.touches[0]
+    touchStart.current = { x: t.clientX, y: t.clientY }
+  }
+  const onTouchEnd = (e: React.TouchEvent) => {
+    const s = touchStart.current
+    touchStart.current = null
+    if (!s) return
+    const t = e.changedTouches[0]
+    const dx = t.clientX - s.x
+    const dy = t.clientY - s.y
+    // 需为明显的水平滑动（位移够大且横向占主导），否则视作上下滚动名单
+    if (Math.abs(dx) < 50 || Math.abs(dx) <= Math.abs(dy)) return
+    switchTab(dx > 0 ? "following" : "followers")
+  }
+
   const list = cache[tab]
   const listLoading = list === undefined
 
@@ -103,6 +121,8 @@ export default function FollowStats({ userId }: FollowStatsProps) {
           <DialogOverlay className="bg-black/40 backdrop-blur-md" />
           <DialogPrimitive.Content
             className="fixed left-1/2 top-1/2 z-50 grid w-full max-w-sm -translate-x-1/2 -translate-y-1/2 gap-4 rounded-3xl border border-white/20 bg-white/10 p-6 text-white shadow-2xl shadow-black/60 backdrop-blur-2xl duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95"
+            onTouchStart={onTouchStart}
+            onTouchEnd={onTouchEnd}
           >
             <DialogTitle className="sr-only">关注与粉丝</DialogTitle>
             {/* 标签切换：绿色果冻药丸滑动指示器 */}
@@ -145,10 +165,14 @@ export default function FollowStats({ userId }: FollowStatsProps) {
                 </div>
               ) : (
                 <ul className="space-y-1">
-                  {list.map((u) => {
+                  {list.map((u, i) => {
                     const name = u.username || "用户"
                     return (
-                      <li key={u.id}>
+                      <li
+                        key={`${tab}-${u.id}`}
+                        className="animate-blur-in"
+                        style={{ animationDelay: `${Math.min(i, 12) * 40}ms` }}
+                      >
                         <button
                           onClick={() => goProfile(u.id)}
                           className="flex w-full items-center gap-3 rounded-2xl px-2 py-2 text-left transition-colors hover:bg-white/10"
