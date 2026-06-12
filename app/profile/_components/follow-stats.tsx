@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import * as DialogPrimitive from "@radix-ui/react-dialog"
+import { X } from "lucide-react"
+import { Dialog, DialogPortal, DialogOverlay, DialogTitle } from "@/components/ui/dialog"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import {
   getFollowCounts,
@@ -87,16 +89,20 @@ export default function FollowStats({ userId }: FollowStatsProps) {
       </div>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-sm border-white/10 bg-neutral-900/95 text-white">
-          <DialogHeader>
+        <DialogPortal>
+          {/* 调淡遮罩并模糊背景页面，毛玻璃才看得出通透感 */}
+          <DialogOverlay className="bg-black/40 backdrop-blur-md" />
+          <DialogPrimitive.Content
+            className="fixed left-1/2 top-1/2 z-50 grid w-full max-w-sm -translate-x-1/2 -translate-y-1/2 gap-4 rounded-3xl border border-white/20 bg-white/10 p-6 text-white shadow-2xl shadow-black/60 backdrop-blur-2xl duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95"
+          >
             <DialogTitle className="sr-only">关注与粉丝</DialogTitle>
             {/* 标签切换 */}
-            <div className="flex items-center gap-1 rounded-xl bg-white/5 p-1">
+            <div className="flex items-center gap-1 rounded-2xl bg-white/10 p-1">
               <button
                 onClick={() => switchTab("followers")}
                 className={
-                  "flex-1 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors " +
-                  (tab === "followers" ? "bg-lime-500 text-black" : "text-white/60 hover:text-white")
+                  "flex-1 rounded-xl px-3 py-1.5 text-sm font-medium transition-colors " +
+                  (tab === "followers" ? "bg-lime-500 text-black" : "text-white/70 hover:text-white")
                 }
               >
                 粉丝 {counts.followers}
@@ -104,52 +110,57 @@ export default function FollowStats({ userId }: FollowStatsProps) {
               <button
                 onClick={() => switchTab("following")}
                 className={
-                  "flex-1 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors " +
-                  (tab === "following" ? "bg-lime-500 text-black" : "text-white/60 hover:text-white")
+                  "flex-1 rounded-xl px-3 py-1.5 text-sm font-medium transition-colors " +
+                  (tab === "following" ? "bg-lime-500 text-black" : "text-white/70 hover:text-white")
                 }
               >
                 关注 {counts.following}
               </button>
             </div>
-          </DialogHeader>
 
-          <div className="max-h-[55vh] overflow-y-auto -mx-2 px-2">
-            {listLoading ? (
-              <div className="py-12 text-center text-sm text-white/40">加载中...</div>
-            ) : list.length === 0 ? (
-              <div className="py-12 text-center text-sm text-white/40">
-                {tab === "followers" ? "还没有粉丝" : "还没有关注任何人"}
-              </div>
-            ) : (
-              <ul className="space-y-1">
-                {list.map((u) => {
-                  const name = u.username || "用户"
-                  return (
-                    <li key={u.id}>
-                      <button
-                        onClick={() => goProfile(u.id)}
-                        className="flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-white/5"
-                      >
-                        <Avatar className="h-10 w-10 border border-white/15">
-                          <AvatarImage src={u.avatar_url || "/placeholder.svg"} />
-                          <AvatarFallback className="bg-black/40 text-sm text-white/80">
-                            {name.charAt(0).toUpperCase()}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm font-medium text-white">{name}</div>
-                          {u.bio && (
-                            <div className="truncate text-xs text-white/40">{u.bio}</div>
-                          )}
-                        </div>
-                      </button>
-                    </li>
-                  )
-                })}
-              </ul>
-            )}
-          </div>
-        </DialogContent>
+            <div className="max-h-[55vh] overflow-y-auto -mx-2 px-2">
+              {listLoading ? (
+                <div className="py-12 text-center text-sm text-white/50">加载中...</div>
+              ) : list.length === 0 ? (
+                <div className="py-12 text-center text-sm text-white/50">
+                  {tab === "followers" ? "还没有粉丝" : "还没有关注任何人"}
+                </div>
+              ) : (
+                <ul className="space-y-1">
+                  {list.map((u) => {
+                    const name = u.username || "用户"
+                    return (
+                      <li key={u.id}>
+                        <button
+                          onClick={() => goProfile(u.id)}
+                          className="flex w-full items-center gap-3 rounded-2xl px-2 py-2 text-left transition-colors hover:bg-white/10"
+                        >
+                          <Avatar className="h-10 w-10 border border-white/20">
+                            <AvatarImage src={u.avatar_url || "/placeholder.svg"} />
+                            <AvatarFallback className="bg-black/40 text-sm text-white/80">
+                              {name.charAt(0).toUpperCase()}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm font-medium text-white">{name}</div>
+                            {u.bio && (
+                              <div className="truncate text-xs text-white/50">{u.bio}</div>
+                            )}
+                          </div>
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </div>
+
+            <DialogPrimitive.Close className="absolute right-4 top-4 rounded-full p-1 text-white/70 opacity-80 transition hover:bg-white/10 hover:opacity-100 focus:outline-none">
+              <X className="h-4 w-4" />
+              <span className="sr-only">关闭</span>
+            </DialogPrimitive.Close>
+          </DialogPrimitive.Content>
+        </DialogPortal>
       </Dialog>
     </>
   )
