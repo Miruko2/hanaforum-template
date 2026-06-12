@@ -96,13 +96,22 @@ export default function FollowStats({ userId }: FollowStatsProps) {
             className="fixed left-1/2 top-1/2 z-50 grid w-full max-w-sm -translate-x-1/2 -translate-y-1/2 gap-4 rounded-3xl border border-white/20 bg-white/10 p-6 text-white shadow-2xl shadow-black/60 backdrop-blur-2xl duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95"
           >
             <DialogTitle className="sr-only">关注与粉丝</DialogTitle>
-            {/* 标签切换 */}
-            <div className="flex items-center gap-1 rounded-2xl bg-white/10 p-1">
+            {/* 标签切换：绿色果冻药丸滑动指示器 */}
+            <div className="relative flex items-center rounded-2xl bg-white/10 p-1">
+              {/* 滑动层：负责在两个标签间平滑移动；内层负责果冻呼吸 */}
+              <div
+                className="pointer-events-none absolute inset-y-1 left-1 w-[calc(50%-0.25rem)] transition-transform duration-300 ease-out"
+                style={{
+                  transform: tab === "following" ? "translateX(100%)" : "translateX(0)",
+                }}
+              >
+                <div className="h-full w-full rounded-xl animate-jelly-pulse" />
+              </div>
               <button
                 onClick={() => switchTab("followers")}
                 className={
-                  "flex-1 rounded-xl px-3 py-1.5 text-sm font-medium transition-colors " +
-                  (tab === "followers" ? "bg-lime-500 text-black" : "text-white/70 hover:text-white")
+                  "relative z-10 flex-1 rounded-xl px-3 py-1.5 text-sm font-medium transition-colors " +
+                  (tab === "followers" ? "text-black" : "text-white/70 hover:text-white")
                 }
               >
                 粉丝 {counts.followers}
@@ -110,8 +119,8 @@ export default function FollowStats({ userId }: FollowStatsProps) {
               <button
                 onClick={() => switchTab("following")}
                 className={
-                  "flex-1 rounded-xl px-3 py-1.5 text-sm font-medium transition-colors " +
-                  (tab === "following" ? "bg-lime-500 text-black" : "text-white/70 hover:text-white")
+                  "relative z-10 flex-1 rounded-xl px-3 py-1.5 text-sm font-medium transition-colors " +
+                  (tab === "following" ? "text-black" : "text-white/70 hover:text-white")
                 }
               >
                 关注 {counts.following}
