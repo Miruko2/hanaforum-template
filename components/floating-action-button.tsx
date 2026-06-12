@@ -9,9 +9,8 @@ import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useToast } from "@/hooks/use-toast"
 import { isAndroidRuntime } from "@/lib/view-transition-nav"
 import { cn } from "@/lib/utils"
-import type { CreatePostForm } from "@/components/create-post-modal"
 
-type FormComponent = typeof CreatePostForm
+type FormModule = typeof import("@/components/create-post-modal")
 
 interface FloatingActionButtonProps {
   onPostCreated?: () => void
@@ -21,18 +20,30 @@ interface FloatingActionButtonProps {
 const OPEN_SPRING = { type: "spring", stiffness: 290, damping: 21, mass: 1 } as const
 const CLOSE_SPRING = { type: "spring", stiffness: 380, damping: 28, mass: 0.9 } as const
 
+// 按钮中心到视口右/下边缘的距离：24px 边距 + 半径 28
+const FAB_CENTER_OFFSET = 52
+
 /**
  * 发帖按钮与发帖面板是同一个常驻元素：点击后按钮经 framer-motion 的
- * layout FLIP（纯 transform，安卓 WebView 安全）果冻形变成居中面板，
- * 关闭时反向缩回按钮位。lime 按钮皮是一层 opacity 交叉淡出的内层。
+ * layout FLIP 果冻形变成居中面板，关闭时反向缩回按钮位。
+ * lime 按钮皮是一层 opacity 交叉淡出的内层。
+ *
+ * 安卓 WebView 上 layout FLIP 实测闪屏（每帧 borderRadius 校正 + boxShadow
+ * 插值都在重绘剧烈变尺寸的图层，纹理重分配跟不上）。安卓改走纯
+ * transform/opacity 假形变：面板一次光栅化后整体从按钮位飞行+缩放弹入，
+ * 果冻皮交叉淡出，全程合成线程，零每帧重绘。
  */
 export default function FloatingActionButton({ onPostCreated }: FloatingActionButtonProps) {
   const [mounted, setMounted] = useState(false)
   const [open, setOpen] = useState(false)
-  const [FormComp, setFormComp] = useState<FormComponent | null>(null)
+  // 安卓延帧起跑：面板先以透明态挂载 2 帧完成光栅化，再放弹簧（消起手卡顿）
+  const [flying, setFlying] = useState(false)
+  const [formMod, setFormMod] = useState<FormModule | null>(null)
   const openRef = useRef(false)
   const lockedRef = useRef(false)
   const prevOverflowRef = useRef("")
+  // 面板中心到按钮中心的位移（打开时采样视口），安卓假形变的飞行向量
+  const flightRef = useRef({ x: 0, y: 0 })
   const { user } = useSimpleAuth()
   const router = useRouter()
   const { toast } = useToast()
@@ -45,7 +56,7 @@ export default function FloatingActionButton({ onPostCreated }: FloatingActionBu
   useEffect(() => {
     const t = window.setTimeout(() => {
       import("@/components/create-post-modal")
-        .then((m) => setFormComp(() => m.CreatePostForm))
+        .then((m) => setFormMod(m))
         .catch(() => {})
     }, 1200)
     return () => window.clearTimeout(t)
@@ -71,6 +82,7 @@ export default function FloatingActionButton({ onPostCreated }: FloatingActionBu
   const close = useCallback(() => {
     openRef.current = false
     setOpen(false)
+    setFlying(false)
     window.setTimeout(() => {
       if (!openRef.current) unlockScroll()
     }, 900)
@@ -98,10 +110,9 @@ export default function FloatingActionButton({ onPostCreated }: FloatingActionBu
       return
     }
 
-    if (!FormComp) {
+    if (!formMod) {
       try {
-        const m = await import("@/components/create-post-modal")
-        setFormComp(() => m.CreatePostForm)
+        setFormMod(await import("@/components/create-post-modal"))
       } catch {
         toast({
           title: "加载失败",
@@ -111,9 +122,23 @@ export default function FloatingActionButton({ onPostCreated }: FloatingActionBu
         return
       }
     }
+    if (isAndroidRuntime) {
+      flightRef.current = {
+        x: window.innerWidth / 2 - FAB_CENTER_OFFSET,
+        y: window.innerHeight / 2 - FAB_CENTER_OFFSET,
+      }
+    }
     lockScroll()
     openRef.current = true
     setOpen(true)
+    if (isAndroidRuntime) {
+      // 双 rAF：等面板透明态挂载并完成首帧光栅化后再起跑
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (openRef.current) setFlying(true)
+        })
+      })
+    }
   }
 
   const handlePostCreated = () => {
@@ -131,16 +156,121 @@ export default function FloatingActionButton({ onPostCreated }: FloatingActionBu
 
   if (!mounted) return null
 
+  // 安卓端假形变：不用 layout FLIP（每帧重绘闪屏），面板作为整体纹理
+  // 从按钮位飞行+缩放弹入/弹出，果冻皮交叉淡出，纯 transform/opacity
+  if (isAndroidRuntime) {
+    const { x: flyX, y: flyY } = flightRef.current
+    return createPortal(
+      <>
+        <AnimatePresence>
+          {open && (
+            <motion.div
+              key="composer-overlay"
+              className="fixed inset-0 z-40 bg-black/70"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.22, ease: "easeOut" }}
+              onClick={close}
+            />
+          )}
+        </AnimatePresence>
+
+        <div
+          className={cn(
+            "pointer-events-none fixed inset-0 flex items-center justify-center",
+            open ? "z-50" : "z-[999]",
+          )}
+        >
+          <AnimatePresence>
+            {!open && (
+              <motion.button
+                key="fab"
+                className="pointer-events-auto absolute bottom-6 right-6 flex h-14 w-14 items-center justify-center rounded-full border border-lime-300/40 bg-gradient-to-br from-lime-400 to-lime-500 text-black shadow-lg"
+                initial={{ opacity: 0, scale: 0.6 }}
+                animate={{ opacity: 1, scale: 1, transition: { delay: 0.22, duration: 0.16 } }}
+                exit={{ opacity: 0, scale: 0.6, transition: { duration: 0.12 } }}
+                onClick={handleButtonClick}
+                aria-label="发布新帖子"
+              >
+                <Plus className="h-6 w-6" />
+                <span className="absolute inset-0 rounded-full bg-lime-400/20 animate-ping" />
+              </motion.button>
+            )}
+          </AnimatePresence>
+
+          <AnimatePresence onExitComplete={unlockScroll}>
+            {open && formMod && (
+              <motion.div
+                key="composer-panel"
+                role="dialog"
+                aria-modal
+                aria-label="创建新帖子"
+                className="pointer-events-auto relative overflow-hidden rounded-3xl border border-white/15 shadow-2xl"
+                style={{
+                  width: "min(42rem, calc(100vw - 32px))",
+                  background: "rgba(21, 23, 27, 0.97)",
+                }}
+                initial={{ x: flyX, y: flyY, scale: 0.12, opacity: 0 }}
+                animate={
+                  flying
+                    ? {
+                        x: 0,
+                        y: 0,
+                        scale: 1,
+                        opacity: 1,
+                        transition: {
+                          x: OPEN_SPRING,
+                          y: OPEN_SPRING,
+                          scale: OPEN_SPRING,
+                          opacity: { duration: 0.16, ease: "easeOut" },
+                        },
+                      }
+                    : { x: flyX, y: flyY, scale: 0.12, opacity: 0, transition: { duration: 0 } }
+                }
+                exit={{
+                  x: flyX,
+                  y: flyY,
+                  scale: 0.12,
+                  opacity: 0,
+                  transition: {
+                    x: CLOSE_SPRING,
+                    y: CLOSE_SPRING,
+                    scale: CLOSE_SPRING,
+                    opacity: { delay: 0.18, duration: 0.18, ease: "easeIn" },
+                  },
+                }}
+              >
+                <div className="relative max-h-[85vh] overflow-y-auto overscroll-contain">
+                  <formMod.CreatePostForm onClose={close} onPostCreated={handlePostCreated} />
+                </div>
+                {/* 果冻皮：起飞时盖住面板再淡出，收回时淡入变回 lime 液滴 */}
+                <motion.div
+                  className="pointer-events-none absolute inset-0 bg-gradient-to-br from-lime-400 to-lime-500"
+                  initial={{ opacity: 1 }}
+                  animate={
+                    flying
+                      ? { opacity: 0, transition: { delay: 0.06, duration: 0.3, ease: "easeOut" } }
+                      : { opacity: 1, transition: { duration: 0 } }
+                  }
+                  exit={{ opacity: 1, transition: { delay: 0.1, duration: 0.16, ease: "easeOut" } }}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      </>,
+      document.body,
+    )
+  }
+
   return createPortal(
     <>
       <AnimatePresence>
         {open && (
           <motion.div
             key="composer-overlay"
-            className={cn(
-              "fixed inset-0 z-40",
-              isAndroidRuntime ? "bg-black/70" : "bg-black/60 backdrop-blur-md",
-            )}
+            className="fixed inset-0 z-40 bg-black/60 backdrop-blur-md"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -200,14 +330,9 @@ export default function FloatingActionButton({ onPostCreated }: FloatingActionBu
             borderRadius: open ? 24 : 28,
             width: open ? "min(42rem, calc(100vw - 32px))" : 56,
             height: open ? "auto" : 56,
-            // 安卓 WebView：实底背景、禁 backdrop-filter（形变中带毛玻璃会鬼影/卡顿）
-            background: isAndroidRuntime ? "rgba(21, 23, 27, 0.97)" : "rgba(255, 255, 255, 0.07)",
-            ...(isAndroidRuntime
-              ? {}
-              : {
-                  backdropFilter: "blur(24px) saturate(150%)",
-                  WebkitBackdropFilter: "blur(24px) saturate(150%)",
-                }),
+            background: "rgba(255, 255, 255, 0.07)",
+            backdropFilter: "blur(24px) saturate(150%)",
+            WebkitBackdropFilter: "blur(24px) saturate(150%)",
           }}
           animate={{
             boxShadow: open
@@ -230,7 +355,7 @@ export default function FloatingActionButton({ onPostCreated }: FloatingActionBu
           </motion.div>
 
           <AnimatePresence>
-            {open && FormComp && (
+            {open && formMod && (
               <motion.div
                 key="composer-form"
                 className="relative max-h-[85vh] overflow-y-auto overscroll-contain"
@@ -242,7 +367,7 @@ export default function FloatingActionButton({ onPostCreated }: FloatingActionBu
                 }}
                 exit={{ opacity: 0, transition: { duration: 0.09 } }}
               >
-                <FormComp onClose={close} onPostCreated={handlePostCreated} />
+                <formMod.CreatePostForm onClose={close} onPostCreated={handlePostCreated} />
               </motion.div>
             )}
           </AnimatePresence>
