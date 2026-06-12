@@ -73,6 +73,9 @@ export default function PageRibbonTransition() {
   const pathname = usePathname()
   const { setCinemaMode } = useCinemaMode()
   const [active, setActive] = useState<ActiveState | null>(null)
+  // 安卓专用：装饰内容（巨型文字行/标题/网点/边条）推迟一帧再挂载。
+  // 非安卓恒为 true（同步渲染，零延迟）。详见下方 showDecor 注释。
+  const [decorReady, setDecorReady] = useState(false)
   // 转场进行中锁：动画 + 冷却期间忽略重复触发（覆盖层本身也拦截一切指针事件）
   const runningRef = useRef(false)
   // 各阶段只执行一次（animationend 与兜底定时器谁先到谁推进）
@@ -142,6 +145,9 @@ export default function PageRibbonTransition() {
       revealedRef.current = false
       hrefRef.current = href
       const gen = ++genRef.current
+      // 安卓先把装饰压住，和 setActive 同批提交 → 遮罩首帧只挂 3 层扫屏（轻），
+      // 装饰交给下方 effect 推迟一帧再上，避开起手帧的布局/光栅化高峰
+      if (isAndroidRuntime) setDecorReady(false)
       setActive({ dir, phase: "cover", card: CARDS[href] ?? FALLBACK_CARD })
       timersRef.current.push(
         window.setTimeout(() => {
@@ -161,13 +167,30 @@ export default function PageRibbonTransition() {
     }
   }, [start])
 
+  // 安卓：遮罩挂载（扫屏起手）后再过两帧才放装饰内容。
+  // 扫屏 translateX 走合成线程，不被主线程的装饰布局/光栅化阻塞 → 起手帧顺滑；
+  // 黑板 0.4s 才盖严、标题本就有 0.34s 入场延迟，晚 ~32ms 上肉眼无感。
+  useEffect(() => {
+    if (!active || !isAndroidRuntime) return
+    let r2 = 0
+    const r1 = requestAnimationFrame(() => {
+      r2 = requestAnimationFrame(() => setDecorReady(true))
+    })
+    return () => {
+      cancelAnimationFrame(r1)
+      if (r2) cancelAnimationFrame(r2)
+    }
+  }, [active])
+
   if (!active) return null
 
   const { card, dir, phase } = active
+  // 装饰是否可挂载：非安卓恒真（同步渲染）；安卓等首帧扫屏起手后两帧才放，
+  // 把巨型文字行的布局/光栅化挪离起手帧，换取扫屏滑动的丝滑起手。
+  const showDecor = !isAndroidRuntime || decorReady
   // 小字行滚完整短语，大字行只滚「单词 + 符号」。
-  // 安卓走静态行（不滚动），只需铺满一屏宽，重复串大幅缩短 —— 省掉超长文本的
-  // 布局/光栅化（滑动首帧卡顿主因之一），视觉静帧无差别。
-  // 非安卓仍走滚动，repeat 足够长保证宽屏下不滚穿。
+  // 转场存活 <1.3s，滚动跑不完一圈，只需够铺满首屏 + 这点位移即可，
+  // 故安卓用较短重复串（省布局开销），非安卓保留长串防宽屏滚穿。
   const phraseRepeat = isAndroidRuntime ? 6 : 14
   const bigRepeat = isAndroidRuntime ? 3 : 12
   const phrase = `${card.word}  ${card.mark}  ${card.jp}  •  ${card.word}  ${card.mark}  ${card.cn}  •  `.repeat(phraseRepeat)
@@ -203,36 +226,44 @@ export default function PageRibbonTransition() {
         }}
       >
         <div className="ptr-panel">
-          <div className="ptr-halftone" />
-          <div className="ptr-rows">
-            {Array.from({ length: ROW_COUNT }, (_, i) => i + 1).map((n) => (
-              <div key={n} className={`ptr-row ptr-row-${n}`}>
-                <span>{n % 2 === 1 ? bigPhrase : phrase}</span>
+          {showDecor && (
+            <>
+              <div className="ptr-halftone" />
+              <div className="ptr-rows">
+                {Array.from({ length: ROW_COUNT }, (_, i) => i + 1).map((n) => (
+                  <div key={n} className={`ptr-row ptr-row-${n}`}>
+                    <span>{n % 2 === 1 ? bigPhrase : phrase}</span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-          <div className="ptr-scanlines" />
+              <div className="ptr-scanlines" />
+            </>
+          )}
         </div>
         {/* 以下元素不进 panel：避开 skew，直接乘主板的平移 */}
-        <div className="ptr-mark">{card.mark}</div>
-        <div className="ptr-title">
-          <div className="ptr-title-word">
-            <span className="ptr-title-echo">{card.word}</span>
-            <span className="ptr-title-main">{card.word}</span>
-          </div>
-          <div className="ptr-title-chip">
-            <span>{card.jp}</span>
-            <i />
-            <span>{card.cn}</span>
-          </div>
-        </div>
-        <div className="ptr-corner-no">
-          {card.no}
-          {card.no !== "EX" && <em>/ 04</em>}
-        </div>
-        <div className="ptr-corner-loading">NOW LOADING ▸▸▸</div>
-        <div className="ptr-edge ptr-edge-left" />
-        <div className="ptr-edge ptr-edge-right" />
+        {showDecor && (
+          <>
+            <div className="ptr-mark">{card.mark}</div>
+            <div className="ptr-title">
+              <div className="ptr-title-word">
+                <span className="ptr-title-echo">{card.word}</span>
+                <span className="ptr-title-main">{card.word}</span>
+              </div>
+              <div className="ptr-title-chip">
+                <span>{card.jp}</span>
+                <i />
+                <span>{card.cn}</span>
+              </div>
+            </div>
+            <div className="ptr-corner-no">
+              {card.no}
+              {card.no !== "EX" && <em>/ 04</em>}
+            </div>
+            <div className="ptr-corner-loading">NOW LOADING ▸▸▸</div>
+            <div className="ptr-edge ptr-edge-left" />
+            <div className="ptr-edge ptr-edge-right" />
+          </>
+        )}
       </div>
       {/* 速度线：压在一切之上横飞。
           安卓上这是常驻无限动画的重灾区（6 条独立合成图层持续光栅化），

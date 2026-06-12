@@ -3841,28 +3841,17 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
 /* ============================================================
    安卓 WebView 精简渲染（.ptr-android）
    --------------------------------------------------------
-   连续快滑切页时安卓最易出现闪屏 / 鬼影 / 卡顿，根因是合成器要在
-   极短时间内反复创建/销毁大量常驻图层、并持续光栅化巨型描边文字 +
-   12 条无限动画。这里在安卓上：
-   · 冻结巨型文字行的无限滚动（保留静态字形，去掉持续光栅化压力）；
-   · 摘掉装饰元素的 will-change（少促一批常驻合成图层，降低快滑时
-     图层创建/销毁的churn → 消除鬼影）；
-   · 停掉常驻闪烁等无限动画。
-   速度线整组在组件里就不挂载（见 page-ribbon-transition.tsx）。
-   核心的三层扫屏（.ptr-wipe）保留 will-change 与动画 —— 它才是真正
-   位移的转场主体。视觉静帧基本不变，只是文字不再滚、速度线不再飞。
+   连续快滑切页时安卓最易出现闪屏 / 鬼影 / 卡顿。对策分两层：
+   · 去掉常驻无限动画的速度线（6 条独立合成图层，在组件里就不挂载）；
+   · 巨型文字行的交错滚动保留 —— 它走合成线程本身不卡，真正的卡在「手势
+     结束 + 遮罩首帧」那一帧的布局/光栅化，由组件侧「装饰推迟一帧挂载」化解。
+   再配合冷却拉长到 480ms、霓虹边降模糊，连续快滑时图层创建/销毁更从容。
+   核心三层扫屏（.ptr-wipe）的 will-change 与动画保留 —— 它才是位移主体。
    ============================================================ */
 .ptr-root.ptr-android .ptr-row {
-  animation: none;
-  will-change: auto;
-}
-.ptr-root.ptr-android .ptr-mark,
-.ptr-root.ptr-android .ptr-title {
-  will-change: auto;
-}
-/* 常驻闪烁：去掉无限动画，停在常显态即可 */
-.ptr-root.ptr-android .ptr-corner-loading {
-  animation: none;
+  /* 滚动与图层提升保留（绝区零式交错滚动靠它），滚动走合成线程本身不卡。
+     首帧开销改由组件侧「装饰推迟一帧挂载」化解，见 page-ribbon-transition.tsx */
+  text-rendering: optimizeSpeed;
 }
 /* 霓虹边：模糊半径越大光栅化越贵，安卓收窄（仍有发光感，静帧基本无差别） */
 .ptr-root.ptr-android .ptr-edge {
