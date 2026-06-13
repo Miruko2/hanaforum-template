@@ -24,7 +24,11 @@ const PLAY_MODE_KEY = "music-play-mode-v1"
 const SOURCE_KEY = "music-source-v1"
 const VOLUME_KEY = "music-volume-v1"
 const LYRICS_KEY = "music-lyrics-v1"
-const HEALTHY_BASE_KEY = "music-meting-base-v1" // 上次探测出的健康 meting 实例
+const HEALTHY_BASE_KEY = "music-meting-base-v2" // 上次探测出的健康 meting 实例：{ base, at }
+// 缓存只在足够「新鲜」时才同步采信：实例健康状态偶尔翻转，几小时内的缓存基本仍准
+//（帮首曲在探测返回前就用对实例）；但跨天的旧缓存可能指向已死实例，那还不如退回构建
+// 默认（列表首位＝当前最可靠实例），免得反把首曲拖到坏实例上（iOS 上即首曲放不出）。
+const HEALTHY_BASE_TTL = 6 * 60 * 60_000 // 6h
 
 // 墙的曲目源：「我的」自定义 vs「精选」默认墙。
 export type MusicSource = "mine" | "featured"
@@ -238,24 +242,34 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   // 冷启动竞态：探测是异步的，首次打开页面若在探测返回前就点歌，ref 还没更新会
   // 用到坏实例（iOS 上第一首放不出、第二首才行）。为此分三层兜底，越靠前越早就绪：
   //   ① 初值 = 实例表首位（同步、瞬时，列表已把当前最可靠的放首位）；
-  //   ② 挂载即同步读 localStorage 上次探测结果覆盖①（老用户/二次访问命中）；
+  //   ② 挂载即同步读 localStorage 上次探测结果覆盖①（仅当新鲜，见 HEALTHY_BASE_TTL）；
   //   ③ 探测完成后更新 ref 并写回 localStorage（自愈 + 供下次冷启动用）。
   const healthyBaseRef = useRef<string>(METING_INSTANCES[0])
   useEffect(() => {
     try {
-      const cached = localStorage.getItem(HEALTHY_BASE_KEY)
-      if (cached && (METING_INSTANCES as readonly string[]).includes(cached)) {
-        healthyBaseRef.current = cached
+      const raw = localStorage.getItem(HEALTHY_BASE_KEY)
+      if (raw) {
+        const cached = JSON.parse(raw) as { base?: string; at?: number }
+        // 仅采信「已知实例 + 新鲜」的缓存；旧缓存忽略、退回 ref 初值（构建默认＝
+        // 列表首位），由下面的探测最终校正。
+        if (
+          cached?.base &&
+          (METING_INSTANCES as readonly string[]).includes(cached.base) &&
+          typeof cached.at === "number" &&
+          Date.now() - cached.at < HEALTHY_BASE_TTL
+        ) {
+          healthyBaseRef.current = cached.base
+        }
       }
     } catch {
-      /* ignore */
+      /* ignore（含旧的纯字符串格式 v1：JSON.parse 失败即忽略，探测会写回新格式） */
     }
     let alive = true
     pickHealthyMetingBase().then((base) => {
       if (!alive) return
       healthyBaseRef.current = base
       try {
-        localStorage.setItem(HEALTHY_BASE_KEY, base)
+        localStorage.setItem(HEALTHY_BASE_KEY, JSON.stringify({ base, at: Date.now() }))
       } catch {
         /* ignore */
       }

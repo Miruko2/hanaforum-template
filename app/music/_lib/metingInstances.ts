@@ -51,15 +51,22 @@ export function rewriteMetingBase(url: string, base: string): string {
 // 故能自愈，掩盖了问题）。在用户点击前先探出健康实例、把 src 改写过去，手势内的
 // 首次 play() 就直接命中可用实例，无需依赖 iOS 不支持的非手势回退。
 const PROBE_ID = "1472822139" // 任意一个常驻网易曲目 id，仅用于探活
+const PROBE_TIMEOUT = 2500    // 单实例探测超时（ms）
 let healthyBasePromise: Promise<string> | null = null
 
 async function isBaseHealthy(base: string): Promise<boolean> {
+  // 加超时：某实例 socket 通但迟迟不回包时，fetch 会挂到浏览器级超时（几十秒甚至
+  // 更久），拖慢「挑健康实例 → 写回 localStorage」的自愈。超时即中断、判这家死、继续
+  // 探下一家。播放期间有 healthyBaseRef 默认值兜底，故超时只影响自愈速度、不影响播放。
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), PROBE_TIMEOUT)
   try {
     // redirect:"manual" —— 健康实例会 302 跳媒体，此模式下得到 opaqueredirect
     // （status 0）即判健康，无需跟随到 CDN 等整段音频响应头，探测在几十毫秒内返回。
     // 故障实例（injahow Redis 挂）返回 200 + text/html 空体，按 content-type 判死。
     const res = await fetch(normalize(base) + "/?server=netease&type=url&id=" + PROBE_ID, {
       redirect: "manual",
+      signal: ctrl.signal,
     })
     if (res.type === "opaqueredirect" || (res.status >= 300 && res.status < 400)) return true
     if (res.ok) {
@@ -70,7 +77,9 @@ async function isBaseHealthy(base: string): Promise<boolean> {
     res.body?.cancel?.()
     return false
   } catch {
-    return false
+    return false // 含 AbortError（超时）：判这家不可用
+  } finally {
+    clearTimeout(timer)
   }
 }
 
