@@ -15,7 +15,7 @@ import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useToast } from "@/hooks/use-toast"
 import { getUserMusicTracks, type UserMusicTrackRow } from "@/lib/supabase"
 import { userRowsToTracks } from "../_lib/userTracks"
-import { metingAlternatives } from "../_lib/metingInstances"
+import { metingAlternatives, pickHealthyMetingBase, rewriteMetingBase } from "../_lib/metingInstances"
 
 const HISTORY_KEY = "music-history-v1"
 const HISTORY_LIMIT = 50
@@ -231,6 +231,19 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   // 实例回退状态（按 playSeq 一份）：首次报错时基于当时的 src 算出其它 meting
   // 实例上的同构 URL 列表，之后每次报错顺序取下一个重试；列表耗尽才判"音源不可用"。
   const metingRetryRef = useRef<{ seq: number; alts: string[]; next: number } | null>(null)
+  // 探测出的健康 meting 实例域名（见 metingInstances.ts）。在用户点击前就绪后，
+  // 解析时把存库/烘焙的 audio_url 改写到该实例，使手势内的首次 play() 直接命中
+  // 可用实例 —— iOS 不支持 error 处理器里的非手势回退 play()，必须靠这条前置改写。
+  const healthyBaseRef = useRef<string | null>(null)
+  useEffect(() => {
+    let alive = true
+    pickHealthyMetingBase().then((base) => {
+      if (alive) healthyBaseRef.current = base
+    })
+    return () => {
+      alive = false
+    }
+  }, [])
 
   // ---- Audio-reactive visuals (simulated pulse only) ----
   //
@@ -559,7 +572,10 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       // (allows fallback to run again for this new track).
       playSeqRef.current += 1
       setIsFallback(false)
-      el.src = track.audio
+      // 改写到已探测的健康实例（若已就绪）：把烘焙/存库里钉死在挂掉实例上的
+      // audio_url 换到可用实例，保证手势内首次 play() 命中可用源（iOS 关键路径）。
+      const base = healthyBaseRef.current
+      el.src = base ? rewriteMetingBase(track.audio, base) : track.audio
       el.currentTime = 0
       setBuffered(0) // 换曲：缓冲条清零
       loadedIdRef.current = track.id
