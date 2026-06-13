@@ -15,7 +15,7 @@ import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useToast } from "@/hooks/use-toast"
 import { getUserMusicTracks, type UserMusicTrackRow } from "@/lib/supabase"
 import { userRowsToTracks } from "../_lib/userTracks"
-import { metingAlternatives, pickHealthyMetingBase, rewriteMetingBase } from "../_lib/metingInstances"
+import { metingAlternatives, pickHealthyMetingBase, rewriteMetingBase, METING_INSTANCES } from "../_lib/metingInstances"
 
 const HISTORY_KEY = "music-history-v1"
 const HISTORY_LIMIT = 50
@@ -24,6 +24,7 @@ const PLAY_MODE_KEY = "music-play-mode-v1"
 const SOURCE_KEY = "music-source-v1"
 const VOLUME_KEY = "music-volume-v1"
 const LYRICS_KEY = "music-lyrics-v1"
+const HEALTHY_BASE_KEY = "music-meting-base-v1" // 上次探测出的健康 meting 实例
 
 // 墙的曲目源：「我的」自定义 vs「精选」默认墙。
 export type MusicSource = "mine" | "featured"
@@ -231,14 +232,33 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   // 实例回退状态（按 playSeq 一份）：首次报错时基于当时的 src 算出其它 meting
   // 实例上的同构 URL 列表，之后每次报错顺序取下一个重试；列表耗尽才判"音源不可用"。
   const metingRetryRef = useRef<{ seq: number; alts: string[]; next: number } | null>(null)
-  // 探测出的健康 meting 实例域名（见 metingInstances.ts）。在用户点击前就绪后，
-  // 解析时把存库/烘焙的 audio_url 改写到该实例，使手势内的首次 play() 直接命中
-  // 可用实例 —— iOS 不支持 error 处理器里的非手势回退 play()，必须靠这条前置改写。
-  const healthyBaseRef = useRef<string | null>(null)
+  // 探测出的健康 meting 实例域名（见 metingInstances.ts）。解析时把存库/烘焙的
+  // audio_url 改写到该实例，使手势内的首次 play() 直接命中可用实例 —— iOS 不支持
+  // error 处理器里的非手势回退 play()，必须靠这条前置改写。
+  // 冷启动竞态：探测是异步的，首次打开页面若在探测返回前就点歌，ref 还没更新会
+  // 用到坏实例（iOS 上第一首放不出、第二首才行）。为此分三层兜底，越靠前越早就绪：
+  //   ① 初值 = 实例表首位（同步、瞬时，列表已把当前最可靠的放首位）；
+  //   ② 挂载即同步读 localStorage 上次探测结果覆盖①（老用户/二次访问命中）；
+  //   ③ 探测完成后更新 ref 并写回 localStorage（自愈 + 供下次冷启动用）。
+  const healthyBaseRef = useRef<string>(METING_INSTANCES[0])
   useEffect(() => {
+    try {
+      const cached = localStorage.getItem(HEALTHY_BASE_KEY)
+      if (cached && (METING_INSTANCES as readonly string[]).includes(cached)) {
+        healthyBaseRef.current = cached
+      }
+    } catch {
+      /* ignore */
+    }
     let alive = true
     pickHealthyMetingBase().then((base) => {
-      if (alive) healthyBaseRef.current = base
+      if (!alive) return
+      healthyBaseRef.current = base
+      try {
+        localStorage.setItem(HEALTHY_BASE_KEY, base)
+      } catch {
+        /* ignore */
+      }
     })
     return () => {
       alive = false
@@ -572,10 +592,10 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       // (allows fallback to run again for this new track).
       playSeqRef.current += 1
       setIsFallback(false)
-      // 改写到已探测的健康实例（若已就绪）：把烘焙/存库里钉死在挂掉实例上的
-      // audio_url 换到可用实例，保证手势内首次 play() 命中可用源（iOS 关键路径）。
-      const base = healthyBaseRef.current
-      el.src = base ? rewriteMetingBase(track.audio, base) : track.audio
+      // 改写到健康实例：把烘焙/存库里钉死在某实例上的 audio_url 换到当前可用实例，
+      // 保证手势内首次 play() 命中可用源（iOS 关键路径）。healthyBaseRef 永不为空
+      // （初值=实例表首位，再被 localStorage 缓存 / 探测结果覆盖）。
+      el.src = rewriteMetingBase(track.audio, healthyBaseRef.current)
       el.currentTime = 0
       setBuffered(0) // 换曲：缓冲条清零
       loadedIdRef.current = track.id

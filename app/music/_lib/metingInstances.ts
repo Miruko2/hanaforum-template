@@ -1,14 +1,16 @@
-// 公共 Meting 实例表（主备回退）。
+// 公共 Meting 实例表（主备回退 + 冷启动默认）。
 // 背景：解析与播放原本单点依赖 injahow，它一挂（如 Redis 写盘失败时返回
-// HTTP 200 + PHP Fatal error 文本）全站歌曲就不可用。这里维护若干接口格式
-// 完全相同的公共实例，按顺序作为主力/备胎：
+// HTTP 200 + 空 html / PHP 报错文本，而非 302 跳媒体）全站歌曲就不可用。这里
+// 维护若干接口格式完全相同的公共实例，按顺序作为主力/备胎：
 //   · 歌单/单曲解析（musicImport）：逐个实例试，谁返回合法 JSON 用谁；
-//   · 播放（PlaybackContext）：存库的 audio_url 带着具体实例域名，<audio>
-//     加载报错时把 URL 换到下一个实例重试，全试完才判"音源不可用"。
+//   · 播放（PlaybackContext）：先探活挑出健康实例，把 audio_url 改写过去再播。
+// 顺序即「偏好/冷启动默认」：列表首位是探测就绪前直接使用的实例，故应放当前
+// 最可靠的一个（injahow 故障期间把 qijieya 提前）。运行时探测会覆盖此默认，
+// 并持久化到 localStorage，恢复后自动回到健康实例 —— 顺序只影响首次冷启动。
 // 要求：实例必须 CORS 为 *、路径形如 https://host/path/?query（query 同构）。
 export const METING_INSTANCES = [
-  "https://api.injahow.cn/meting/",
   "https://api.qijieya.cn/meting/",
+  "https://api.injahow.cn/meting/",
 ] as const
 
 /** 规整成不带末尾斜杠的前缀，便于和 URL 的 ? 前部分比对 */
@@ -53,18 +55,20 @@ let healthyBasePromise: Promise<string> | null = null
 
 async function isBaseHealthy(base: string): Promise<boolean> {
   try {
+    // redirect:"manual" —— 健康实例会 302 跳媒体，此模式下得到 opaqueredirect
+    // （status 0）即判健康，无需跟随到 CDN 等整段音频响应头，探测在几十毫秒内返回。
+    // 故障实例（injahow Redis 挂）返回 200 + text/html 空体，按 content-type 判死。
     const res = await fetch(normalize(base) + "/?server=netease&type=url&id=" + PROBE_ID, {
-      // 健康实例会 302 到媒体；跟随后 content-type 为 audio/*。
-      // 不读 body，拿到响应头即取消，避免下载整段音频。
-      redirect: "follow",
+      redirect: "manual",
     })
-    if (!res.ok) {
+    if (res.type === "opaqueredirect" || (res.status >= 300 && res.status < 400)) return true
+    if (res.ok) {
+      const ct = (res.headers.get("content-type") || "").toLowerCase()
       res.body?.cancel?.()
-      return false
+      return ct.startsWith("audio") || ct.startsWith("application/octet-stream")
     }
-    const ct = (res.headers.get("content-type") || "").toLowerCase()
     res.body?.cancel?.()
-    return ct.startsWith("audio") || ct.startsWith("application/octet-stream")
+    return false
   } catch {
     return false
   }
