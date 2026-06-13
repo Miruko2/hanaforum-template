@@ -14,7 +14,8 @@ import { CoverBackdrop } from "./CoverBackdrop"
 import { VideoBackdrop } from "./VideoBackdrop"
 import { Grain } from "./Grain"
 import { useReducedMotion } from "../_lib/useReducedMotion"
-import { useIsAndroid, useIsAndroidApp, useIsMobileTier } from "../_lib/platform"
+import { useIsMobile } from "../_lib/useIsMobile"
+import { useIsAndroid, useIsAndroidApp } from "../_lib/useIsAndroid"
 import { usePlaybackWall, useTracks } from "../_context/PlaybackContext"
 // Toggle between cover-image backdrop (per track) and a single looping video.
 const USE_VIDEO_BACKDROP = true
@@ -92,7 +93,7 @@ export function MusicCanvas({ onExpand, overlayOpen = false }: Props) {
   // Distinct from the layout-driven `isMobile` (viewSize.w < 768) below —
   // this is a *device-tier* signal that drives perf degradation: when true
   // we drop the video backdrop, grain, parallax, and lighten the card blur.
-  const mobileTier = useIsMobileTier()
+  const mobileTier = useIsMobile()
   // `lite` collapses both reasons we'd want a stripped-down render into a
   // single boolean for the rAF loop / props below.
   const lite = reducedMotion || mobileTier
