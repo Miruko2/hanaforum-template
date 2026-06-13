@@ -363,7 +363,7 @@ const PostCard = memo(function PostCard({
         
         {canDelete && (
           <DropdownMenu>
-            <DropdownMenuTrigger className="absolute top-2 right-2 z-10 p-1.5 bg-black/30 backdrop-blur-md text-white/80 rounded-lg hover:bg-black/40">
+            <DropdownMenuTrigger className="absolute top-2 right-2 z-20 p-1.5 bg-black/30 backdrop-blur-md text-white/80 rounded-lg hover:bg-black/40">
               <MoreVertical className="h-4 w-4" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
