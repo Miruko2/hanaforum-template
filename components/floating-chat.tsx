@@ -89,6 +89,91 @@ function savePosition(pos: PanelPosition) {
   } catch {}
 }
 
+// 「删除会话」是本地隐藏（私聊消息本身不删，避免误删双方记录）：
+// 记录 convId → 隐藏时刻(ms)。loadConvs 据此过滤；若隐藏后该会话又有更新的消息
+// （对方再发 / 自己重开），则取消隐藏恢复显示。仅本机生效。
+const HIDDEN_CONVS_KEY = "floating-chat-hidden-convs"
+
+function loadHiddenConvs(): Record<string, number> {
+  if (typeof window === "undefined") return {}
+  try {
+    const raw = localStorage.getItem(HIDDEN_CONVS_KEY)
+    if (!raw) return {}
+    const obj = JSON.parse(raw)
+    return obj && typeof obj === "object" ? (obj as Record<string, number>) : {}
+  } catch {
+    return {}
+  }
+}
+
+function saveHiddenConvs(map: Record<string, number>) {
+  try {
+    localStorage.setItem(HIDDEN_CONVS_KEY, JSON.stringify(map))
+  } catch {}
+}
+
+function hideConv(convId: string) {
+  const map = loadHiddenConvs()
+  map[convId] = Date.now()
+  saveHiddenConvs(map)
+}
+
+function unhideConv(convId: string) {
+  const map = loadHiddenConvs()
+  if (map[convId] != null) {
+    delete map[convId]
+    saveHiddenConvs(map)
+  }
+}
+
+// 「最后已读时刻」：convId → ms。打开/查看某会话时更新为当下。
+// loadConvs 据此把「对方发来、且晚于已读时刻」的消息计为未读——这样即便
+// 接收方离线、错过了 realtime 推送，再打开页面也能正确亮红点。仅本机生效。
+const LAST_READ_KEY = "floating-chat-last-read"
+// 安装基线：本功能首次运行的时刻。没有「最后已读」记录的会话以它为界，
+// 只有「上线之后」的新消息才算未读，避免历史私聊一上来全亮红点。
+const INSTALLED_AT_KEY = "floating-chat-installed-at"
+
+function loadLastRead(): Record<string, number> {
+  if (typeof window === "undefined") return {}
+  try {
+    const raw = localStorage.getItem(LAST_READ_KEY)
+    if (!raw) return {}
+    const obj = JSON.parse(raw)
+    return obj && typeof obj === "object" ? (obj as Record<string, number>) : {}
+  } catch {
+    return {}
+  }
+}
+
+function saveLastRead(map: Record<string, number>) {
+  try {
+    localStorage.setItem(LAST_READ_KEY, JSON.stringify(map))
+  } catch {}
+}
+
+function markConvRead(convId: string) {
+  const map = loadLastRead()
+  map[convId] = Date.now()
+  saveLastRead(map)
+}
+
+function getInstalledAt(): number {
+  if (typeof window === "undefined") return Date.now()
+  try {
+    const raw = localStorage.getItem(INSTALLED_AT_KEY)
+    if (raw) {
+      const n = Number(raw)
+      if (Number.isFinite(n)) return n
+    }
+    const now = Date.now()
+    localStorage.setItem(INSTALLED_AT_KEY, String(now))
+    return now
+  } catch {
+    return Date.now()
+  }
+}
+
 export default function FloatingChat() {
   const { user } = useSimpleAuth()
   const { toast } = useToast()
@@ -222,30 +307,61 @@ export default function FloatingChat() {
       .order("created_at", { ascending: false })
       .limit(200)
     if (error || !data) return
-    const rows = (data ?? []) as { sender_id: string; recipient_id: string }[]
+    const rows = (data ?? []) as { sender_id: string; recipient_id: string; created_at: string }[]
+
+    const lastRead = loadLastRead()
+    const baseline = getInstalledAt() // 无「最后已读」记录的会话以此为界，只算上线后的新消息
+    const hidden = loadHiddenConvs()
+    let hiddenChanged = false
+
+    // 一趟遍历：记录每会话最新消息时刻（rows 已按 created_at 倒序，首次遇到即最新）+ 统计未读
+    const latestAt = new Map<string, number>()
+    const unreadCount = new Map<string, number>()
     const partners: string[] = []
     for (const r of rows) {
       const other: string = r.sender_id === myId ? r.recipient_id : r.sender_id
-      if (other && other !== myId && !partners.includes(other)) partners.push(other)
+      if (!other || other === myId) continue
+      const ts = new Date(r.created_at).getTime()
+      if (!latestAt.has(other)) latestAt.set(other, ts)
+      if (!partners.includes(other)) partners.push(other)
+      // 对方发来（sender 即对方）、且晚于「最后已读（无则用安装基线）」→ 未读，含离线期间错过的
+      if (r.sender_id === other && ts > (lastRead[other] ?? baseline)) {
+        unreadCount.set(other, (unreadCount.get(other) ?? 0) + 1)
+      }
     }
-    if (partners.length === 0) {
+    // 过滤被「删除」的会话；若隐藏后又有更新的消息则恢复并清掉隐藏标记
+    const visible = partners.filter((id) => {
+      const h = hidden[id]
+      if (h == null) return true
+      if ((latestAt.get(id) ?? 0) > h) {
+        delete hidden[id]
+        hiddenChanged = true
+        return true
+      }
+      return false
+    })
+    if (hiddenChanged) saveHiddenConvs(hidden)
+    if (visible.length === 0) {
       setConvs([])
       return
     }
     const { data: profs } = await supabase
       .from("profiles")
       .select("id,username,avatar_url")
-      .in("id", partners)
+      .in("id", visible)
     const pmap = new Map((profs ?? []).map((p: { id: string; username: string; avatar_url: string | null }) => [p.id, p]))
     setConvs((prev) => {
-      const unreadMap = new Map(prev.map((c) => [c.id, c.unread]))
-      return partners.map((id) => {
+      const prevUnread = new Map(prev.map((c) => [c.id, c.unread]))
+      return visible.map((id) => {
         const p = pmap.get(id)
+        // 取「计算出的未读」与「内存里已累加的未读」较大值，避免覆盖实时已 +1 但还没读的
+        const computed = unreadCount.get(id) ?? 0
+        const inMem = prevUnread.get(id) ?? 0
         return {
           id,
           username: p?.username || "用户",
           avatar_url: p?.avatar_url ?? null,
-          unread: unreadMap.get(id) ?? 0,
+          unread: Math.max(computed, inMem),
         }
       })
     })
@@ -267,9 +383,11 @@ export default function FloatingChat() {
         { event: "INSERT", schema: "public", table: "dm_messages", filter: `recipient_id=eq.${myId}` },
         (payload) => {
           const m = payload.new as { sender_id: string }
+          unhideConv(m.sender_id) // 对方又发来消息：若该会话曾被删除(隐藏)，恢复显示
           const a = activeRef.current
           // 仅当面板开着且正在看这个人才不计未读；其余（含面板关闭）一律 +1
           const viewing = openRef.current && a.kind === "dm" && a.id === m.sender_id
+          if (viewing) markConvRead(m.sender_id) // 正在看：持续标记已读，避免切走后被当未读
           const known = convsRef.current.some((c) => c.id === m.sender_id)
           setConvs((prev) => {
             const exists = prev.find((c) => c.id === m.sender_id)
@@ -396,6 +514,7 @@ export default function FloatingChat() {
       const mapped = rows.map((m) => mapDm(m, myId, myName, partner))
       msgCacheRef.current.set(key, mapped)
       setMessages(mapped)
+      markConvRead(partner.id) // 打开会话即视为已读，更新「最后已读」时刻
     })()
 
     const ch = supabase
@@ -588,6 +707,7 @@ export default function FloatingChat() {
   const startDm = useCallback(
     (p: Partner) => {
       if (!myId || p.id === myId) return
+      unhideConv(p.id) // 主动重开会话：取消之前的删除(隐藏)
       setActive({ kind: "dm", id: p.id, username: p.username, avatar_url: p.avatar_url ?? null })
       setConvs((prev) => {
         const exists = prev.find((c) => c.id === p.id)
@@ -619,6 +739,7 @@ export default function FloatingChat() {
 
   // 关闭（删除）一个私聊会话
   const closeDm = useCallback((convId: string) => {
+    hideConv(convId) // 持久化隐藏：刷新后不再复活（除非之后有更新的消息）
     setConvs((prev) => prev.filter((c) => c.id !== convId))
     // 如果正在看这个人的私聊，切回大厅
     if (activeRef.current.kind === "dm" && activeRef.current.id === convId) {
