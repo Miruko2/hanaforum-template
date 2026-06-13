@@ -1481,6 +1481,80 @@ body.modal-open {
   .touch-callout-none {
     -webkit-touch-callout: none;
   }
+
+  /* ============================================================
+     安卓 / 触屏滚动性能：backdrop-filter 永不参与过渡/动画
+     --------------------------------------------------------
+     手指滑动时浏览器会对手指下方的元素触发 :hover。若 backdrop-filter
+     在 transition 列表里（transition:all 或显式声明）且 :hover 改了
+     它的值，GPU 每帧都要重新采样并光栅化背景 → 掉帧/花屏/卡顿。
+     以下规则仅在触屏设备生效，桌面端完全不受影响。
+     ============================================================ */
+
+  /* —— 帖子卡片（首页核心，影响最大）—— */
+  /* transition 排除 backdrop-filter，只保留合成器友好的属性 */
+  .glass-card {
+    transition: transform 0.4s cubic-bezier(0.23, 1, 0.320, 1),
+                box-shadow 0.4s cubic-bezier(0.23, 1, 0.320, 1),
+                border-color 0.4s cubic-bezier(0.23, 1, 0.320, 1),
+                background-color 0.4s cubic-bezier(0.23, 1, 0.320, 1);
+  }
+  /* hover 时 backdrop-filter 保持基础值不变（桌面才加强到 blur(26px)） */
+  .glass-card:hover {
+    backdrop-filter: blur(20px) saturate(140%);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
+  }
+
+  /* —— 帖子入场动画：动画结束后释放 filter 后备存储 —— */
+  .post-enter-visible .glass-card {
+    will-change: transform, opacity;
+  }
+
+  /* —— 玻璃拟态卡片（--gm-blur 驱动 backdrop-filter）—— */
+  .glassmorphism-container {
+    --gm-transition: transform 0.4s cubic-bezier(0.23, 1, 0.32, 1),
+                     box-shadow 0.4s cubic-bezier(0.23, 1, 0.32, 1),
+                     border-color 0.4s cubic-bezier(0.23, 1, 0.32, 1),
+                     background-color 0.4s cubic-bezier(0.23, 1, 0.32, 1);
+  }
+  .glassmorphism-card:hover {
+    --gm-blur: 20px;
+  }
+
+  /* —— 含 backdrop-filter 的辅助元素：transition 排除 backdrop-filter —— */
+  .card-action-btn {
+    transition: color 0.3s cubic-bezier(0.23, 1, 0.320, 1),
+                background-color 0.3s cubic-bezier(0.23, 1, 0.320, 1),
+                border-color 0.3s cubic-bezier(0.23, 1, 0.320, 1),
+                transform 0.3s cubic-bezier(0.23, 1, 0.320, 1),
+                box-shadow 0.3s cubic-bezier(0.23, 1, 0.320, 1);
+  }
+  .menu-button {
+    transition: color 0.3s ease, background-color 0.3s ease, border-color 0.3s ease;
+  }
+  .frosted-glass {
+    transition: border-color 0.3s ease, background-color 0.3s ease;
+  }
+  .floating-action-button {
+    transition: transform 0.4s cubic-bezier(0.23, 1, 0.320, 1),
+                box-shadow 0.4s cubic-bezier(0.23, 1, 0.320, 1),
+                border-color 0.4s cubic-bezier(0.23, 1, 0.320, 1),
+                background 0.4s cubic-bezier(0.23, 1, 0.320, 1);
+  }
+
+  /* —— 模态遮罩：不过渡/不动画 backdrop-filter —— */
+  .modal-backdrop {
+    transition: background-color 0.3s ease;
+  }
+  .modal-backdrop-strong {
+    will-change: opacity;
+    opacity: 0;
+    animation-name: touchBackdropFadeIn;
+  }
+  @keyframes touchBackdropFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
 }
 
 /* 过渡优化 */
@@ -4082,4 +4156,34 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
 /* 霓虹边：模糊半径越大光栅化越贵，安卓收窄（仍有发光感，静帧基本无差别） */
 .ptr-root.ptr-android .ptr-edge {
   box-shadow: 0 0 12px rgba(var(--ptr-accent-rgb), 0.7);
+}
+
+/* —— 巨型镂空描边文字行：实心化降光栅化成本 ——
+   -webkit-text-stroke 要为每个字形生成独立描边路径纹理，光栅化成本远高于
+   实心填充。3 条巨型镂空行（row-1/3/5，最大 190px）是遮罩存活期间最重的
+   单层纹理来源，连续快滑时图层创建/回收跟不上 GPU 纹理回收 → 卡顿、掉帧、
+   纹理残留花屏。安卓改为半透明实心填充：视觉存在感不减（实心比描边更显眼），
+   但单层纹理复杂度骤降。仅 .ptr-android 生效，桌面/iOS 保留完整镂空描边。 */
+.ptr-root.ptr-android .ptr-row-1,
+.ptr-root.ptr-android .ptr-row-3,
+.ptr-root.ptr-android .ptr-row-5 {
+  -webkit-text-stroke: 0;
+}
+.ptr-root.ptr-android .ptr-row-1 {
+  color: rgba(255, 255, 255, 0.26);
+}
+.ptr-root.ptr-android .ptr-row-3 {
+  color: rgba(var(--ptr-accent-rgb), 0.5);
+}
+.ptr-root.ptr-android .ptr-row-5 {
+  color: rgba(255, 255, 255, 0.38);
+}
+
+/* —— 巨型水印符号：瘦身纹理 ——
+   原最大 640px 镂空描边，单元素纹理面积极大。安卓收窄字号上限并改实心
+   低透明填充，纹理瘦身同时保留水印的视觉重量（仍居中、仍大、仍带主题色）。 */
+.ptr-root.ptr-android .ptr-mark {
+  -webkit-text-stroke: 0;
+  font-size: clamp(180px, 42vh, 380px);
+  color: rgba(var(--ptr-accent-rgb), 0.16);
 }
