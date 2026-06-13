@@ -53,6 +53,13 @@ const ASSET_EXTS = ["jpg", "png", "webp", "gif"]
 const BLUR_FADE_ZONE = 50 // pixels from edge to start blur
 const BLUR_MAX = 12 // max blur in pixels
 
+// 触屏设备（安卓 WebView 等）：onScroll 中的 updateBlur 需要 rAF 节流，
+// 否则逐事件 querySelectorAll + getBoundingClientRect + 写 inline filter
+// 会在滑动时强制布局 + filter 光栅化 → 卡顿/花屏。桌面端直接调用即可。
+const IS_TOUCH =
+  typeof window !== "undefined" &&
+  (window.matchMedia?.("(hover: none) and (pointer: coarse)").matches ?? false)
+
 const pairKey = (a: string, b: string) => [a, b].sort().join(":")
 
 // localStorage key for persisting chat panel position
@@ -112,6 +119,8 @@ export default function FloatingChat() {
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const feedRef = useRef<HTMLDivElement>(null)
   const atBottomRef = useRef(true)
+  // rAF 节流 ref（仅触屏设备使用）
+  const blurRafRef = useRef<number | null>(null)
   const avatarRef = useRef<string | null>(null)
   const activeRef = useRef<Active>(active)
   const convsRef = useRef<DmConv[]>(convs)
@@ -433,7 +442,17 @@ export default function FloatingChat() {
     const el = feedRef.current
     if (el) {
       atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60
-      updateBlur()
+      if (IS_TOUCH) {
+        // 触屏设备：rAF 合并连续 scroll 事件，一帧最多一次 updateBlur
+        if (blurRafRef.current == null) {
+          blurRafRef.current = requestAnimationFrame(() => {
+            blurRafRef.current = null
+            updateBlur()
+          })
+        }
+      } else {
+        updateBlur()
+      }
     }
   }
   useEffect(() => {

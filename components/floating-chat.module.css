@@ -187,6 +187,17 @@
   max-width: 100%;
   transition: filter 0.35s ease-out, opacity 0.35s ease-out;
 }
+
+/* 触屏设备：移除 filter/opacity 过渡。updateBlur 在 onScroll 中以 rAF
+   频率逐帧改写 inline filter/opacity，若再加 350ms 过渡，GPU 每个 tick
+   都要在旧新 blur 值之间插值光栅化 → 安卓滚动严重卡顿/花屏。
+   rAF 节流后本身就是 60fps 平滑更新，无需 CSS 过渡补间。
+   桌面端保留过渡（鼠标滚轮滚动频率低，过渡让模糊变化更柔和）。 */
+@media (hover: none) and (pointer: coarse) {
+  .row {
+    transition: none;
+  }
+}
 .rowOther {
   justify-content: flex-start;
 }
