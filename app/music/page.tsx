@@ -6,8 +6,15 @@ import { ListMusic } from "lucide-react"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { PlaybackProvider } from "./_context/PlaybackContext"
 import { PerfHUD } from "./_components/PerfHUD"
+import { METING_INSTANCES } from "./_lib/metingInstances"
 import type { Track } from "./_data/tracks"
 import type { ExpandRect, ExpandTarget } from "./_components/ExpandedCard"
+
+// meting 实例的 origin（去重）——用于页面级 preconnect 预热。模块级算一次，
+// 不随渲染重算；URL 在 SSR(Node) / 浏览器都可用，无 window 依赖。
+const METING_ORIGINS = Array.from(
+  new Set(METING_INSTANCES.map((b) => new URL(b).origin)),
+)
 
 const MusicCanvas = dynamic(
   () => import("./_components/MusicCanvas").then((m) => m.MusicCanvas),
@@ -76,6 +83,11 @@ export default function MusicPage() {
 
   return (
     <PlaybackProvider>
+      {/* 预热 meting 实例连接：提前完成 DNS + TLS 握手，缩短首播「现取签名 URL」那一跳的
+          往返。音频字节走网易 CDN 直链、域名随歌变化无法稳定预连，故只预热代理实例。 */}
+      {METING_ORIGINS.map((origin) => (
+        <link key={origin} rel="preconnect" href={origin} />
+      ))}
       <MusicCanvas onExpand={handleExpand} overlayOpen={overlayOpen} />
       <MusicPlayer
         onToggleHistory={() => setLibraryOpen((v) => !v)}

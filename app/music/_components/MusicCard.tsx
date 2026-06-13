@@ -71,6 +71,11 @@ function MusicCardBase(
         // Only treat as a tap if it was small AND quick — otherwise it's a drag
         // and the click is collateral; swallow it.
         if (Math.hypot(dx, dy) > 5 || dt > 500) return
+        // 点卡片即播：在「点击手势的同步栈内」就发起 play()，让首播的解析/缓冲与面板
+        // 飞入动画重叠，把 iOS 那 3-4s 网络等待藏进动画里。iOS 只认手势栈内同步触发的
+        // play()，故必须在此处发起，不能等面板挂载后再播（那时已脱离手势栈、会被拒）。
+        // 已在播放的当前曲不重复触发（否则 togglePlay 会把正放的歌切成暂停）。
+        if (!isPlaying) togglePlay(track.id)
         onExpand(track, (e.currentTarget as HTMLDivElement).getBoundingClientRect())
       }}
       // 初始 opacity-0：新卡挂载瞬间先隐身。canvas 的 rAF 循环首帧会写入内联 opacity
