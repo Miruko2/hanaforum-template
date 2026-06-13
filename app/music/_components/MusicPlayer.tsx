@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion"
 import { Pause, Play, SkipBack, SkipForward, History as HistoryIcon, Heart, Repeat, Repeat1, Square } from "lucide-react"
 import { usePlayback, usePlaybackTime } from "../_context/PlaybackContext"
 import { useDominantHue } from "../_lib/useDominantHue"
+import { useIsAndroidApp } from "../_lib/useIsAndroid"
 import { TrackCover } from "./TrackCover"
 import { PlayModeMenu } from "./PlayModeMenu"
 import { VolumeControl } from "./VolumeControl"
@@ -158,9 +159,9 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
   // 贡献趋近于 0；但代价是真实的 —— 背景呼吸脉冲每变一次，整块面板都要重模糊
   // 一遍，还给本就脆弱的 WebView 合成器（鬼影史）多压一层。实底加深到 0.92 补偿。
   // 安卓 Chrome / iOS / 桌面不受影响，保留完整毛玻璃。
-  const isAndroidWebView = typeof navigator !== "undefined" &&
-    /Android/.test(navigator.userAgent) &&
-    /wv|WebView/.test(navigator.userAgent)
+  // 走统一的 useIsAndroidApp（同步首帧正确 + Capacitor 全局检测 + 晚注入补查），
+  // 不再单独内联一份更松的 UA 正则。它只驱动静态底色、不碰 framer-motion initial。
+  const isAndroidWebView = useIsAndroidApp()
 
   return (
     <div

@@ -3,63 +3,76 @@
 import { useEffect, useState } from "react"
 
 /**
- * Detects Android devices (phones + tablets running Android Chrome / WebView).
+ * Platform detection for the music page's Android perf-degradation and the
+ * WebView ghosting workarounds.
  *
- * Why this exists: Android Chrome's GPU compositor has a long-standing bug
- * where combining `backdrop-filter` with an animated `filter` (e.g.
- * framer-motion `initial/animate/exit: { filter: "blur(...)" }`) tears the
- * layer's backing buffer during the transition — users see a momentary
- * "shattered / static-noise" flash on the affected element.
+ * WHY SYNCHRONOUS (first-frame-correct): these flags feed framer-motion
+ * `initial` props — the frosted-glass entrance `filter` on ExpandedCard /
+ * HistoryPanel. `initial` is read only on the mount frame. A detector that
+ * returns the wrong value on first paint (the classic `useState(false)` +
+ * `useEffect` flip) sets the NON-Android variant first; when we then swap to
+ * the Android variant, framer-motion stops managing `filter` → blur sticks →
+ * the panel/list is permanently blurred on Android. A footgun that does NOT
+ * reproduce on desktop. So we read the UA / Capacitor global *synchronously
+ * during render* and never start with a placeholder `false`.
  *
- * iOS Safari runs a different rendering pipeline (WebKit + CoreAnimation /
- * Metal) and does NOT exhibit this bug; iPads and iPhones display normally.
+ * WHY THAT'S SSR-SAFE HERE: every consumer (MusicCanvas, MusicPlayer,
+ * HistoryPanel, ExpandedCard) is dynamically imported with `{ ssr: false }`
+ * (see app/music/page.tsx), so `navigator` is always defined when these run and
+ * there is no server render to mismatch during hydration. Re-evaluate before
+ * reusing these hooks in a component that DOES server-render.
  *
- * We therefore narrowly target Android only and fall back to a solid
- * semi-opaque background + skip the filter animation on those devices. All
- * other platforms keep the full frosted-glass effect.
- *
- * Note: SSR-safe — initial value is `false` and we only inspect
- * `navigator.userAgent` inside `useEffect`, so first paint matches the
- * server output and there's no hydration mismatch.
+ * The Android-only targeting exists because Android Chrome's GPU compositor
+ * tears the backing buffer when an animated `filter` overlaps a
+ * `backdrop-filter` (momentary "shattered / static-noise" flash). iOS Safari
+ * (WebKit + CoreAnimation / Metal) does not exhibit this, so iPhones/iPads keep
+ * the full frosted-glass effect.
  */
-export function useIsAndroid(): boolean {
-  const [android, setAndroid] = useState(false)
-  useEffect(() => {
-    if (typeof navigator === "undefined") return
-    setAndroid(/Android/i.test(navigator.userAgent))
-  }, [])
-  return android
+
+function ua(): string {
+  return typeof navigator !== "undefined" ? navigator.userAgent || "" : ""
+}
+
+/** Any Android device: phones, tablets, Android Chrome and the in-app WebView. */
+export function detectIsAndroid(): boolean {
+  return /Android/i.test(ua())
 }
 
 /**
- * Detects specifically the **Android Capacitor app** (Android System WebView) —
- * NOT a normal browser (desktop / iOS / Android Chrome).
- *
- * Used to scope the bottom-player ghosting workaround: the Android System
- * WebView carries a Chromium compositor bug where `preserve-3d` cards in
- * MusicCanvas paint over the fixed bottom player ("square ghost / flicker").
- * This bug does NOT reproduce in Android Chrome / iOS / desktop, so the
- * (visually lossy) card-occlusion fix must run ONLY inside the Android app.
- *
- * Detection prefers the Capacitor-injected runtime global, with the Android
- * System WebView UA token (`; wv)`, which Chrome lacks) as a robust fallback in
- * case the global isn't injected on a remotely-loaded (server.url) page.
- *
- * SSR-safe: starts `false`, only inspects `window`/`navigator` inside
- * `useEffect` → no hydration mismatch.
+ * Specifically the Capacitor Android app (Android System WebView), NOT a normal
+ * browser (desktop / iOS / Android Chrome). Prefers the Capacitor-injected
+ * runtime global; falls back to the System WebView UA token (`; wv)`, which
+ * Chrome lacks) so the cold-start window on a remotely-loaded (server.url) page
+ * — before the global is injected — is still covered.
  */
-export function useIsAndroidApp(): boolean {
-  const [isAndroidApp, setIsAndroidApp] = useState(false)
-  useEffect(() => {
-    if (typeof window === "undefined") return
+export function detectIsAndroidApp(): boolean {
+  if (typeof window !== "undefined") {
     const cap = (
       window as unknown as { Capacitor?: { getPlatform?: () => string } }
     ).Capacitor
-    const fromCapacitor =
-      typeof cap?.getPlatform === "function" && cap.getPlatform() === "android"
-    const ua = navigator.userAgent || ""
-    const fromWebViewUA = /Android/i.test(ua) && /;\s*wv\)/i.test(ua)
-    setIsAndroidApp(Boolean(fromCapacitor || fromWebViewUA))
-  }, [])
-  return isAndroidApp
+    if (typeof cap?.getPlatform === "function" && cap.getPlatform() === "android") {
+      return true
+    }
+  }
+  const s = ua()
+  return /Android/i.test(s) && /;\s*wv\)/i.test(s)
+}
+
+/** Hook — sync-correct on the first frame (no useEffect flash). Safe to drive
+ *  framer-motion `initial`. */
+export function useIsAndroid(): boolean {
+  return useState(detectIsAndroid)[0]
+}
+
+/**
+ * Hook — sync-correct on the first frame via the UA token, plus a one-shot
+ * re-check after mount in case the Capacitor global was injected late on a
+ * remotely-loaded page (race) and the UA fallback hadn't matched yet.
+ */
+export function useIsAndroidApp(): boolean {
+  const [v, setV] = useState(detectIsAndroidApp)
+  useEffect(() => {
+    if (!v) setV(detectIsAndroidApp())
+  }, [v])
+  return v
 }
