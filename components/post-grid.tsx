@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback, useEffect, useRef } from "react" // 添加useRef
+import { useState, useCallback, useEffect, useRef, useMemo } from "react"
 import PostCard from "./post-card"
 import VirtualPostList from "./virtual-post-list"
 import type { Post } from "@/lib/types"
@@ -14,13 +14,24 @@ import { RefreshCw, AlertTriangle } from "lucide-react"
 // 定义每页加载的帖子数
 const PAGE_SIZE = 30
 
-export default function PostGrid() {
+export type PostSortMode = "default" | "hot"
+
+// 热度分：点赞×2 + 评论×3（评论成本更高，权重更大）
+const hotScore = (p: Post) => (p.likes_count ?? 0) * 2 + (p.comments_count ?? 0) * 3
+
+export default function PostGrid({ sortMode = "default" }: { sortMode?: PostSortMode }) {
   const [activePostId, setActivePostId] = useState<string | null>(null)
   const { user, loading: authLoading } = useSimpleAuth()
   const { state, loadMorePosts, updatePost, deletePost, retryLoading } = usePosts()
   
   // 从context中获取状态
-  const { posts, isLoading, hasMore, error } = state
+  const { posts: rawPosts, isLoading, hasMore, error } = state
+
+  // 热度模式：对已加载的帖子按权重排序（前端排序，不改取数逻辑）
+  const posts = useMemo(() => {
+    if (sortMode !== "hot") return rawPosts
+    return [...rawPosts].sort((a, b) => hotScore(b) - hotScore(a))
+  }, [rawPosts, sortMode])
   
   // 添加用于追踪上次用户ID的引用
   const lastUserIdRef = useRef<string | null>(null);

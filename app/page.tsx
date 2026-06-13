@@ -1,9 +1,9 @@
 "use client"
 
-import { Suspense, useEffect, useMemo } from "react"
+import { Suspense, useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { AnimatePresence } from "framer-motion"
-import PostGrid from "@/components/post-grid"
+import PostGrid, { type PostSortMode } from "@/components/post-grid"
 import CinemaMode from "@/components/cinema-mode"
 import FloatingActionButton from "@/components/floating-action-button"
 import { usePosts } from "@/contexts/posts-context"
@@ -29,6 +29,11 @@ const blindsOverlayStyle = {
   zIndex: 0,
 }
 
+const SORT_OPTIONS: { value: PostSortMode; label: string }[] = [
+  { value: "default", label: "默认" },
+  { value: "hot", label: "热度" },
+]
+
 // HomePage 内部使用了 useSearchParams()，在 Next.js `output:'export'`
 // 静态构建（Capacitor APK）模式下必须包 Suspense，否则 build 阶段 prerender 失败。
 function HomeContent() {
@@ -36,6 +41,9 @@ function HomeContent() {
   const searchParams = useSearchParams()
   // 影院模式状态由 CinemaModeProvider 统一管理（localStorage / URL ?cinema=1 也在那里）
   const { cinemaMode } = useCinemaMode()
+
+  // 帖子排序方式：default=按时间（现有逻辑），hot=按点赞/评论权重
+  const [sortMode, setSortMode] = useState<PostSortMode>("default")
 
   // 从 URL 读 ?category=xxx，useSearchParams 在 URL 变化时自动重渲
   const activeCategory = useMemo(() => {
@@ -95,6 +103,37 @@ function HomeContent() {
               </motion.div>
             )}
 
+            {/* 排序切换：默认（按时间）/ 热度（按点赞评论权重） */}
+            <motion.div
+              className="mb-5 flex items-center gap-1 px-4 max-w-7xl mx-auto"
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4, ease: "easeOut" }}
+            >
+              {SORT_OPTIONS.map(({ value, label }) => {
+                const active = sortMode === value
+                return (
+                  <button
+                    key={value}
+                    onClick={() => setSortMode(value)}
+                    className={`relative px-4 py-1.5 text-sm rounded-full transition-colors duration-200 ${
+                      active ? "text-black font-semibold" : "text-white/50 hover:text-white/80"
+                    }`}
+                  >
+                    {active && (
+                      <motion.span
+                        layoutId="sort-pill"
+                        className="absolute inset-0 bg-lime-400 rounded-full"
+                        style={{ boxShadow: "0 0 16px rgba(132,204,22,0.45)" }}
+                        transition={{ type: "spring", stiffness: 500, damping: 35 }}
+                      />
+                    )}
+                    <span className="relative z-10">{label}</span>
+                  </button>
+                )
+              })}
+            </motion.div>
+
             {/* 帖子列表 */}
             <motion.section
               className="mb-8"
@@ -102,7 +141,7 @@ function HomeContent() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, ease: "easeOut" }}
             >
-              <PostGrid />
+              <PostGrid sortMode={sortMode} />
             </motion.section>
           </motion.main>
         )}
