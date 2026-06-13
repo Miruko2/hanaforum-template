@@ -46,6 +46,8 @@ interface DmConv extends Partner {
 type Active = { kind: "hall" } | ({ kind: "dm" } & Partner)
 
 const MAX_LEN = 300
+// 空闲预热：最多预拉最近这么多个私聊会话的历史进缓存（控量，纯文本流量很小）
+const PREWARM_MAX_CONVS = 5
 const STICKERS = ["happy", "shy", "worried", "yandere", "surprised", "sleepy"]
 const ASSET_EXTS = ["jpg", "png", "webp", "gif"]
 
@@ -125,6 +127,10 @@ export default function FloatingChat() {
   const activeRef = useRef<Active>(active)
   const convsRef = useRef<DmConv[]>(convs)
   const openRef = useRef(open)
+  // 会话消息缓存：key = "hall" 或 pairKey(双方)。
+  // 切回看过的会话时立即回显缓存（秒开、不再先空屏），后台再静默拉最新覆盖。
+  // ref 跨「面板开关」保留，故关掉面板再开也秒开；仅整页刷新才失效。
+  const msgCacheRef = useRef<Map<string, DisplayMsg[]>>(new Map())
 
   // Load saved position on mount
   useEffect(() => {
@@ -322,11 +328,17 @@ export default function FloatingChat() {
     }
   }, [open, myId, myName])
 
-  // 当前会话：加载历史 + 订阅实时（大厅 or 某个私聊）
+  // 当前会话：加载历史 + 订阅实时（大厅 or 某个私聊）。
+  // 缓存命中即秒开：切回看过的会话立即回显缓存，不再先空屏等查询；
+  // 同时后台静默拉最新覆盖（stale-while-revalidate），保证最终一致。
   useEffect(() => {
     if (!open || !myId) return
     let alive = true
-    setMessages([])
+
+    const key = active.kind === "hall" ? "hall" : pairKey(myId, active.id)
+    const cached = msgCacheRef.current.get(key)
+    // 命中缓存：立即回显（清掉 isNew，切换不重放入场动效）；未命中才空屏等首查。
+    setMessages(cached ? cached.map((m) => (m.isNew ? { ...m, isNew: false } : m)) : [])
 
     if (active.kind === "hall") {
       ;(async () => {
@@ -337,18 +349,29 @@ export default function FloatingChat() {
           .limit(100)
         if (!alive || error) return
         const rows = ((data ?? []) as ChatRow[]).slice().reverse()
-        setMessages(rows.map(mapHall))
+        const mapped = rows.map(mapHall)
+        msgCacheRef.current.set(key, mapped)
+        setMessages(mapped)
       })()
 
       const msgChannel = supabase
         .channel("chat_room_messages")
         .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_messages" }, (payload) => {
           const m = payload.new as ChatRow
-          setMessages((prev) => (prev.some((x) => x.id === m.id) ? prev : [...prev, { ...mapHall(m), isNew: true }].slice(-200)))
+          setMessages((prev) => {
+            if (prev.some((x) => x.id === m.id)) return prev
+            const next = [...prev, { ...mapHall(m), isNew: true }].slice(-200)
+            msgCacheRef.current.set(key, next)
+            return next
+          })
         })
         .on("postgres_changes", { event: "DELETE", schema: "public", table: "chat_messages" }, (payload) => {
           const id = (payload.old as { id: string }).id
-          setMessages((prev) => prev.filter((x) => x.id !== id))
+          setMessages((prev) => {
+            const next = prev.filter((x) => x.id !== id)
+            msgCacheRef.current.set(key, next)
+            return next
+          })
         })
         .subscribe()
 
@@ -360,7 +383,7 @@ export default function FloatingChat() {
 
     // 私聊
     const partner: Partner = { id: active.id, username: active.username, avatar_url: active.avatar_url }
-    const pk = pairKey(myId, partner.id)
+    const pk = key // 私聊分支的缓存 key 即 pairKey
     ;(async () => {
       const { data, error } = await supabase
         .from("dm_messages")
@@ -370,14 +393,21 @@ export default function FloatingChat() {
         .limit(100)
       if (!alive || error) return
       const rows = ((data ?? []) as DmRow[]).slice().reverse()
-      setMessages(rows.map((m) => mapDm(m, myId, myName, partner)))
+      const mapped = rows.map((m) => mapDm(m, myId, myName, partner))
+      msgCacheRef.current.set(key, mapped)
+      setMessages(mapped)
     })()
 
     const ch = supabase
       .channel(`dm_${pk}`)
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "dm_messages", filter: `pair_key=eq.${pk}` }, (payload) => {
         const m = payload.new as DmRow
-        setMessages((prev) => (prev.some((x) => x.id === m.id) ? prev : [...prev, { ...mapDm(m, myId, myName, partner), isNew: true }].slice(-200)))
+        setMessages((prev) => {
+          if (prev.some((x) => x.id === m.id)) return prev
+          const next = [...prev, { ...mapDm(m, myId, myName, partner), isNew: true }].slice(-200)
+          msgCacheRef.current.set(key, next)
+          return next
+        })
       })
       .subscribe()
 
@@ -386,6 +416,45 @@ export default function FloatingChat() {
       supabase.removeChannel(ch)
     }
   }, [open, myId, myName, active])
+
+  // 空闲预热：面板打开后稍候，预拉最近若干个私聊会话的历史进缓存，
+  // 让「整页刷新后首次点开」也能秒开。三重克制，避免浪费流量 / 踩实时：
+  //   1) 仅最近 PREWARM_MAX_CONVS 个会话（convs 已按时间倒序）；
+  //   2) 跳过当前正在看的会话、以及已在缓存里的会话；
+  //   3) 查询回填时再判一次「仍未缓存」才写，绝不覆盖主查询/实时已填的内容。
+  useEffect(() => {
+    if (!open || !myId || convs.length === 0) return
+    let cancelled = false
+    const timer = setTimeout(() => {
+      const a = activeRef.current
+      const activeKey = a.kind === "hall" ? "hall" : pairKey(myId, a.id)
+      const targets = convs.slice(0, PREWARM_MAX_CONVS).filter((c) => {
+        const key = pairKey(myId, c.id)
+        return key !== activeKey && !msgCacheRef.current.has(key)
+      })
+      for (const c of targets) {
+        const key = pairKey(myId, c.id)
+        const partner: Partner = { id: c.id, username: c.username, avatar_url: c.avatar_url }
+        ;(async () => {
+          const { data, error } = await supabase
+            .from("dm_messages")
+            .select("id,sender_id,kind,content,created_at")
+            .eq("pair_key", key)
+            .order("created_at", { ascending: false })
+            .limit(100)
+          if (cancelled || error || !data) return
+          // 回填时再判一次：期间用户若已点开该会话（主查询/实时已填缓存），不覆盖
+          if (msgCacheRef.current.has(key)) return
+          const rows = (data as DmRow[]).slice().reverse()
+          msgCacheRef.current.set(key, rows.map((m) => mapDm(m, myId, myName, partner)))
+        })()
+      }
+    }, 800)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [open, myId, myName, convs])
 
   // Update blur effect for messages near edges
   const updateBlur = useCallback(() => {
