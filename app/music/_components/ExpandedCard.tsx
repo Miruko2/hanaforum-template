@@ -3,12 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { motion, AnimatePresence } from "framer-motion"
-import { Pause, Play, SkipBack, SkipForward, Heart, X } from "lucide-react"
+import { Pause, Play, SkipBack, SkipForward, X, Mic2 } from "lucide-react"
 import { type Track } from "../_data/tracks"
 import { usePlayback, usePlaybackTime, useTracks } from "../_context/PlaybackContext"
 import { useDominantHue } from "../_lib/useDominantHue"
 import { useReducedMotion } from "../_lib/useReducedMotion"
+import { useLyrics } from "../_lib/lyrics"
 import { TrackCover } from "./TrackCover"
+import { LyricsEcho } from "./LyricsEcho"
 
 /** Screen-space rect of the card that was clicked — used as flight start. */
 export type ExpandRect = { left: number; top: number; width: number; height: number }
@@ -64,7 +66,7 @@ function ExpandedInner({
   target: { track: Track; rect: ExpandRect }
   onClose: () => void
 }) {
-  const { currentTrack, isPlaying, isFallback, togglePlay, play, seek, isFavorite, toggleFavorite } =
+  const { currentTrack, isPlaying, isFallback, togglePlay, play, seek, lyricsEnabled, setLyricsEnabled } =
     usePlayback()
   const { currentTime, duration } = usePlaybackTime()
   const tracks = useTracks()
@@ -86,7 +88,9 @@ function ExpandedInner({
   const [isAndroid] = useState(
     () => typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent),
   )
-  const fav = isFavorite(shown.id)
+  // 歌词：仅当前播放曲目才有时间轴可同步；无有效歌词（纯音乐/仅元信息/非
+  // meting 音源/实例全挂）时为 null，整个歌词层不渲染。
+  const lyrics = useLyrics(shown, isCurrent && lyricsEnabled)
 
   // ---- Responsive sizing ----
   // Watch viewport width; below COMPACT_VW the panel + disk shrink so the
@@ -382,16 +386,24 @@ function ExpandedInner({
             </div>
             <button
               type="button"
-              aria-label={fav ? "unlike" : "like"}
-              onClick={() => toggleFavorite(shown.id)}
-              className={`grid h-8 w-8 place-items-center rounded-full transition-colors hover:bg-white/10 sm:h-9 sm:w-9 ${
-                fav ? "text-rose-400" : "text-white/55 hover:text-white"
-              }`}
+              aria-label="歌词"
+              aria-pressed={lyricsEnabled}
+              title={lyricsEnabled ? "关闭歌词" : "开启歌词"}
+              onClick={() => setLyricsEnabled(!lyricsEnabled)}
+              className="grid h-8 w-8 place-items-center rounded-full transition-colors hover:bg-white/10 sm:h-9 sm:w-9"
+              style={{
+                color: lyricsEnabled ? `hsl(${hue} 80% 65%)` : "rgba(255,255,255,0.55)",
+              }}
             >
-              <Heart size={compact ? 16 : 18} fill={fav ? "currentColor" : "none"} />
+              <Mic2 size={compact ? 16 : 18} />
             </button>
           </div>
         </div>
+
+        {/* 歌词 echo 堆叠（面板上下两侧，绝对定位在面板外沿） */}
+        {isCurrent && lyricsEnabled && lyrics && (
+          <LyricsEcho lines={lyrics} isAndroid={isAndroid} compact={compact} />
+        )}
       </motion.div>
     </motion.div>
   )

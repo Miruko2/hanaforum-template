@@ -23,6 +23,7 @@ const FAVORITES_KEY = "music-favorites-v1"
 const PLAY_MODE_KEY = "music-play-mode-v1"
 const SOURCE_KEY = "music-source-v1"
 const VOLUME_KEY = "music-volume-v1"
+const LYRICS_KEY = "music-lyrics-v1"
 
 // 墙的曲目源：「我的」自定义 vs「精选」默认墙。
 export type MusicSource = "mine" | "featured"
@@ -69,6 +70,9 @@ export type PlaybackState = {
   volume: number
   /** 设置音量 [0,1]（自动夹取范围并持久化）。 */
   setVolume: (v: number) => void
+  /** 详情页歌词显示开关，持久化到 localStorage。 */
+  lyricsEnabled: boolean
+  setLyricsEnabled: (on: boolean) => void
   /**
    * Returns the current audio intensity in [0, 1], smoothed across frames.
    * Implementation strategy:
@@ -352,6 +356,25 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     try {
       const v = localStorage.getItem(PLAY_MODE_KEY)
       if (v === "list" || v === "one" || v === "once") setPlayModeState(v)
+    } catch {
+      /* ignore */
+    }
+  }, [])
+
+  const [lyricsEnabled, setLyricsEnabledState] = useState(true)
+  const setLyricsEnabled = useCallback((on: boolean) => {
+    setLyricsEnabledState(on)
+    try {
+      localStorage.setItem(LYRICS_KEY, on ? "1" : "0")
+    } catch {
+      /* ignore */
+    }
+  }, [])
+
+  // ---- 载入持久化的歌词开关（默认开） ----
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(LYRICS_KEY) === "0") setLyricsEnabledState(false)
     } catch {
       /* ignore */
     }
@@ -756,10 +779,12 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       setPlayMode,
       volume,
       setVolume,
+      lyricsEnabled,
+      setLyricsEnabled,
       getAudioIntensity,
       refreshTracks,
     }),
-    [currentTrack, isPlaying, isFallback, playMode, history, favorites, tracks, play, pause, togglePlay, seek, next, prev, clearHistory, isFavorite, toggleFavorite, setPlayMode, volume, setVolume, getAudioIntensity, refreshTracks],
+    [currentTrack, isPlaying, isFallback, playMode, history, favorites, tracks, play, pause, togglePlay, seek, next, prev, clearHistory, isFavorite, toggleFavorite, setPlayMode, volume, setVolume, lyricsEnabled, setLyricsEnabled, getAudioIntensity, refreshTracks],
   )
 
   const tracksCtxValue = useMemo<TrackSourceCtx>(
