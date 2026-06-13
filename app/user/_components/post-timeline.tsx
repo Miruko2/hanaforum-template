@@ -8,6 +8,7 @@ import { ThumbsUp, MessageSquare } from "lucide-react"
 import type { Post } from "@/lib/types"
 import { CATEGORY_LABELS } from "@/lib/categories"
 import { postThumbUrl } from "@/lib/post-image-thumb"
+import { cdnUrl } from "@/lib/cdn-url"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useToast } from "@/hooks/use-toast"
 import { useIsMobile } from "@/hooks/use-mobile"
@@ -152,8 +153,8 @@ function TimelineCard({
   const title = post.title || "无标题"
   // 方格封面用 640px 缩略图（lib/post-image-thumb 约定）省 egress；
   // 老帖没回填缩略图时 onError 回退主图
-  const cover = post.image_url
-  const coverThumb = postThumbUrl(cover)
+  const cover = cdnUrl(post.image_url)
+  const coverThumb = cdnUrl(postThumbUrl(post.image_url))
   return (
     <div className={className}>
       <motion.button

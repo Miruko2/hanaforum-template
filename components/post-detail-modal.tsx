@@ -1,6 +1,7 @@
 "use client"
 
 import React, { useState, useCallback, useLayoutEffect, useRef } from "react"
+import { cdnUrl } from "@/lib/cdn-url"
 import { motion, AnimatePresence, useMotionValue, useTransform, animate } from "framer-motion"
 import { X, MessageSquare, Maximize2 } from "lucide-react"
 import { createPortal } from "react-dom"
@@ -282,7 +283,7 @@ export default function PostDetailModal({
           title={`查看 ${username} 的主页`}
         >
           <img
-            src={avatarUrl || "/logo.png"}
+            src={cdnUrl(avatarUrl) || "/logo.png"}
             alt={username}
             className="w-9 h-9 rounded-full object-cover border border-white/20 avatar-hover-effect"
             onError={(e) => {
@@ -587,7 +588,7 @@ export default function PostDetailModal({
             {/* 图片灯箱：点击详情页图片后居中聚焦放大（弹跳进出）。
                 自带 portal 到 body，盖在详情框之上 */}
             <ImageLightbox
-              src={lightboxOpen ? post.image_url ?? null : null}
+              src={lightboxOpen ? cdnUrl(post.image_url) : null}
               alt={post.title}
               onClose={() => setLightboxOpen(false)}
             />

@@ -1,6 +1,7 @@
 "use client"
 
 import React, { useState, useEffect, useLayoutEffect, useCallback, useRef, memo } from "react"
+import { cdnUrl } from "@/lib/cdn-url"
 import { MoreVertical, MessageSquare, ThumbsUp, Trash2, X, AlertCircle, Pin } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { createPortal } from "react-dom"
@@ -428,7 +429,7 @@ const PostCard = memo(function PostCard({
             onClick={(e) => e.stopPropagation()}
           >
             <img
-              src={avatarUrl || "/logo.png"}
+              src={cdnUrl(avatarUrl) || "/logo.png"}
               alt={username}
               className="h-10 w-10 rounded-full object-cover border-2 border-white/30 shadow-lg avatar-hover-effect cursor-pointer"
               onError={(e) => {

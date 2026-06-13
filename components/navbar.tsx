@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
+import { cdnUrl } from "@/lib/cdn-url"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -197,7 +198,7 @@ export default function Navbar() {
                   <Button variant="ghost" className="relative h-8 w-8 rounded-full">
                     {avatarUrl ? (
                       <img
-                        src={avatarUrl}
+                        src={cdnUrl(avatarUrl) ?? undefined}
                         alt="用户头像"
                         className="h-full w-full rounded-full object-cover"
                       />

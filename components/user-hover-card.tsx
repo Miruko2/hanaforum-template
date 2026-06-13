@@ -10,6 +10,7 @@ import {
   type PointerEvent,
 } from "react"
 import { useRouter } from "next/navigation"
+import { cdnUrl } from "@/lib/cdn-url"
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "@/components/ui/hover-card"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useChatUI } from "@/contexts/chat-ui-context"
@@ -74,7 +75,7 @@ export function UserCardBody({
       {/* 背景图 Banner：底部经 mask 渐隐，直接融进毛玻璃（样式见 globals.css） */}
       <div className="user-card-banner relative h-24 w-full">
         {backgroundUrl ? (
-          <img src={backgroundUrl} alt="" className="h-full w-full object-cover" />
+          <img src={cdnUrl(backgroundUrl) ?? undefined} alt="" className="h-full w-full object-cover" />
         ) : (
           // 无背景图的兜底：中性白雾渐变，融入毛玻璃壳（之前的 lime/emerald 渐变
           // 会给每张无背景卡扣一层突兀的「绿帽子」）
@@ -86,7 +87,7 @@ export function UserCardBody({
         {/* 头像：叠在 banner 下沿 */}
         <div className="relative -mt-9 mb-2 inline-block">
           <img
-            src={avatarUrl || "/logo.png"}
+            src={cdnUrl(avatarUrl) || "/logo.png"}
             alt={username}
             className="h-16 w-16 rounded-full border-[3px] border-white/25 object-cover shadow-[0_8px_24px_rgba(0,0,0,0.45)]"
             onError={(e) => {

@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, type ReactNode } from "react"
+import { cdnUrl } from "@/lib/cdn-url"
 import { Camera, Pencil, Check, X, ImagePlus } from "lucide-react"
 import { BIO_MAX } from "@/lib/profiles"
 
@@ -67,7 +68,7 @@ export default function ProfileHeader({
         onClick={edit ? edit.background.onClick : undefined}
       >
         {backgroundUrl ? (
-          <img src={backgroundUrl} alt="背景图" className="w-full h-full object-cover" />
+          <img src={cdnUrl(backgroundUrl) ?? undefined} alt="背景图" className="w-full h-full object-cover" />
         ) : (
           <div className="w-full h-full bg-gradient-to-br from-lime-900/40 via-emerald-900/25 to-black/40" />
         )}
@@ -97,7 +98,7 @@ export default function ProfileHeader({
         >
           <div className="w-24 h-24 rounded-full overflow-hidden bg-lime-900/40 flex items-center justify-center border-[3px] border-black/40 shadow-lg transition-transform duration-300 group-hover/avatar:scale-[1.03]">
             {avatarUrl ? (
-              <img src={avatarUrl} alt="头像" className="w-full h-full object-cover" />
+              <img src={cdnUrl(avatarUrl) ?? undefined} alt="头像" className="w-full h-full object-cover" />
             ) : (
               <span className="text-3xl font-bold text-lime-400">{fallbackLetter}</span>
             )}

@@ -1,6 +1,7 @@
 "use client"
 
 import { Heart, MessageCircle, Reply, ShieldAlert, Megaphone, UserPlus, Loader2 } from "lucide-react"
+import { cdnUrl } from "@/lib/cdn-url"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { formatDate, cn } from "@/lib/utils"
 import type { Notification } from "@/lib/types"
@@ -118,7 +119,7 @@ export default function NotificationCard({
               compact ? "h-9 w-9" : "h-10 w-10",
             )}
           >
-            <AvatarImage src={avatarUrl || "/placeholder.svg"} />
+            <AvatarImage src={cdnUrl(avatarUrl) || "/placeholder.svg"} />
             <AvatarFallback className="bg-black/40 text-white/80 text-sm">
               {getInitial(username)}
             </AvatarFallback>

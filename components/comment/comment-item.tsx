@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { cdnUrl } from "@/lib/cdn-url"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { formatDate, cn } from "@/lib/utils"
@@ -201,7 +202,7 @@ export default function CommentItem({
           className="shrink-0"
         >
           <Avatar className="h-8 w-8 avatar-hover-effect cursor-pointer">
-            <AvatarImage src={avatarUrl || "/logo.png"} />
+            <AvatarImage src={cdnUrl(avatarUrl) || "/logo.png"} />
             <AvatarFallback>{getInitial(displayName)}</AvatarFallback>
           </Avatar>
         </button>

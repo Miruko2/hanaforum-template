@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { cdnUrl } from "@/lib/cdn-url"
 import { useRouter } from "next/navigation"
 import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { X } from "lucide-react"
@@ -178,7 +179,7 @@ export default function FollowStats({ userId }: FollowStatsProps) {
                           className="flex w-full items-center gap-3 rounded-2xl px-2 py-2 text-left transition-colors hover:bg-white/10"
                         >
                           <Avatar className="h-10 w-10 border border-white/20">
-                            <AvatarImage src={u.avatar_url || "/placeholder.svg"} />
+                            <AvatarImage src={cdnUrl(u.avatar_url) || "/placeholder.svg"} />
                             <AvatarFallback className="bg-black/40 text-sm text-white/80">
                               {name.charAt(0).toUpperCase()}
                             </AvatarFallback>

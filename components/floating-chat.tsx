@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { cdnUrl } from "@/lib/cdn-url"
 import { createPortal } from "react-dom"
 import { motion, AnimatePresence } from "framer-motion"
 import { X, Send, Smile, Users, Hash } from "lucide-react"
@@ -894,7 +895,7 @@ function UserAvatar({
       <span className={styles.uavatarFallback}>{initial}</span>
       {avatarUrl && (
         <img
-          src={avatarUrl}
+          src={cdnUrl(avatarUrl) ?? undefined}
           alt={username}
           className={styles.uavatarImg}
           onError={(e) => {

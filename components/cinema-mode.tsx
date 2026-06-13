@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useCallback } from "react"
 import { postThumbUrl } from "@/lib/post-image-thumb"
+import { cdnUrl } from "@/lib/cdn-url"
 import { motion } from "framer-motion"
 import type { Post } from "@/lib/types"
 import PostDetailModal from "./post-detail-modal"
@@ -148,7 +149,7 @@ function CinemaCard({ post, onClick }: { post: Post; onClick: () => void }) {
       {!showFallback ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={(!useFullImage && thumbUrl) || post.image_url!}
+          src={cdnUrl((!useFullImage && thumbUrl) || post.image_url) ?? undefined}
           alt={post.title}
           loading="lazy"
           decoding="async"

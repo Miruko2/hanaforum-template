@@ -6,6 +6,7 @@ import type { Post } from "@/lib/types"
 import { ImageOff } from "lucide-react"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { postThumbUrl } from "@/lib/post-image-thumb"
+import { cdnUrl } from "@/lib/cdn-url"
 
 interface PostCardImageProps {
   post: Post
@@ -46,7 +47,7 @@ export default function PostCardImage({
   // 列表与详情统一加载 640px 缩略图（同一 URL → 详情命中列表缓存、hero 飞入即时
   // 有图不闪），高清留给点击后的灯箱原图。
   const thumbUrl = postThumbUrl(post.image_url)
-  const displaySrc = (!useFullImage && thumbUrl) || post.image_url || ""
+  const displaySrc = cdnUrl((!useFullImage && thumbUrl) || post.image_url) || ""
 
   // 编辑帖子换图后重置加载/错误态，按新 URL 重新走「缩略图→主图」流程
   useEffect(() => {

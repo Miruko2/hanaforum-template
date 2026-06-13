@@ -1,6 +1,7 @@
 "use client"
 
 import { Suspense, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react"
+import { cdnUrl } from "@/lib/cdn-url"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -387,7 +388,7 @@ function NavigationContent() {
                   <DropdownMenuTrigger asChild>
                     <Button variant="ghost" className="relative h-10 w-10 rounded-full p-0">
                       <Avatar className="h-9 w-9 avatar-breathe cursor-pointer">
-                        <AvatarImage src={avatarUrl || undefined} alt="用户头像" />
+                        <AvatarImage src={cdnUrl(avatarUrl) || undefined} alt="用户头像" />
                         <AvatarFallback className="bg-lime-900/30 text-lime-400 text-sm">
                           {user.user_metadata?.username?.[0]?.toUpperCase() || user.email?.[0]?.toUpperCase() || "U"}
                         </AvatarFallback>
