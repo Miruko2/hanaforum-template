@@ -659,6 +659,33 @@ export const getPostsPaginated = withCache(
   30 // 缓存30秒
 );
 
+// 热度分页：走 hot_posts RPC（scripts/2026-06-13-hot-posts-rpc.sql），
+// 数据库端按 赞×2+评论×3 全库排序。RPC 返回 SETOF posts，
+// 可直接 .select(POST_SELECT) 嵌套计数，后续处理与 getPostsPaginated 完全一致。
+export const getHotPostsPaginated = withCache(
+  async (page: number = 0, limit: number = 30, category: string | null = null): Promise<Post[]> => {
+    try {
+      const { data, error } = await supabase
+        .rpc("hot_posts", {
+          p_offset: page * limit,
+          p_limit: limit,
+          p_category: category,
+        })
+        .select(POST_SELECT);
+      if (error) {
+        console.error("❌ 获取热度帖子失败:", error);
+        return [];
+      }
+      return await processPostsData(data as any[]);
+    } catch (error) {
+      console.error("❌ 获取热度帖子失败:", error);
+      return [];
+    }
+  },
+  "posts-hot-paginated",
+  30
+);
+
 // 获取某用户的全部帖子（社交个人页 /user 用）。复用 POST_SELECT + processPostsData；
 // 用户帖子量通常不大，一次拉到上限即可（无需分页）。
 export const getUserPosts = withCache(

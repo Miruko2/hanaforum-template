@@ -1,12 +1,12 @@
 "use client"
 
-import { Suspense, useEffect, useMemo, useState } from "react"
+import { Suspense, useEffect, useMemo } from "react"
 import { useSearchParams } from "next/navigation"
 import { AnimatePresence } from "framer-motion"
-import PostGrid, { type PostSortMode } from "@/components/post-grid"
+import PostGrid from "@/components/post-grid"
 import CinemaMode from "@/components/cinema-mode"
 import FloatingActionButton from "@/components/floating-action-button"
-import { usePosts } from "@/contexts/posts-context"
+import { usePosts, type PostSortMode } from "@/contexts/posts-context"
 import { useCinemaMode } from "@/contexts/cinema-mode-context"
 import { isValidCategory, CATEGORY_LABELS } from "@/lib/categories"
 import { motion } from "framer-motion"
@@ -37,13 +37,13 @@ const SORT_OPTIONS: { value: PostSortMode; label: string }[] = [
 // HomePage 内部使用了 useSearchParams()，在 Next.js `output:'export'`
 // 静态构建（Capacitor APK）模式下必须包 Suspense，否则 build 阶段 prerender 失败。
 function HomeContent() {
-  const { setCategory, state } = usePosts()
+  const { setCategory, setSort, state } = usePosts()
   const searchParams = useSearchParams()
   // 影院模式状态由 CinemaModeProvider 统一管理（localStorage / URL ?cinema=1 也在那里）
   const { cinemaMode } = useCinemaMode()
 
-  // 帖子排序方式：default=按时间（现有逻辑），hot=按点赞/评论权重
-  const [sortMode, setSortMode] = useState<PostSortMode>("default")
+  // 帖子排序方式由 PostsContext 管理：default=按时间，hot=按赞/评论权重（数据库端排序）
+  const sortMode = state.sort
 
   // 从 URL 读 ?category=xxx，useSearchParams 在 URL 变化时自动重渲
   const activeCategory = useMemo(() => {
@@ -115,7 +115,7 @@ function HomeContent() {
                 return (
                   <button
                     key={value}
-                    onClick={() => setSortMode(value)}
+                    onClick={() => setSort(value)}
                     className={`relative px-4 py-1.5 text-sm rounded-full transition-colors duration-200 ${
                       active ? "text-black font-semibold" : "text-white/50 hover:text-white/80"
                     }`}
@@ -141,7 +141,7 @@ function HomeContent() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, ease: "easeOut" }}
             >
-              <PostGrid sortMode={sortMode} />
+              <PostGrid />
             </motion.section>
           </motion.main>
         )}

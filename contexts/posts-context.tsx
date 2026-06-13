@@ -2,17 +2,21 @@
 
 import { createContext, useReducer, useContext, ReactNode, useEffect, useState } from 'react'
 import type { Post } from '@/lib/types'
-import { getPostsPaginated } from '@/lib/supabase-optimized'
+import { getPostsPaginated, getHotPostsPaginated } from '@/lib/supabase-optimized'
 import { supabase } from '@/lib/supabaseClient'
 import { useSimpleAuth } from '@/contexts/auth-context-simple'
 
-// 添加帖子缓存（按分类）
-// key: category 值，null 对应 "__all__"
+// 排序方式：default=按时间（getPostsPaginated），hot=按赞/评论权重（hot_posts RPC）
+export type PostSortMode = 'default' | 'hot'
+
+// 添加帖子缓存（按 排序+分类）
+// key: `${sort}:${category}`，category 为 null 对应 "__all__"
 const postCacheByCategory = new Map<string, { posts: Post[]; time: number }>();
 const CACHE_TTL = 10000; // 缓存有效期10秒
 
 const CACHE_KEY_ALL = "__all__";
-const catKey = (c: string | null) => c ?? CACHE_KEY_ALL;
+const catKey = (c: string | null, sort: PostSortMode = 'default') =>
+  `${sort}:${c ?? CACHE_KEY_ALL}`;
 
 // 强制清理缓存的函数（清理所有分类）
 export function clearPostsCache() {
@@ -35,10 +39,10 @@ const LS_PREFIX = "hana_posts_v1_";
 const LS_MAX = PAGE_SIZE;             // 最多持久化条数，避免 localStorage 过大
 const LS_TTL = 24 * 60 * 60 * 1000;   // 持久化有效期 24h；过旧则不用（但仍会后台刷新）
 
-function loadPostsFromLS(category: string | null): Post[] | null {
+function loadPostsFromLS(category: string | null, sort: PostSortMode): Post[] | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = window.localStorage.getItem(LS_PREFIX + catKey(category));
+    const raw = window.localStorage.getItem(LS_PREFIX + catKey(category, sort));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as { posts: Post[]; time: number };
     if (!parsed?.posts?.length) return null;
@@ -49,12 +53,12 @@ function loadPostsFromLS(category: string | null): Post[] | null {
   }
 }
 
-function savePostsToLS(category: string | null, posts: Post[]) {
+function savePostsToLS(category: string | null, sort: PostSortMode, posts: Post[]) {
   if (typeof window === "undefined") return;
   try {
     const slim = posts.slice(0, LS_MAX);
     window.localStorage.setItem(
-      LS_PREFIX + catKey(category),
+      LS_PREFIX + catKey(category, sort),
       JSON.stringify({ posts: slim, time: Date.now() }),
     );
   } catch {
@@ -70,6 +74,7 @@ export type PostsState = {
   page: number
   error: string | null
   category: string | null
+  sort: PostSortMode
 }
 
 export type PostsAction = 
@@ -80,6 +85,7 @@ export type PostsAction =
   | { type: 'SET_PAGE', payload: number }
   | { type: 'SET_ERROR', payload: string | null }
   | { type: 'SET_CATEGORY', payload: string | null }
+  | { type: 'SET_SORT', payload: PostSortMode }
   | { type: 'ADD_POST', payload: Post }
   | { type: 'DELETE_POST', payload: string }
   | { type: 'UPDATE_POST', payload: { id: string, updates: Partial<Post> } }
@@ -119,6 +125,8 @@ function postsReducer(state: PostsState, action: PostsAction): PostsState {
       return { ...state, error: action.payload }
     case 'SET_CATEGORY':
       return { ...state, category: action.payload, page: 0, posts: [] }
+    case 'SET_SORT':
+      return { ...state, sort: action.payload, page: 0, posts: [] }
     case 'ADD_POST':
       // 添加新帖子到顶部
       return { 
@@ -155,6 +163,7 @@ type PostsContextType = {
   updatePost: (postId: string, updates: Partial<Post>) => void
   retryLoading: () => Promise<void>
   setCategory: (category: string | null) => void
+  setSort: (sort: PostSortMode) => void
 }
 
 const PostsContext = createContext<PostsContextType | undefined>(undefined)
@@ -168,6 +177,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
     page: 0,
     error: null,
     category: null,
+    sort: 'default',
   })
 
   // 用于 addPost 时优先用当前登录用户自己的用户名（零延迟，无需查 profiles）
@@ -180,7 +190,8 @@ export function PostsProvider({ children }: { children: ReactNode }) {
       dispatch({ type: 'SET_ERROR', payload: null })
       
       const currentCategory = state.category;
-      const cacheKey = catKey(currentCategory);
+      const currentSort = state.sort;
+      const cacheKey = catKey(currentCategory, currentSort);
       const cached = postCacheByCategory.get(cacheKey);
 
       // 检查缓存是否有效
@@ -193,8 +204,10 @@ export function PostsProvider({ children }: { children: ReactNode }) {
         return;
       }
       
-      // 获取新数据（按分类过滤）
-      const fetchedPosts = await getPostsPaginated(0, PAGE_SIZE, currentCategory);
+      // 获取新数据（按分类过滤，按排序方式选取数函数）
+      const fetchedPosts = currentSort === 'hot'
+        ? await getHotPostsPaginated(0, PAGE_SIZE, currentCategory)
+        : await getPostsPaginated(0, PAGE_SIZE, currentCategory);
       
       // 检查是否获取到了帖子
       if (fetchedPosts.length === 0 && !loadingFailed && retryCount < MAX_RETRIES) {
@@ -231,7 +244,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
 
         // 更新内存缓存 + 持久化到 localStorage（供下次冷启动秒显）
         postCacheByCategory.set(cacheKey, { posts: fetchedPosts, time: now });
-        savePostsToLS(currentCategory, fetchedPosts);
+        savePostsToLS(currentCategory, currentSort, fetchedPosts);
       }
       
       console.debug('✅ PostsContext: 成功加载帖子', {
@@ -250,7 +263,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
       loadingFailed = true;
       
       // 如果失败但有缓存，使用缓存数据
-      const cached = postCacheByCategory.get(catKey(state.category));
+      const cached = postCacheByCategory.get(catKey(state.category, state.sort));
       if (cached && cached.posts.length > 0) {
         dispatch({ type: 'LOAD_POSTS', payload: cached.posts });
         // 但不覆盖错误信息，保持提示用户有问题
@@ -299,10 +312,13 @@ export function PostsProvider({ children }: { children: ReactNode }) {
       const pageToLoad = page || state.page + 1;
       const pageSize = limit || PAGE_SIZE;
       const currentCategory = state.category;
-      const cacheKey = catKey(currentCategory);
-      
-      console.debug(`📄 加载第${pageToLoad}页帖子，每页${pageSize}条，分类=${currentCategory ?? '全部'}`);
-      const morePosts = await getPostsPaginated(pageToLoad, pageSize, currentCategory);
+      const currentSort = state.sort;
+      const cacheKey = catKey(currentCategory, currentSort);
+
+      console.debug(`📄 加载第${pageToLoad}页帖子，每页${pageSize}条，分类=${currentCategory ?? '全部'}，排序=${currentSort}`);
+      const morePosts = currentSort === 'hot'
+        ? await getHotPostsPaginated(pageToLoad, pageSize, currentCategory)
+        : await getPostsPaginated(pageToLoad, pageSize, currentCategory);
       if (morePosts.length === 0) {
         dispatch({ type: 'SET_HAS_MORE', payload: false });
         return;
@@ -440,12 +456,18 @@ export function PostsProvider({ children }: { children: ReactNode }) {
   const setCategory = (category: string | null) => {
     dispatch({ type: 'SET_CATEGORY', payload: category });
   }
+
+  // 切换排序：清当前列表，触发重新加载（与切分类同款流程）
+  const setSort = (sort: PostSortMode) => {
+    if (sort === state.sort) return;
+    dispatch({ type: 'SET_SORT', payload: sort });
+  }
   
   // 初始加载
   useEffect(() => {
     // 冷启动先用 localStorage 里上次的帖子秒显（stale-while-revalidate），
     // 紧接着 loadPosts() 后台拉最新覆盖。posts 非空时 PostGrid 不显示转圈，体验是「立刻有内容」。
-    const persisted = loadPostsFromLS(state.category);
+    const persisted = loadPostsFromLS(state.category, state.sort);
     if (persisted && persisted.length > 0) {
       dispatch({ type: 'LOAD_POSTS', payload: persisted });
       dispatch({ type: 'SET_HAS_MORE', payload: persisted.length >= PAGE_SIZE });
@@ -456,7 +478,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
     // 添加窗口焦点事件监听器，用户返回页面时刷新
     const handleFocus = () => {
       // 如果当前分类缓存距离上次加载超过1分钟，自动刷新
-      const entry = postCacheByCategory.get(catKey(state.category));
+      const entry = postCacheByCategory.get(catKey(state.category, state.sort));
       if (!entry || Date.now() - entry.time > 60000) {
         loadPosts();
       }
@@ -507,7 +529,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
       window.removeEventListener('focus', handleFocus);
       window.removeEventListener('auth-state-changed', handleAuthChange);
     };
-  }, [state.category]); // 分类变化时重新加载
+  }, [state.category, state.sort]); // 分类/排序变化时重新加载
   
   // 实时订阅帖子变更 - 优化版本
   // 减少依赖于state.posts的频繁重新渲染
@@ -576,6 +598,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
         updatePost,
         retryLoading,
         setCategory,
+        setSort,
       }}
     >
       {children}
