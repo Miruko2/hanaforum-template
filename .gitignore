@@ -55,3 +55,15 @@ build.log
 
 # 测试输出日志
 jest-out.log
+
+# 本地设计参考图（cankao* 系列，临时素材，不入库）
+/cankao*.png
+/cankao*.jpg
+/cankao*.jpeg
+/cankao*.webp
+
+# 本地 CDN 调试笔记
+/cdn-debug-summary.md
+
+# 本地记忆库（AI 辅助开发笔记，不入库）
+/memory-bank/
