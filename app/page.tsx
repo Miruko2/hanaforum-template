@@ -1,6 +1,6 @@
 "use client"
 
-import { Suspense, useEffect, useMemo } from "react"
+import { Suspense, useEffect, useMemo, useRef } from "react"
 import { useSearchParams } from "next/navigation"
 import { AnimatePresence } from "framer-motion"
 import PostGrid from "@/components/post-grid"
@@ -10,6 +10,13 @@ import { usePosts, type PostSortMode } from "@/contexts/posts-context"
 import { useCinemaMode } from "@/contexts/cinema-mode-context"
 import { isValidCategory, CATEGORY_LABELS } from "@/lib/categories"
 import { motion } from "framer-motion"
+
+// 首页是否已进入过一次（模块级，跨路由往返保留）。
+// 帖子数据由全局 PostsProvider 缓存，从 music 等页返回首页时内容其实是「现成的」，
+// 真正让人觉得「加载慢」的是每次都重放一遍 0.5s 上滑入场动画。
+// 故首次进入保留完整入场动画，之后的返回直接秒显内容（入场动画跳过），
+// 配合导航的丝带转场，回首页是「转场揭开即见内容」而非空等动画。
+let homeEntered = false
 
 // 百叶窗效果样式（静态对象提升到模块级，避免每次渲染重建）
 const blindsOverlayStyle = {
@@ -50,6 +57,12 @@ function HomeContent() {
     const raw = searchParams?.get("category") || null
     return isValidCategory(raw) ? raw : null
   }, [searchParams])
+
+  // 首次进入才播放入场动画；之后的路由返回直接秒显（见 homeEntered 注释）。
+  const firstEnter = useRef(!homeEntered)
+  useEffect(() => {
+    homeEntered = true
+  }, [])
 
   // 同步分类到 PostsContext
   useEffect(() => {
@@ -106,7 +119,7 @@ function HomeContent() {
             {/* 排序切换：默认（按时间）/ 热度（按点赞评论权重） */}
             <motion.div
               className="mb-5 flex items-center gap-1 px-4 max-w-7xl mx-auto"
-              initial={{ opacity: 0, y: -8 }}
+              initial={firstEnter.current ? { opacity: 0, y: -8 } : false}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.4, ease: "easeOut" }}
             >
@@ -137,7 +150,7 @@ function HomeContent() {
             {/* 帖子列表 */}
             <motion.section
               className="mb-8"
-              initial={{ opacity: 0, y: 30 }}
+              initial={firstEnter.current ? { opacity: 0, y: 30 } : false}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, ease: "easeOut" }}
             >

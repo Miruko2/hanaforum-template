@@ -1,6 +1,8 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useRouter } from "next/navigation"
+import { navigateWithTransition } from "@/lib/view-transition-nav"
 import { type Track } from "../_data/tracks"
 import {
   computeInstances,
@@ -64,8 +66,23 @@ function PlaybackPresenceProbe({
 }
 
 export function MusicCanvas({ onExpand, overlayOpen = false }: Props) {
+  const router = useRouter()
   const reducedMotion = useReducedMotion()
   const isAndroid = useIsAndroid()
+
+  // 关闭音乐页回首页：走 SPA 客户端导航 + 丝带转场（与导航栏点击一致）。
+  // 不能用 <a href="/">——那会触发整页硬刷新，把全站常驻的 PlaybackProvider
+  // 一并销毁（音乐停、迷你卡片消失），也看不到过渡动画、加载更慢。
+  // music 在导航序里排在首页之后，回首页方向为 "prev"。
+  const handleClose = useCallback(
+    (e: React.MouseEvent) => {
+      // 保留中键/Ctrl/Cmd 等在新标签打开的原生行为
+      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+      e.preventDefault()
+      navigateWithTransition(router, "/", "prev")
+    },
+    [router],
+  )
   // 安卓上有弹窗时退出渲染。其他平台 / 无弹窗时保持 canvas 显示。
   const hideForOverlay = isAndroid && overlayOpen
   // rAF 循环闭包依赖 [] 不重建，用 ref 让每帧读到最新 hideForOverlay。
@@ -570,6 +587,7 @@ export function MusicCanvas({ onExpand, overlayOpen = false }: Props) {
         aria-label="close"
         className="absolute top-4 right-4 z-10 h-9 w-9 grid place-items-center rounded-full bg-white/10 hover:bg-white/20 text-white/80 hover:text-white transition-colors backdrop-blur"
         onPointerDown={(e) => e.stopPropagation()}
+        onClick={handleClose}
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <line x1="18" y1="6" x2="6" y2="18" />

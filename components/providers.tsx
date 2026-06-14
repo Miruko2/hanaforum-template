@@ -15,6 +15,8 @@ import dynamic from "next/dynamic"
 // NotificationProvider 需要同步加载（Navigation 和页面都依赖其 Context）
 import { NotificationProvider } from "@/contexts/notification-context"
 import { ChatUIProvider } from "@/contexts/chat-ui-context"
+// 音乐播放上下文提升到全站：跨页面后台续播（音频元素 + 播放状态随 app 生命周期常驻）
+import { PlaybackProvider } from "@/app/music/_context/PlaybackContext"
 
 // 延迟加载非首屏必需的纯 UI 组件
 const Navigation = dynamic(() => import("@/components/navigation"), { ssr: false })
@@ -23,6 +25,11 @@ const Toaster = dynamic(
   { ssr: false }
 )
 const FloatingChatMount = dynamic(() => import("@/components/floating-chat-mount"), { ssr: false })
+// 全站后台续播的迷你音乐卡片（仅在有曲目且不在 /music 页时显示）
+const GlobalMiniPlayer = dynamic(
+  () => import("@/app/music/_components/GlobalMiniPlayer").then(m => m.GlobalMiniPlayer),
+  { ssr: false }
+)
 
 // 延迟加载包装器：等浏览器空闲后再挂载，让首屏内容优先抢占主线程。
 // requestIdleCallback 在不支持的浏览器（Safari < 18.4）上回退到 setTimeout。
@@ -77,6 +84,9 @@ export function Providers({ children }: { children: ReactNode }) {
             <CinemaModeProvider>
             {/* ChatUIProvider 让导航栏入口与浮动聊天面板共享 open / 未读状态 */}
             <ChatUIProvider>
+            {/* PlaybackProvider 提升到全站：音频元素与播放状态随 app 常驻，
+                切到别的页面歌不断；迷你卡片（GlobalMiniPlayer）作为可见入口 */}
+            <PlaybackProvider>
             {/* 首屏内容：立即渲染 */}
             <PageTransition>
               {children}
@@ -95,10 +105,14 @@ export function Providers({ children }: { children: ReactNode }) {
             {/* 全站浮动聊天室：放在 PageTransition 外，不随页面切换动画消失 */}
             <FloatingChatMount />
 
+            {/* 后台续播迷你卡片：放在 PageTransition 外，切页不消失、歌继续放 */}
+            <GlobalMiniPlayer />
+
             {/* 触屏左右轻扫切页 + 丝带标题卡转场覆盖层 + 空闲时预热邻页 chunk */}
             <PageSwipe />
             <PageRibbonTransition />
             <RouteWarmup />
+            </PlaybackProvider>
             </ChatUIProvider>
             </CinemaModeProvider>
           </NotificationProvider>

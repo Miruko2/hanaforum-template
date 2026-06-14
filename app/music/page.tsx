@@ -4,7 +4,6 @@ import dynamic from "next/dynamic"
 import { useCallback, useState } from "react"
 import { ListMusic } from "lucide-react"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
-import { PlaybackProvider } from "./_context/PlaybackContext"
 import { PerfHUD } from "./_components/PerfHUD"
 import { METING_INSTANCES } from "./_lib/metingInstances"
 import type { Track } from "./_data/tracks"
@@ -82,7 +81,7 @@ export default function MusicPage() {
   const overlayOpen = libraryOpen || expand !== null || editorOpen
 
   return (
-    <PlaybackProvider>
+    <>
       {/* 预热 meting 实例连接：提前完成 DNS + TLS 握手，缩短首播「现取签名 URL」那一跳的
           往返。音频字节走网易 CDN 直链、域名随歌变化无法稳定预连，故只预热代理实例。 */}
       {METING_ORIGINS.map((origin) => (
@@ -119,6 +118,6 @@ export default function MusicPage() {
 
       {/* ?perf 性能测量浮层：不带参数时为 null、零成本（真机调优用） */}
       <PerfHUD />
-    </PlaybackProvider>
+    </>
   )
 }

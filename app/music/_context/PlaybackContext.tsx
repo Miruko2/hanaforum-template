@@ -10,6 +10,7 @@ import {
   useState,
   type ReactNode,
 } from "react"
+import { usePathname } from "next/navigation"
 import { DEFAULT_TRACKS, type Track } from "../_data/tracks"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useToast } from "@/hooks/use-toast"
@@ -168,6 +169,10 @@ export function useTrackSource(): TrackSourceCtx {
 export function PlaybackProvider({ children }: { children: ReactNode }) {
   const { user } = useSimpleAuth()
   const { toast } = useToast()
+  // Provider 现在挂在全局（跨页面后台续播），但 Space / ←/→ 快捷键只应在
+  // music 页生效——否则一旦播过歌，在论坛里按空格会被劫持成播放/暂停、
+  // 破坏页面默认的空格滚动。用 pathname 把快捷键限定在 /music。
+  const pathname = usePathname()
 
   // 运行时曲目源。userTracks = 当前用户的自定义曲目（空 = 没有 / 游客）。
   // source = 墙当前显示「我的」还是「精选」，持久化；有自定义曲目时才有意义。
@@ -735,7 +740,9 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   // ---- Global keyboard shortcuts ----
   // Space = play/pause, ArrowLeft = prev, ArrowRight = next.
   // Ignored while focus is on a text input (so search-in-library still works).
+  // 仅在 music 页绑定：provider 现在是全局的，不能在其他页面劫持空格/方向键。
   useEffect(() => {
+    if (pathname !== "/music") return
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null
       if (
@@ -762,7 +769,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [currentTrackId, togglePlay, prev, next])
+  }, [pathname, currentTrackId, togglePlay, prev, next])
 
   // ---- Favorites ----
   // Lookup via a Set so isFavorite() is O(1) — important because every card
