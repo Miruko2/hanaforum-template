@@ -30,6 +30,10 @@ export const metadata: Metadata = {
   // 首页虽是客户端渲染，但此 meta 由 layout 服务端注入、始终在初始 HTML 里，验证不受影响。
   verification: {
     google: "z_Fv3TeOE9zHuPKjvq6je00bC3ekqhQ2avyCt3KsEOQ",
+    // 百度搜索资源平台所有权验证：other 里的键名原样渲染成 <meta name="...">
+    other: {
+      "baidu-site-verification": "codeva-BTDRxGdWPh",
+    },
   },
   // 社交分享卡片：微信 / Twitter / Telegram 等抓取这里生成带图预览
   openGraph: {
