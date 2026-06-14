@@ -236,7 +236,7 @@ export default function FloatingActionButton({ onPostCreated }: FloatingActionBu
                   width: "min(42rem, calc(100vw - 32px))",
                   background: "rgba(21, 23, 27, 0.97)",
                 }}
-                initial={{ x: flyX, y: flyY, scale: 0.12, opacity: 0 }}
+                initial={{ x: flyX, y: flyY, scale: 0.12, opacity: 1 }}
                 animate={
                   flying
                     ? {
@@ -248,11 +248,9 @@ export default function FloatingActionButton({ onPostCreated }: FloatingActionBu
                           x: OPEN_SPRING,
                           y: OPEN_SPRING,
                           scale: OPEN_SPRING,
-                          // 绿色 blob 稍晚、柔和地淡入（晚一点点出现，避免一闪而过的突兀）
-                          opacity: { delay: 0.06, duration: 0.2, ease: "easeOut" },
                         },
                       }
-                    : { x: flyX, y: flyY, scale: 0.12, opacity: 0, transition: { duration: 0 } }
+                    : { x: flyX, y: flyY, scale: 0.12, opacity: 1, transition: { duration: 0 } }
                 }
                 exit={{
                   x: flyX,
