@@ -13,10 +13,14 @@ import { useRouter } from "next/navigation"
 import { cdnUrl } from "@/lib/cdn-url"
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "@/components/ui/hover-card"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
-import { useChatUI } from "@/contexts/chat-ui-context"
 import { useToast } from "@/hooks/use-toast"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { type Profile } from "@/lib/profiles"
+import {
+  followUser,
+  unfollowUser,
+  isFollowing as checkIsFollowing,
+} from "@/lib/follows"
 import {
   fetchUserCardData,
   peekUserCardData,
@@ -53,6 +57,10 @@ export interface UserCardBodyProps {
   stats: UserCardStats | null
   primaryLabel?: string
   secondaryLabel?: string
+  // 主按钮是否处于「激活态」（如已关注）：true 时用低调描边样式，false 时用高亮主色
+  primaryActive?: boolean
+  // 主按钮禁用（如关注请求进行中）
+  primaryDisabled?: boolean
   onPrimary: () => void
   onSecondary: () => void
 }
@@ -67,6 +75,8 @@ export function UserCardBody({
   stats,
   primaryLabel = "私信",
   secondaryLabel = "查看主页",
+  primaryActive = false,
+  primaryDisabled = false,
   onPrimary,
   onSecondary,
 }: UserCardBodyProps) {
@@ -115,7 +125,13 @@ export function UserCardBody({
           <button
             type="button"
             onClick={onPrimary}
-            className="flex-1 rounded-xl bg-lime-400 py-2.5 text-sm font-semibold text-black shadow-[0_4px_18px_rgba(163,230,53,0.25)] transition-all hover:bg-lime-300 hover:shadow-[0_4px_24px_rgba(163,230,53,0.4)]"
+            disabled={primaryDisabled}
+            className={
+              "flex-1 rounded-xl py-2.5 text-sm font-semibold transition-all disabled:opacity-60 " +
+              (primaryActive
+                ? "border border-white/10 bg-white/10 text-white hover:bg-white/15"
+                : "bg-lime-400 text-black shadow-[0_4px_18px_rgba(163,230,53,0.25)] hover:bg-lime-300 hover:shadow-[0_4px_24px_rgba(163,230,53,0.4)]")
+            }
           >
             {primaryLabel}
           </button>
@@ -133,7 +149,7 @@ export function UserCardBody({
 }
 
 // 头像 hover 弹出的精简社交卡片：背景图 + 头像(带等级角标) + 用户名 + 签名 +
-// 三栏统计(获赞/粉丝/帖子) + 私信 / 查看主页。数据在首次 hover 时懒加载。
+// 三栏统计(获赞/粉丝/帖子) + 关注 / 查看主页。数据在首次 hover 时懒加载。
 export default function UserHoverCard({
   userId,
   fallbackName,
@@ -142,7 +158,6 @@ export default function UserHoverCard({
 }: UserHoverCardProps) {
   const router = useRouter()
   const { user } = useSimpleAuth()
-  const { startDmWith } = useChatUI()
   const { toast } = useToast()
   const isMobile = useIsMobile()
 
@@ -155,10 +170,18 @@ export default function UserHoverCard({
   )
   // 受控开关：手机/平板用点击触发(touch 无 hover)，桌面仍用 hover
   const [open, setOpen] = useState(false)
+  // 关注态 + 请求中标记（首次开卡时按需查询）
+  const [following, setFollowing] = useState(false)
+  const [followBusy, setFollowBusy] = useState(false)
 
   const isSelf = !!user && user.id === userId
   const username = profile?.username || fallbackName
   const avatarUrl = profile?.avatar_url || fallbackAvatar
+
+  const myName =
+    user?.user_metadata?.username ||
+    user?.user_metadata?.displayName ||
+    (user?.email ? user.email.split("@")[0] : undefined)
 
   const applyData = (d: UserCardData) => {
     if (d.profile) setProfile(d.profile)
@@ -196,6 +219,10 @@ export default function UserHoverCard({
     const cached = peekUserCardData(userId, { allowStale: true })
     if (cached) applyData(cached)
     void fetchUserCardData(userId).then(applyData)
+    // 关注态：仅对「已登录且非自己」查询
+    if (user && !isSelf) {
+      void checkIsFollowing(user.id, userId).then(setFollowing)
+    }
   }
 
   const handleOpenChange = (next: boolean) => {
@@ -236,17 +263,35 @@ export default function UserHoverCard({
     router.push(`/user?id=${userId}`)
   }
 
-  const handleDm = () => {
+  const handleFollow = async () => {
     if (!user) {
-      toast({ title: "请先登录", description: "登录后才能私信", variant: "destructive" })
+      toast({ title: "请先登录", description: "登录后才能关注", variant: "destructive" })
       return
     }
-    setOpen(false)
+    // 自己：主按钮充当「我的主页」入口
     if (isSelf) {
+      setOpen(false)
       router.push(`/user?id=${userId}`)
       return
     }
-    startDmWith({ id: userId, username, avatar_url: avatarUrl })
+    if (followBusy) return
+    const prev = following
+    // 乐观更新：关注态 + 卡面粉丝数
+    setFollowing(!prev)
+    setStats((s) => (s ? { ...s, followers: Math.max(0, s.followers + (prev ? -1 : 1)) } : s))
+    setFollowBusy(true)
+    try {
+      if (prev) await unfollowUser(user.id, userId)
+      else await followUser(user.id, userId, myName)
+    } catch (err) {
+      // 回滚
+      setFollowing(prev)
+      setStats((s) => (s ? { ...s, followers: Math.max(0, s.followers + (prev ? 1 : -1)) } : s))
+      const e = err as { message?: string }
+      toast({ title: "操作失败", description: e?.message || "请稍后再试", variant: "destructive" })
+    } finally {
+      setFollowBusy(false)
+    }
   }
 
   return (
@@ -266,8 +311,10 @@ export default function UserHoverCard({
           backgroundUrl={profile?.background_url ?? null}
           bio={profile?.bio ?? null}
           stats={stats}
-          primaryLabel={isSelf ? "我的主页" : "私信"}
-          onPrimary={handleDm}
+          primaryLabel={isSelf ? "我的主页" : following ? "已关注" : "关注"}
+          primaryActive={!isSelf && following}
+          primaryDisabled={followBusy}
+          onPrimary={handleFollow}
           onSecondary={goProfile}
         />
       </HoverCardContent>
