@@ -5,7 +5,6 @@ import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useEffect, useState, useRef } from "react"
 import Navbar from "@/components/navbar"
 import BackgroundEffects from "@/components/background-effects"
-import { useRouter } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
 import {
   getOwnProfile,
@@ -18,15 +17,13 @@ import {
   UsernameTakenError,
 } from "@/lib/profiles"
 import ProfileHeader from "./_components/profile-header"
-import ProfileSettingsList from "./_components/profile-settings-list"
 import FollowStats from "./_components/follow-stats"
 
 // 「我的」页 = 编排层：持有页面级状态，handler 薄封装调用 lib/profiles 数据层，
 // 再把状态/回调下发给 Banner 头部与设置菜单。头像、背景图各有一个隐藏文件 input
 // （只此一处、由头部对应区域触发）。
 export default function ProfilePage() {
-  const { user, signOut } = useSimpleAuth()
-  const router = useRouter()
+  const { user } = useSimpleAuth()
   const { toast } = useToast()
 
   const [username, setUsername] = useState("")
@@ -73,11 +70,6 @@ export default function ProfilePage() {
       setLoading(false)
     }
   }, [user])
-
-  const handleSignOut = async () => {
-    await signOut()
-    router.push("/")
-  }
 
   // ───────── 头像上传 ─────────
   const handleAvatarClick = () => avatarInputRef.current?.click()
@@ -304,11 +296,6 @@ export default function ProfilePage() {
           />
 
           {user && <FollowStats userId={user.id} />}
-
-          <ProfileSettingsList
-            onDownload={() => router.push("/download")}
-            onSignOut={handleSignOut}
-          />
         </div>
       </div>
     </main>
