@@ -47,6 +47,11 @@ export default function ImageLightbox({
   // 多图轮播容器与当前索引
   const trackRef = useRef<HTMLDivElement>(null)
   const [current, setCurrent] = useState(index)
+  // current 的 ref 镜像：滚轮处理器里按「当前页」做相对切换，避免闭包拿到旧值
+  const currentRef = useRef(index)
+  useEffect(() => {
+    currentRef.current = current
+  }, [current])
   // 程序化滚动期间忽略 onScroll 反写，避免与受控 index 抖动
   const lockScrollSync = useRef(false)
   // 记录按下位置，区分「轻点空白/图片（关闭）」与「滑动翻页（不关闭）」
@@ -115,6 +120,36 @@ export default function ImageLightbox({
     },
     [list.length],
   )
+
+  // PC 端：在灯箱图片上滚动鼠标滚轮 → 左右切换图片（竖向滚轮换算翻页）。
+  // 原生非被动监听才能 preventDefault；加冷却避免一次滚动连跳多张；到边界不接管。
+  useEffect(() => {
+    const el = trackRef.current
+    if (!open || !isMulti || !el) return
+    let lock = false
+    let acc = 0
+    const STEP = 24
+    const onWheel = (e: WheelEvent) => {
+      const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY
+      if (delta === 0) return
+      e.preventDefault()
+      if (lock) return
+      acc += delta
+      if (Math.abs(acc) >= STEP) {
+        const dir = acc > 0 ? 1 : -1
+        acc = 0
+        const target = currentRef.current + dir
+        if (target < 0 || target > list.length - 1) return
+        lock = true
+        goTo(target)
+        window.setTimeout(() => {
+          lock = false
+        }, 350)
+      }
+    }
+    el.addEventListener("wheel", onWheel, { passive: false })
+    return () => el.removeEventListener("wheel", onWheel)
+  }, [open, isMulti, goTo, list.length])
 
   // 监听滚动，推导当前页
   const handleScroll = useCallback(() => {
