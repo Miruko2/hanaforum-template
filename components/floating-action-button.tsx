@@ -32,12 +32,24 @@ const FAB_CENTER_OFFSET = 52
  * 插值都在重绘剧烈变尺寸的图层，纹理重分配跟不上）。安卓改走纯
  * transform/opacity 假形变：面板一次光栅化后整体从按钮位飞行+缩放弹入，
  * 果冻皮交叉淡出，全程合成线程，零每帧重绘。
+ *
+ * 安卓再优化（消果冻弹入卡顿 + 绿色中途让位）：飞行+缩放阶段表单整树
+ * visibility:hidden，只让纯色面板 + lime 果冻皮做弹簧，backdrop-filter 子树零绘制。
+ * 两个时机解耦：果冻皮约 240ms（弹窗冲到最大、回弹动态中）就溶解、露出深色面板底
+ * （绿色中途让位、不等弹窗站定）；毛玻璃表单约 480ms（scale 贴近 1）才点亮——缩放
+ * 途中绘制 backdrop-filter 会逐帧重采样卡顿（最初病根），故必须等到位，其间深色空盒
+ * 短暂露出(约 0.08s)再浮现内容。毛玻璃样式不变。
  */
 export default function FloatingActionButton({ onPostCreated }: FloatingActionButtonProps) {
   const [mounted, setMounted] = useState(false)
   const [open, setOpen] = useState(false)
   // 安卓延帧起跑：面板先以透明态挂载 2 帧完成光栅化，再放弹簧（消起手卡顿）
   const [flying, setFlying] = useState(false)
+  // 解耦「果冻皮溶解」与「毛玻璃点亮」两个时机：
+  // skinDissolve —— 果冻皮在弹窗还在回弹的中途就溶解，露出深色面板底随弹簧弹到位；
+  // formLit —— 毛玻璃表单延后到 scale 贴近 1 才点亮（缩放途中绘制 backdrop-filter 会卡）
+  const [skinDissolve, setSkinDissolve] = useState(false)
+  const [formLit, setFormLit] = useState(false)
   const [formMod, setFormMod] = useState<FormModule | null>(null)
   const openRef = useRef(false)
   const lockedRef = useRef(false)
@@ -130,6 +142,8 @@ export default function FloatingActionButton({ onPostCreated }: FloatingActionBu
     }
     lockScroll()
     openRef.current = true
+    setSkinDissolve(false)
+    setFormLit(false)
     setOpen(true)
     if (isAndroidRuntime) {
       // 双 rAF：等面板透明态挂载并完成首帧光栅化后再起跑
@@ -138,6 +152,17 @@ export default function FloatingActionButton({ onPostCreated }: FloatingActionBu
           if (openRef.current) setFlying(true)
         })
       })
+      // 果冻皮中途溶解：~0.24s（弹窗刚冲到最大、正在回弹的动态中）绿色就化开，露出
+      // 深色面板底继续随弹簧弹到位——绿色不等弹窗站定、过渡更紧凑（弹簧时间驱动、与
+      // 设备无关）
+      window.setTimeout(() => {
+        if (openRef.current) setSkinDissolve(true)
+      }, 240)
+      // 毛玻璃落位后再点亮：~0.48s（scale 已贴近 1）。缩放途中绘制毛玻璃会逐帧重采样
+      // 卡顿（最初病根），故必须等到位；其间深色空盒短暂露出（约 0.08s）再浮现内容
+      window.setTimeout(() => {
+        if (openRef.current) setFormLit(true)
+      }, 480)
     }
   }
 
@@ -223,7 +248,8 @@ export default function FloatingActionButton({ onPostCreated }: FloatingActionBu
                           x: OPEN_SPRING,
                           y: OPEN_SPRING,
                           scale: OPEN_SPRING,
-                          opacity: { duration: 0.16, ease: "easeOut" },
+                          // 绿色 blob 稍晚、柔和地淡入（晚一点点出现，避免一闪而过的突兀）
+                          opacity: { delay: 0.06, duration: 0.2, ease: "easeOut" },
                         },
                       }
                     : { x: flyX, y: flyY, scale: 0.12, opacity: 0, transition: { duration: 0 } }
@@ -241,16 +267,20 @@ export default function FloatingActionButton({ onPostCreated }: FloatingActionBu
                   },
                 }}
               >
-                <div className="relative max-h-[85vh] overflow-y-auto overscroll-contain">
+                <div
+                  className="relative max-h-[85vh] overflow-y-auto overscroll-contain"
+                  style={{ visibility: formLit ? "visible" : "hidden" }}
+                >
                   <formMod.CreatePostForm onClose={close} onPostCreated={handlePostCreated} />
                 </div>
-                {/* 果冻皮：起飞时盖住面板再淡出，收回时淡入变回 lime 液滴 */}
+                {/* 果冻皮：飞行+弹簧全程盖住面板（底下毛玻璃表单此时未绘制），
+                    落位后才淡出露出表单；收回时淡入变回 lime 液滴 */}
                 <motion.div
                   className="pointer-events-none absolute inset-0 bg-gradient-to-br from-lime-400 to-lime-500"
                   initial={{ opacity: 1 }}
                   animate={
-                    flying
-                      ? { opacity: 0, transition: { delay: 0.06, duration: 0.3, ease: "easeOut" } }
+                    skinDissolve
+                      ? { opacity: 0, transition: { duration: 0.3, ease: "easeOut" } }
                       : { opacity: 1, transition: { duration: 0 } }
                   }
                   exit={{ opacity: 1, transition: { delay: 0.1, duration: 0.16, ease: "easeOut" } }}
