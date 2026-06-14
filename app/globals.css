@@ -4187,3 +4187,146 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
   font-size: clamp(180px, 42vh, 380px);
   color: rgba(var(--ptr-accent-rgb), 0.16);
 }
+
+/* ============================================================
+   个人页「我的帖子」标题条 —— 绝区零式静态横幅（.mp-*）
+   --------------------------------------------------------
+   呼应胶片绶带转场的美术语言：实心暗底 + 双色辉光、描边镂空巨字、
+   左侧 hazard 斜纹、贴纸硬投影标题、角标编号、闪烁危险点。
+   动效全部为「挂载后只跑一次」的入场（裁切滑入 / 斜纹拉开 / 高光扫掠 /
+   水印漂移 / 角标淡入）+ 一个极廉价的 opacity 闪烁点，无位移类常驻无限
+   动画，安卓 WebView 安全（与 .profile-glass / .ptr-* 同思路）。
+   ============================================================ */
+.mp-banner {
+  position: relative;
+  overflow: hidden;
+  /* 与 .profile-glass 同款毛玻璃语言，保证个人页风格统一 */
+  background: rgba(25, 25, 35, 0.42);
+  backdrop-filter: blur(22px) saturate(140%);
+  -webkit-backdrop-filter: blur(22px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  animation: mp-banner-in 0.6s cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+@keyframes mp-banner-in {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* 顶边高光线：模拟玻璃上沿反光 */
+.mp-banner::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 8%;
+  right: 8%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+  pointer-events: none;
+}
+
+/* 一次性高光扫掠：挂载后斜向扫过一次即停 */
+.mp-sheen {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(105deg, transparent 38%, rgba(255, 255, 255, 0.13) 50%, transparent 62%);
+  transform: translateX(-130%);
+  animation: mp-sheen-sweep 1.1s cubic-bezier(0.4, 0, 0.2, 1) 0.4s both;
+}
+@keyframes mp-sheen-sweep {
+  to { transform: translateX(130%); }
+}
+
+/* 镂空巨字水印：描边可见、轻微入场漂移 */
+.mp-watermark {
+  position: absolute;
+  right: -0.5rem;
+  top: 50%;
+  font-size: 5.5rem;
+  font-weight: 900;
+  font-style: italic;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  color: transparent;
+  -webkit-text-stroke: 1.5px rgba(255, 255, 255, 0.08);
+  user-select: none;
+  pointer-events: none;
+  animation: mp-watermark-in 0.8s cubic-bezier(0.23, 1, 0.32, 1) 0.1s both;
+}
+@keyframes mp-watermark-in {
+  from { opacity: 0; transform: translateY(-50%) translateX(22px); }
+  to   { opacity: 1; transform: translateY(-50%) translateX(0); }
+}
+
+/* 左侧 hazard 斜纹条：纵向拉开入场 */
+.mp-hazard {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  background: repeating-linear-gradient(
+    45deg,
+    #a3e635 0,
+    #a3e635 6px,
+    transparent 6px,
+    transparent 12px
+  );
+  transform-origin: top center;
+  animation: mp-hazard-in 0.5s cubic-bezier(0.2, 1, 0.3, 1) 0.25s both;
+}
+@keyframes mp-hazard-in {
+  from { opacity: 0; transform: scaleY(0); }
+  to   { opacity: 1; transform: scaleY(1); }
+}
+
+/* 标题：贴纸式硬投影（lime 双层）+ 从左裁切滑入 */
+.mp-title {
+  position: relative;
+  color: #fff;
+  text-shadow:
+    0.03em 0.03em 0 rgba(163, 230, 53, 0.85),
+    0.06em 0.06em 0 rgba(163, 230, 53, 0.32);
+  animation: mp-title-in 0.55s cubic-bezier(0.2, 0.7, 0.3, 1) 0.15s both;
+}
+@keyframes mp-title-in {
+  from { opacity: 0; transform: translateX(-14px); clip-path: inset(0 100% 0 0); }
+  to   { opacity: 1; transform: translateX(0); clip-path: inset(0 0 0 0); }
+}
+
+/* 副标 / 角标：轻微上移淡入 */
+.mp-fade-up {
+  animation: mp-fade-up 0.45s ease-out 0.42s both;
+}
+@keyframes mp-fade-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* 闪烁危险点：纯 opacity，廉价常驻 */
+.mp-rec-dot {
+  animation: mp-blink 1.8s steps(1, end) infinite;
+}
+@keyframes mp-blink {
+  0%, 62% { opacity: 1; }
+  63%, 100% { opacity: 0.25; }
+}
+
+/* 降低动态偏好：去掉所有入场/闪烁，仅保留终态 */
+@media (prefers-reduced-motion: reduce) {
+  .mp-banner,
+  .mp-sheen,
+  .mp-watermark,
+  .mp-hazard,
+  .mp-title,
+  .mp-fade-up,
+  .mp-rec-dot {
+    animation: none;
+  }
+  .mp-sheen { display: none; }
+  .mp-title { clip-path: none; }
+  .mp-watermark { transform: translateY(-50%); }
+}
