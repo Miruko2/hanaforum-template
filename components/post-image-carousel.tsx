@@ -208,7 +208,7 @@ export default function PostImageCarousel({
         {images.map((url, i) => (
           <div
             key={i}
-            className="h-full w-full shrink-0 snap-center"
+            className="h-full w-full shrink-0 snap-center snap-always"
             onPointerDown={(e) => {
               downX.current = e.clientX
             }}

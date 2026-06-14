@@ -224,7 +224,7 @@ export default function ImageLightbox({
                 {list.map((url, i) => (
                   <div
                     key={i}
-                    className="flex h-full w-full shrink-0 snap-center items-center justify-center p-4 sm:p-12"
+                    className="flex h-full w-full shrink-0 snap-center snap-always items-center justify-center p-4 sm:p-12"
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
