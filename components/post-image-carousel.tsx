@@ -98,6 +98,11 @@ export default function PostImageCarousel({
 }: PostImageCarouselProps) {
   const trackRef = useRef<HTMLDivElement>(null)
   const [current, setCurrent] = useState(0)
+  // current 的 ref 镜像：滚轮处理器里要按「当前页」做相对切换，避免闭包拿到旧值
+  const currentRef = useRef(0)
+  useEffect(() => {
+    currentRef.current = current
+  }, [current])
   // 高清预加载：详情打开后（错开首图、空闲时）后台把所有图的主图都预清晰化，
   // 这样滑到后面任意一张时主图早已就绪、直接显示清晰图，不再「糊一下」。
   const [prefetchAll, setPrefetchAll] = useState(false)
@@ -157,6 +162,39 @@ export default function PostImageCarousel({
     ro.observe(el)
     return () => ro.disconnect()
   }, [current])
+
+  // PC 端：在图片区域滚动鼠标滚轮 → 左右切换图片（把竖向滚轮换算成翻页）。
+  // 用原生非被动监听才能 preventDefault 阻止页面/模态竖向滚动；加冷却避免一次滚动连跳多张。
+  // 触摸设备基本不触发 wheel，单图时不接管（让页面正常滚动）。
+  useEffect(() => {
+    const el = trackRef.current
+    if (!el || images.length <= 1) return
+    let lock = false
+    let acc = 0
+    const STEP = 24
+    const onWheel = (e: WheelEvent) => {
+      const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY
+      if (delta === 0) return
+      // 接管滚轮：阻止详情页/页面竖向滚动，改为切图
+      e.preventDefault()
+      if (lock) return
+      acc += delta
+      if (Math.abs(acc) >= STEP) {
+        const dir = acc > 0 ? 1 : -1
+        acc = 0
+        const target = currentRef.current + dir
+        // 到边界就不再接管（保持原地，不连跳）
+        if (target < 0 || target > images.length - 1) return
+        lock = true
+        goTo(target)
+        window.setTimeout(() => {
+          lock = false
+        }, 350)
+      }
+    }
+    el.addEventListener("wheel", onWheel, { passive: false })
+    return () => el.removeEventListener("wheel", onWheel)
+  }, [images.length, goTo])
 
   const heightClass = fillParent ? "h-full" : "h-[300px]"
 
