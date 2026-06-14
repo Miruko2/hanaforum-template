@@ -49,6 +49,8 @@ export default function ImageLightbox({
   const [current, setCurrent] = useState(index)
   // 程序化滚动期间忽略 onScroll 反写，避免与受控 index 抖动
   const lockScrollSync = useRef(false)
+  // 记录按下位置，区分「轻点空白/图片（关闭）」与「滑动翻页（不关闭）」
+  const tapStart = useRef<{ x: number; y: number } | null>(null)
 
   // 安卓 WebView：backdrop-filter 叠加父级 opacity 动画会撕裂 backing buffer。同步判定。
   const [isAndroid] = useState(
@@ -201,11 +203,22 @@ export default function ImageLightbox({
                 {current + 1} / {list.length}
               </motion.div>
 
-              {/* 横向 scroll-snap 轮播：滑动 / 箭头 / 键盘切换 */}
+              {/* 横向 scroll-snap 轮播：滑动 / 箭头 / 键盘切换。
+                  轻点（图片或两侧空白、非滑动）即关闭灯箱。 */}
               <div
                 ref={trackRef}
                 onScroll={handleScroll}
-                onClick={(e) => e.stopPropagation()}
+                onPointerDown={(e) => {
+                  tapStart.current = { x: e.clientX, y: e.clientY }
+                }}
+                onClick={(e) => {
+                  const s = tapStart.current
+                  tapStart.current = null
+                  // 仅在「几乎没移动」时视为轻点关闭，避免滑动翻页误关
+                  if (s && Math.abs(e.clientX - s.x) < 10 && Math.abs(e.clientY - s.y) < 10) {
+                    onClose()
+                  }
+                }}
                 className="flex h-full w-full snap-x snap-mandatory overflow-x-auto overflow-y-hidden overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
               >
                 {list.map((url, i) => (
@@ -219,7 +232,6 @@ export default function ImageLightbox({
                       alt={alt}
                       draggable={false}
                       decoding="async"
-                      onClick={onClose}
                       className="max-h-full max-w-full select-none rounded-2xl object-contain shadow-[0_30px_90px_-20px_rgba(0,0,0,0.8)]"
                     />
                   </div>
