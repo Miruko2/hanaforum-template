@@ -38,7 +38,16 @@ function fmt(s: number): string {
  * identity), then settles into a horizontal panel: spinning vinyl on the left,
  * circular progress ring around it, transport on the right.
  */
-export function ExpandedCard({ target, onClose }: { target: ExpandTarget; onClose: () => void }) {
+export function ExpandedCard({
+  target,
+  onClose,
+  overlayZ = 60,
+}: {
+  target: ExpandTarget
+  onClose: () => void
+  /** 外层覆盖容器的 z-index。默认 60（music 页内够用）；在弹幕墙等高层级页面需调高。 */
+  overlayZ?: number
+}) {
   const [mounted, setMounted] = useState(false)
   useEffect(() => setMounted(true), [])
 
@@ -54,7 +63,7 @@ export function ExpandedCard({ target, onClose }: { target: ExpandTarget; onClos
   if (!mounted) return null
   return createPortal(
     <AnimatePresence>
-      {target && <ExpandedInner key={target.track.id} target={target} onClose={onClose} />}
+      {target && <ExpandedInner key={target.track.id} target={target} onClose={onClose} overlayZ={overlayZ} />}
     </AnimatePresence>,
     document.body,
   )
@@ -63,9 +72,11 @@ export function ExpandedCard({ target, onClose }: { target: ExpandTarget; onClos
 function ExpandedInner({
   target,
   onClose,
+  overlayZ,
 }: {
   target: { track: Track; rect: ExpandRect }
   onClose: () => void
+  overlayZ: number
 }) {
   const { currentTrack, isPlaying, isFallback, togglePlay, play, seek, lyricsEnabled, setLyricsEnabled } =
     usePlayback()
@@ -213,7 +224,8 @@ function ExpandedInner({
 
   return (
     <motion.div
-      className="fixed inset-0 z-[60] flex items-center justify-center"
+      className="fixed inset-0 flex items-center justify-center"
+      style={{ zIndex: overlayZ }}
       onClick={onClose}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}

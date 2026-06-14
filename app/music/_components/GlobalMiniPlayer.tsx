@@ -1,18 +1,14 @@
 "use client"
 
-import { useCallback, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Pause, Play, SkipBack, SkipForward, Heart, Repeat, Repeat1, Square } from "lucide-react"
-import { usePathname, useRouter } from "next/navigation"
-import {
-  effectiveRingPath,
-  navigateWithTransition,
-  ringDirection,
-} from "@/lib/view-transition-nav"
+import { usePathname } from "next/navigation"
 import { usePlayback, usePlaybackTime, type PlayMode } from "../_context/PlaybackContext"
 import { useDominantHue } from "../_lib/useDominantHue"
 import { useIsAndroidApp } from "../_lib/useIsAndroid"
 import { TrackCover } from "./TrackCover"
+import { ExpandedCard, type ExpandTarget } from "./ExpandedCard"
 
 // 播放模式循环顺序：列表循环 → 单曲循环 → 播完暂停。
 const MODE_ORDER: PlayMode[] = ["list", "one", "once"]
@@ -135,7 +131,6 @@ function MiniProgressBar({
  */
 export function GlobalMiniPlayer() {
   const pathname = usePathname()
-  const router = useRouter()
   const {
     currentTrack,
     isPlaying,
@@ -150,6 +145,9 @@ export function GlobalMiniPlayer() {
   } = usePlayback()
   const { currentTime, duration, buffered } = usePlaybackTime()
 
+  // 点卡片打开的「正在播放」详情页（复用 music 页的 ExpandedCard）。
+  const [expand, setExpand] = useState<ExpandTarget>(null)
+
   // 与底部播放器一致：取封面主色驱动进度条/图标着色
   const extracted = useDominantHue(
     currentTrack?.userProvided ? null : currentTrack?.cover ?? null,
@@ -161,11 +159,26 @@ export function GlobalMiniPlayer() {
 
   const fav = currentTrack ? isFavorite(currentTrack.id) : false
 
-  const openMusicPage = useCallback(() => {
-    const dir = ringDirection(effectiveRingPath(pathname || "", false), "/music")
-    if (dir) navigateWithTransition(router, "/music", dir)
-    else router.push("/music")
-  }, [pathname, router])
+  // 点卡片本体 → 打开详情页（用卡片自身的屏幕矩形作为展开起点）。
+  const openDetail = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (!currentTrack) return
+      const r = (e.currentTarget as HTMLDivElement).getBoundingClientRect()
+      setExpand({
+        track: currentTrack,
+        rect: { left: r.left, top: r.top, width: r.width, height: r.height },
+      })
+    },
+    [currentTrack],
+  )
+
+  // 切页或当前曲目清空时收起详情页（本组件常驻、不随路由卸载，需手动收起）。
+  useEffect(() => {
+    setExpand(null)
+  }, [pathname])
+  useEffect(() => {
+    if (!currentTrack) setExpand(null)
+  }, [currentTrack])
 
   const cycleMode = useCallback(() => {
     const i = MODE_ORDER.indexOf(playMode)
@@ -185,6 +198,7 @@ export function GlobalMiniPlayer() {
     : "pointer-events-none fixed bottom-4 left-4 z-[45] w-[min(360px,calc(100vw-96px))]"
 
   return (
+    <>
     <div className={wrapperClass}>
       <AnimatePresence mode="popLayout">
         {visible && currentTrack && (
@@ -192,8 +206,8 @@ export function GlobalMiniPlayer() {
             key="mini-player"
             className="pointer-events-auto relative cursor-pointer overflow-hidden rounded-2xl p-2"
             role="button"
-            aria-label={`正在播放 ${currentTrack.title}，点击打开音乐页`}
-            onClick={openMusicPage}
+            aria-label={`正在播放 ${currentTrack.title}，点击展开详情`}
+            onClick={openDetail}
             style={{
               background: isAndroidWebView ? "rgba(40,40,40,0.92)" : "rgba(255,255,255,0.05)",
               backdropFilter: isAndroidWebView ? undefined : "blur(32px) saturate(140%)",
@@ -307,5 +321,9 @@ export function GlobalMiniPlayer() {
         )}
       </AnimatePresence>
     </div>
+
+    {/* 正在播放详情页（复用 music 页 ExpandedCard）。live 页层级抬到弹幕墙(z-80)之上。 */}
+    <ExpandedCard target={expand} onClose={() => setExpand(null)} overlayZ={onLive ? 90 : 60} />
+    </>
   )
 }
