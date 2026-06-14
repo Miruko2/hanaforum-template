@@ -23,12 +23,14 @@ export type PostImageSource = {
 let columnCheck: Promise<boolean> | null = null
 export function postsHaveImageUrls(): Promise<boolean> {
   if (!columnCheck) {
-    columnCheck = supabase
-      .from("posts")
-      .select("image_urls")
-      .limit(1)
-      .then(({ error }) => !error)
-      .catch(() => false)
+    columnCheck = (async () => {
+      try {
+        const { error } = await supabase.from("posts").select("image_urls").limit(1)
+        return !error
+      } catch {
+        return false
+      }
+    })()
   }
   return columnCheck
 }

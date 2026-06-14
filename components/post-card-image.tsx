@@ -19,6 +19,11 @@ interface PostCardImageProps {
    * 配合父容器的固定高度使用（例如详情页左侧列）。
    */
   fillParent?: boolean
+  /**
+   * 高清模式：先用缩略图秒出占位，后台加载主图(1920 webp)后无缝替换。
+   * 详情页开启，让大图清晰；列表卡片关闭，仍用 640 缩略图省 egress。
+   */
+  fullRes?: boolean
   onImageLoad?: (dimensions: { width: number, height: number, ratio: number }) => void
 }
 
@@ -28,6 +33,7 @@ export default function PostCardImage({
   disablePreview = false,
   inDetailView = false,
   fillParent = false,
+  fullRes = false,
   onImageLoad
 }: PostCardImageProps) {
   const [imageError, setImageError] = useState(false)
@@ -59,6 +65,24 @@ export default function PostCardImage({
     setImageLoaded(false)
     setUseFullImage(false)
   }, [post.image_url])
+
+  // 高清模式（详情页）：缩略图先顶上（多半命中列表缓存、秒出），后台预载主图，
+  // 加载完成后切到主图无缝替换为高清。无缩略图则直接上主图。
+  useEffect(() => {
+    if (!fullRes) return
+    const full = cdnUrl(post.image_url)
+    if (!full) return
+    if (!thumbUrl) {
+      setUseFullImage(true)
+      return
+    }
+    const img = new Image()
+    img.onload = () => setUseFullImage(true)
+    img.src = full
+    return () => {
+      img.onload = null
+    }
+  }, [fullRes, post.image_url, thumbUrl])
   
   // 计算图片容器的宽高比 - 让图片按真实比例显示，形成自然的瀑布流高低错落
   // 返回 { heightClass, aspectStyle } 二选一：

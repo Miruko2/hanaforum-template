@@ -489,6 +489,7 @@ export default function PostDetailModal({
                             images={images}
                             alt={post.title}
                             fillParent
+                            fullRes
                             onIndexChange={setImageIndex}
                             onImageClick={(i) => {
                               setImageIndex(i)
@@ -513,6 +514,7 @@ export default function PostDetailModal({
                               isMobile={isMobile}
                               inDetailView={true}
                               fillParent={true}
+                              fullRes
                             />
                           </div>
                           {imageHoverOverlay}
@@ -542,6 +544,7 @@ export default function PostDetailModal({
                           <PostImageCarousel
                             images={images}
                             alt={post.title}
+                            fullRes
                             onIndexChange={setImageIndex}
                             onImageClick={(i) => {
                               setImageIndex(i)
@@ -565,6 +568,7 @@ export default function PostDetailModal({
                             post={post}
                             isMobile={isMobile}
                             inDetailView={true}
+                            fullRes
                           />
                         </div>
                           {imageHoverOverlay}

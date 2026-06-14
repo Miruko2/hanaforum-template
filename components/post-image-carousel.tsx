@@ -12,6 +12,8 @@ interface PostImageCarouselProps {
   alt?: string
   /** 横版详情：铺满父容器高度（h-full）；否则用固定高度（竖版/手机） */
   fillParent?: boolean
+  /** 高清模式：当前查看的那张升级为主图(1920 webp)；其余仍用缩略图省 egress */
+  fullRes?: boolean
   /** 当前页变化回调（供父组件同步灯箱起始索引） */
   onIndexChange?: (i: number) => void
   /** 点击某张图片（用于打开灯箱），回传该图索引 */
@@ -20,11 +22,35 @@ interface PostImageCarouselProps {
 }
 
 // 单张轮播图：先试 640px 缩略图（省 egress），失败回退主图，再失败显错误态。
-function CarouselSlide({ url, alt }: { url: string; alt: string }) {
+// 高清模式下、且当前正在查看（active）时，后台预载主图，加载完无缝替换为高清。
+function CarouselSlide({
+  url,
+  alt,
+  fullRes,
+  active,
+}: {
+  url: string
+  alt: string
+  fullRes: boolean
+  active: boolean
+}) {
   const [useFull, setUseFull] = useState(false)
   const [errored, setErrored] = useState(false)
   const thumb = postThumbUrl(url)
   const src = cdnUrl((!useFull && thumb) || url) || ""
+
+  // 高清升级：仅对当前正在看的这张做（避免一次拉下全部原图）。无缩略图则本就显示主图。
+  useEffect(() => {
+    if (!fullRes || !active || useFull) return
+    const full = cdnUrl(url)
+    if (!full || !thumb) return
+    const img = new Image()
+    img.onload = () => setUseFull(true)
+    img.src = full
+    return () => {
+      img.onload = null
+    }
+  }, [fullRes, active, useFull, url, thumb])
 
   if (errored) {
     return (
@@ -62,6 +88,7 @@ export default function PostImageCarousel({
   images,
   alt = "",
   fillParent = false,
+  fullRes = false,
   onIndexChange,
   onImageClick,
   className,
@@ -125,7 +152,7 @@ export default function PostImageCarousel({
               if (dx < 8) onImageClick?.(i)
             }}
           >
-            <CarouselSlide url={url} alt={alt} />
+            <CarouselSlide url={url} alt={alt} fullRes={fullRes} active={i === current} />
           </div>
         ))}
       </div>
