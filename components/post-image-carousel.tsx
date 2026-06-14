@@ -21,38 +21,27 @@ interface PostImageCarouselProps {
   className?: string
 }
 
-// 单张轮播图：先试 640px 缩略图（省 egress），失败回退主图，再失败显错误态。
-// 高清模式下、且当前正在查看（active）时，后台预载主图，加载完无缝替换为高清。
+// 单张轮播图：双层交叉淡入。底层永远是缩略图（秒出占位），上层是主图，
+// 主图加载完成后淡入覆盖——避免「换 src 重新解码」造成的「糊→清」闪烁。
+// load=true 时才挂载主图层并触发其下载（用于当前张 + 预加载）。
 function CarouselSlide({
   url,
   alt,
-  fullRes,
-  active,
+  load,
 }: {
   url: string
   alt: string
-  fullRes: boolean
-  active: boolean
+  load: boolean
 }) {
-  const [useFull, setUseFull] = useState(false)
-  const [errored, setErrored] = useState(false)
-  const thumb = postThumbUrl(url)
-  const src = cdnUrl((!useFull && thumb) || url) || ""
+  const [fullLoaded, setFullLoaded] = useState(false)
+  const [baseErrored, setBaseErrored] = useState(false)
+  const thumb = cdnUrl(postThumbUrl(url))
+  const full = cdnUrl(url) || ""
+  // 有缩略图就拿它做底；没有就直接拿主图做底（此时无需上层）
+  const base = thumb || full
+  const needOverlay = load && !!full && !!thumb
 
-  // 高清升级：仅对当前正在看的这张做（避免一次拉下全部原图）。无缩略图则本就显示主图。
-  useEffect(() => {
-    if (!fullRes || !active || useFull) return
-    const full = cdnUrl(url)
-    if (!full || !thumb) return
-    const img = new Image()
-    img.onload = () => setUseFull(true)
-    img.src = full
-    return () => {
-      img.onload = null
-    }
-  }, [fullRes, active, useFull, url, thumb])
-
-  if (errored) {
+  if (baseErrored && !full) {
     return (
       <div className="flex h-full w-full items-center justify-center bg-gray-800/60 text-gray-400">
         <ImageOff className="h-6 w-6" />
@@ -61,18 +50,32 @@ function CarouselSlide({
   }
 
   return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={src}
-      alt={alt}
-      draggable={false}
-      decoding="async"
-      className="h-full w-full object-cover"
-      onError={() => {
-        if (!useFull && thumb) setUseFull(true)
-        else setErrored(true)
-      }}
-    />
+    <div className="relative h-full w-full">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={base}
+        alt={alt}
+        draggable={false}
+        decoding="async"
+        className="absolute inset-0 h-full w-full object-cover"
+        onError={() => setBaseErrored(true)}
+      />
+      {needOverlay && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={full}
+          alt=""
+          aria-hidden
+          draggable={false}
+          decoding="async"
+          onLoad={() => setFullLoaded(true)}
+          className={cn(
+            "absolute inset-0 h-full w-full object-cover transition-opacity duration-300 ease-out",
+            fullLoaded ? "opacity-100" : "opacity-0",
+          )}
+        />
+      )}
+    </div>
   )
 }
 
@@ -95,8 +98,34 @@ export default function PostImageCarousel({
 }: PostImageCarouselProps) {
   const trackRef = useRef<HTMLDivElement>(null)
   const [current, setCurrent] = useState(0)
+  // 高清预加载：详情打开后（错开首图、空闲时）后台把所有图的主图都预清晰化，
+  // 这样滑到后面任意一张时主图早已就绪、直接显示清晰图，不再「糊一下」。
+  const [prefetchAll, setPrefetchAll] = useState(false)
   // 记录按下位置，区分「点击放大」与「滑动翻页」
   const downX = useRef<number | null>(null)
+
+  // 错峰预加载：先让当前张（封面）独享带宽，约 600ms 后再批量预清晰其余图。
+  useEffect(() => {
+    if (!fullRes || images.length <= 1) return
+    const w = window as typeof window & {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number
+      cancelIdleCallback?: (id: number) => void
+    }
+    let idleId: number | undefined
+    const timer = setTimeout(() => {
+      if (typeof w.requestIdleCallback === "function") {
+        idleId = w.requestIdleCallback(() => setPrefetchAll(true), { timeout: 3000 })
+      } else {
+        setPrefetchAll(true)
+      }
+    }, 600)
+    return () => {
+      clearTimeout(timer)
+      if (idleId !== undefined && typeof w.cancelIdleCallback === "function") {
+        w.cancelIdleCallback(idleId)
+      }
+    }
+  }, [fullRes, images.length])
 
   const handleScroll = useCallback(() => {
     const el = trackRef.current
@@ -152,7 +181,7 @@ export default function PostImageCarousel({
               if (dx < 8) onImageClick?.(i)
             }}
           >
-            <CarouselSlide url={url} alt={alt} fullRes={fullRes} active={i === current} />
+            <CarouselSlide url={url} alt={alt} load={fullRes && (i === current || prefetchAll)} />
           </div>
         ))}
       </div>
