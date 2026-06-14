@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Pause, Play, SkipBack, SkipForward, History as HistoryIcon, Heart, Repeat, Repeat1, Square } from "lucide-react"
+import { Pause, Play, SkipBack, SkipForward, History as HistoryIcon, Heart, Repeat, Repeat1, Square, CloudRain, Target, Droplet } from "lucide-react"
 import { usePlayback, usePlaybackTime } from "../_context/PlaybackContext"
 import { useDominantHue } from "../_lib/useDominantHue"
 import { useIsAndroidApp } from "../_lib/useIsAndroid"
+import { useIsMobile } from "../_lib/useIsMobile"
 import { TrackCover } from "./TrackCover"
 import { PlayModeMenu } from "./PlayModeMenu"
 import { VolumeControl } from "./VolumeControl"
@@ -129,7 +130,7 @@ function ProgressBar({
 }
 
 export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
-  const { currentTrack, isPlaying, isFallback, togglePlay, seek, next, prev, isFavorite, toggleFavorite, playMode, setPlayMode, volume, setVolume } =
+  const { currentTrack, isPlaying, isFallback, togglePlay, seek, next, prev, isFavorite, toggleFavorite, playMode, setPlayMode, volume, setVolume, liquidFx, setLiquidFx } =
     usePlayback()
   const { currentTime, duration, buffered } = usePlaybackTime()
   const fav = currentTrack ? isFavorite(currentTrack.id) : false
@@ -162,6 +163,8 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
   // 走统一的 useIsAndroidApp（同步首帧正确 + Capacitor 全局检测 + 晚注入补查），
   // 不再单独内联一份更松的 UA 正则。它只驱动静态底色、不碰 framer-motion initial。
   const isAndroidWebView = useIsAndroidApp()
+  // 液面切换按钮仅桌面/iPad 有意义（移动端走 CSS 水纹、无液面），与 LiquidRefraction 门控一致。
+  const isMobile = useIsMobile()
 
   return (
     <div
@@ -292,6 +295,38 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
                 <Repeat size={15} />
               )}
             </button>
+            {/* 详情页液面背景的自动律动切换（仅桌面/iPad；循环 下雨 → 中间冒泡 → 默认）。 */}
+            {!isMobile && (
+              <button
+                type="button"
+                aria-label="水波效果"
+                title={
+                  liquidFx === "rain"
+                    ? "水波：下雨（点击切中间冒泡）"
+                    : liquidFx === "center"
+                      ? "水波：中间冒泡（点击切默认）"
+                      : "水波：默认（点击切下雨）"
+                }
+                className="h-8 w-8 grid place-items-center rounded-full hover:bg-white/10 transition-colors"
+                style={{
+                  color: liquidFx === "off" ? "rgba(255,255,255,0.55)" : `hsl(${hue} 75% 65%)`,
+                }}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setLiquidFx(
+                    liquidFx === "rain" ? "center" : liquidFx === "center" ? "off" : "rain",
+                  )
+                }}
+              >
+                {liquidFx === "rain" ? (
+                  <CloudRain size={15} />
+                ) : liquidFx === "center" ? (
+                  <Target size={15} />
+                ) : (
+                  <Droplet size={15} />
+                )}
+              </button>
+            )}
             <VolumeControl volume={volume} setVolume={setVolume} hue={hue} />
             <button
               type="button"

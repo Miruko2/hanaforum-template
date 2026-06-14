@@ -10,8 +10,11 @@ import { useDominantHue } from "../_lib/useDominantHue"
 import { useReducedMotion } from "../_lib/useReducedMotion"
 import { useLyrics } from "../_lib/lyrics"
 import { useIsAndroid } from "../_lib/useIsAndroid"
+import { useIsMobile } from "../_lib/useIsMobile"
 import { TrackCover } from "./TrackCover"
 import { LyricsEcho } from "./LyricsEcho"
+import { SoundField } from "./SoundField"
+import { LiquidRefraction } from "./LiquidRefraction"
 
 /** Screen-space rect of the card that was clicked — used as flight start. */
 export type ExpandRect = { left: number; top: number; width: number; height: number }
@@ -78,8 +81,19 @@ function ExpandedInner({
   onClose: () => void
   overlayZ: number
 }) {
-  const { currentTrack, isPlaying, isFallback, togglePlay, play, seek, lyricsEnabled, setLyricsEnabled } =
-    usePlayback()
+  const {
+    currentTrack,
+    isPlaying,
+    isFallback,
+    togglePlay,
+    play,
+    seek,
+    lyricsEnabled,
+    setLyricsEnabled,
+    volume,
+    getAudioIntensity,
+    liquidFx,
+  } = usePlayback()
   const { currentTime, duration } = usePlaybackTime()
   const tracks = useTracks()
   const [shown, setShown] = useState<Track>(target.track)
@@ -96,6 +110,8 @@ function ExpandedInner({
   // filter，首帧必须为真值，否则切到无 filter 变体时 framer-motion 撒手不管 filter →
   // blur 卡死、面板永久模糊（已踩坑，桌面复现不到）。
   const isAndroid = useIsAndroid()
+  // 桌面/iPad=false，安卓与手机=true。决定背景律动走 WebGL 液面还是 CSS 水纹。
+  const isMobile = useIsMobile()
   // 歌词：仅当前播放曲目才有时间轴可同步；无有效歌词（纯音乐/仅元信息/非
   // meting 音源/实例全挂）时为 null，整个歌词层不渲染。
   const lyrics = useLyrics(shown, isCurrent && lyricsEnabled)
@@ -226,7 +242,9 @@ function ExpandedInner({
     <motion.div
       className="fixed inset-0 flex items-center justify-center"
       style={{ zIndex: overlayZ }}
-      onClick={onClose}
+      // 桌面液面模式（rain/center）：点击空白处用来跟水面交互（起涟漪），不关闭弹层——
+      // 只有卡片上的 ✕（或 Esc）才关。off=默认（无液面）与移动端无水面交互，保留点空白关闭。
+      onClick={isMobile || liquidFx === "off" ? onClose : undefined}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -234,6 +252,21 @@ function ExpandedInner({
     >
       {/* Backdrop — dimmer only, no blur, so the canvas behind stays sharp. */}
       <div className="absolute inset-0 bg-black/55" />
+
+      {/* 详情页背景律动（铺在暗化遮罩之上、卡片之下）：
+          桌面/iPad：液面模式（rain/center）才挂 WebGL 液面；off=默认时不挂、回到原本
+          的详情页样式（暗化遮罩 + 卡片）。安卓/手机走廉价 CSS 水纹（SoundField）。 */}
+      {isMobile ? (
+        <SoundField hue={hue} active={playing} reducedMotion={reducedMotion} vw={vw} />
+      ) : liquidFx === "off" ? null : (
+        <LiquidRefraction
+          hue={hue}
+          playing={playing}
+          volume={volume}
+          getIntensity={getAudioIntensity}
+          mode={liquidFx}
+        />
+      )}
 
       {/* Panel */}
       <motion.div

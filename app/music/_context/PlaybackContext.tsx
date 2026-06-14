@@ -25,6 +25,7 @@ const PLAY_MODE_KEY = "music-play-mode-v1"
 const SOURCE_KEY = "music-source-v1"
 const VOLUME_KEY = "music-volume-v1"
 const LYRICS_KEY = "music-lyrics-v1"
+const LIQUID_FX_KEY = "music-liquidfx-v1"
 const HEALTHY_BASE_KEY = "music-meting-base-v2" // 上次探测出的健康 meting 实例：{ base, at }
 // 缓存只在足够「新鲜」时才同步采信：实例健康状态偶尔翻转，几小时内的缓存基本仍准
 //（帮首曲在探测返回前就用对实例）；但跨天的旧缓存可能指向已死实例，那还不如退回构建
@@ -36,6 +37,9 @@ export type MusicSource = "mine" | "featured"
 
 // 播放模式：列表循环 / 单曲循环 / 播完就暂停。
 export type PlayMode = "list" | "one" | "once"
+
+/** 详情页桌面液面背景的自动律动模式（off = 默认，只留鼠标交互）。 */
+export type LiquidFx = "rain" | "center" | "off"
 
 // ---- 音频拉取冷却 / 复用（防 ban、防滥用）----
 // REUSE_TTL：同一首在此窗口内已拉取过 → 复用，不重置 src、不再打外部源。
@@ -79,6 +83,9 @@ export type PlaybackState = {
   /** 详情页歌词显示开关，持久化到 localStorage。 */
   lyricsEnabled: boolean
   setLyricsEnabled: (on: boolean) => void
+  /** 详情页桌面液面背景的自动律动模式，持久化到 localStorage。 */
+  liquidFx: LiquidFx
+  setLiquidFx: (m: LiquidFx) => void
   /**
    * Returns the current audio intensity in [0, 1], smoothed across frames.
    * Implementation strategy:
@@ -427,6 +434,26 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     try {
       if (localStorage.getItem(LYRICS_KEY) === "0") setLyricsEnabledState(false)
+    } catch {
+      /* ignore */
+    }
+  }, [])
+
+  const [liquidFx, setLiquidFxState] = useState<LiquidFx>("rain")
+  const setLiquidFx = useCallback((m: LiquidFx) => {
+    setLiquidFxState(m)
+    try {
+      localStorage.setItem(LIQUID_FX_KEY, m)
+    } catch {
+      /* ignore */
+    }
+  }, [])
+
+  // ---- 载入持久化的液面律动模式（默认 rain） ----
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem(LIQUID_FX_KEY)
+      if (v === "rain" || v === "center" || v === "off") setLiquidFxState(v)
     } catch {
       /* ignore */
     }
@@ -838,10 +865,12 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       setVolume,
       lyricsEnabled,
       setLyricsEnabled,
+      liquidFx,
+      setLiquidFx,
       getAudioIntensity,
       refreshTracks,
     }),
-    [currentTrack, isPlaying, isFallback, playMode, history, favorites, tracks, play, pause, togglePlay, seek, next, prev, clearHistory, isFavorite, toggleFavorite, setPlayMode, volume, setVolume, lyricsEnabled, setLyricsEnabled, getAudioIntensity, refreshTracks],
+    [currentTrack, isPlaying, isFallback, playMode, history, favorites, tracks, play, pause, togglePlay, seek, next, prev, clearHistory, isFavorite, toggleFavorite, setPlayMode, volume, setVolume, lyricsEnabled, setLyricsEnabled, liquidFx, setLiquidFx, getAudioIntensity, refreshTracks],
   )
 
   const tracksCtxValue = useMemo<TrackSourceCtx>(
