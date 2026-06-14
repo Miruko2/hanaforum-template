@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { motion, AnimatePresence, type MotionProps } from "framer-motion"
 import dynamic from "next/dynamic"
-import { ThumbsUp, MessageSquare } from "lucide-react"
+import { ThumbsUp, MessageSquare, Check, Trash2 } from "lucide-react"
 import type { Post } from "@/lib/types"
 import { CATEGORY_LABELS } from "@/lib/categories"
 import { postThumbUrl } from "@/lib/post-image-thumb"
@@ -13,6 +13,17 @@ import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useToast } from "@/hooks/use-toast"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { likePost, unlikePost, checkUserLiked } from "@/lib/supabase"
+import { deletePostWithUIUpdate } from "@/lib/post-delete-fix"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 
 const PostDetailModal = dynamic(() => import("@/components/post-detail-modal"), { ssr: false })
 
@@ -658,22 +669,53 @@ function HorizontalTimeline({ items, onOpen }: { items: Post[]; onOpen: (p: Post
 // ───────── 网格视图（个人主页「我的帖子」用） ─────────
 // 复用 TimelineCard 卡面，按响应式网格排列（移动 2 列 / 桌面 3 列），
 // stagger 高斯模糊渐入。点开走父组件同一套详情弹窗 + 点赞逻辑。
-function GridTimeline({ items, onOpen }: { items: Post[]; onOpen: (p: Post) => void }) {
+function GridTimeline({
+  items,
+  onOpen,
+  selectMode = false,
+  selectedIds,
+  onToggle,
+}: {
+  items: Post[]
+  onOpen: (p: Post) => void
+  selectMode?: boolean
+  selectedIds?: Set<string>
+  onToggle?: (id: string) => void
+}) {
   return (
     <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3">
-      {items.map((post, i) => (
-        <TimelineCard
-          key={post.id}
-          post={post}
-          onOpen={onOpen}
-          enter={{
-            initial: { opacity: 0, y: 18, filter: "blur(8px)" },
-            whileInView: { opacity: 1, y: 0, filter: "blur(0px)" },
-            viewport: { once: true, margin: "-40px" },
-            transition: { duration: 0.45, ease: "easeOut", delay: Math.min(i * 0.05, 0.4) },
-          }}
-        />
-      ))}
+      {items.map((post, i) => {
+        const selected = selectedIds?.has(post.id) ?? false
+        return (
+          <div
+            key={post.id}
+            className={`relative rounded-[1.7rem] ${selectMode && selected ? "ring-2 ring-lime-400" : ""}`}
+          >
+            {/* 选择模式：点卡片走打勾（onToggle）而非打开详情；右上角勾选标记 */}
+            <TimelineCard
+              post={post}
+              onOpen={selectMode && onToggle ? () => onToggle(post.id) : onOpen}
+              enter={{
+                initial: { opacity: 0, y: 18, filter: "blur(8px)" },
+                whileInView: { opacity: 1, y: 0, filter: "blur(0px)" },
+                viewport: { once: true, margin: "-40px" },
+                transition: { duration: 0.45, ease: "easeOut", delay: Math.min(i * 0.05, 0.4) },
+              }}
+            />
+            {selectMode && (
+              <span
+                className={`pointer-events-none absolute right-3 top-3 z-20 flex h-7 w-7 items-center justify-center rounded-full border-2 shadow-lg transition-colors ${
+                  selected
+                    ? "border-lime-400 bg-lime-400 text-black"
+                    : "border-white/70 bg-black/40 text-transparent"
+                }`}
+              >
+                <Check className="h-4 w-4" strokeWidth={3} />
+              </span>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -683,9 +725,11 @@ function GridTimeline({ items, onOpen }: { items: Post[]; onOpen: (p: Post) => v
 export default function PostTimeline({
   posts,
   layout = "timeline",
+  selectable = false,
 }: {
   posts: Post[]
   layout?: "timeline" | "grid"
+  selectable?: boolean
 }) {
   const { user, isAdmin } = useSimpleAuth()
   const { toast } = useToast()
@@ -700,6 +744,47 @@ export default function PostTimeline({
   const [liked, setLiked] = useState(false)
   const [likeCount, setLikeCount] = useState(0)
   const [isLiking, setIsLiking] = useState(false)
+
+  // 批量删除（仅 selectable 的网格用，如个人主页「我的帖子」）
+  const [selectMode, setSelectMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [deleting, setDeleting] = useState(false)
+  const [confirmOpen, setConfirmOpen] = useState(false)
+
+  const toggleSelect = (id: string) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  const exitSelect = () => {
+    setSelectMode(false)
+    setSelectedIds(new Set())
+  }
+  const doDelete = async () => {
+    if (deleting || selectedIds.size === 0) return
+    setDeleting(true)
+    const ids = Array.from(selectedIds)
+    let ok = 0
+    for (const id of ids) {
+      try {
+        const success = await deletePostWithUIUpdate(id, () => {})
+        if (success) ok++
+      } catch {
+        /* 单条失败继续删其余 */
+      }
+    }
+    setItems((prev) => prev.filter((p) => !selectedIds.has(p.id)))
+    setDeleting(false)
+    setConfirmOpen(false)
+    exitSelect()
+    toast({
+      title: ok > 0 ? "删除完成" : "删除失败",
+      description: ok > 0 ? `已删除 ${ok} 个帖子` : "请稍后重试",
+      variant: ok > 0 ? undefined : "destructive",
+    })
+  }
 
   const openPost = async (post: Post) => {
     setActive(post)
@@ -757,7 +842,48 @@ export default function PostTimeline({
   return (
     <>
       {layout === "grid" ? (
-        <GridTimeline items={items} onOpen={openPost} />
+        <>
+          {selectable && items.length > 0 && (
+            <div className="mb-3 flex items-center gap-2">
+              {!selectMode ? (
+                <button
+                  type="button"
+                  onClick={() => setSelectMode(true)}
+                  className="ml-auto rounded-full border border-white/20 bg-white/10 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:border-lime-400/50 hover:text-lime-400"
+                >
+                  管理帖子
+                </button>
+              ) : (
+                <>
+                  <span className="text-sm text-white/60">已选 {selectedIds.size} 项</span>
+                  <button
+                    type="button"
+                    onClick={exitSelect}
+                    className="ml-auto rounded-full border border-white/20 bg-white/10 px-4 py-1.5 text-sm text-white/80 transition-colors hover:bg-white/15"
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmOpen(true)}
+                    disabled={selectedIds.size === 0 || deleting}
+                    className="inline-flex items-center gap-1.5 rounded-full bg-red-500/90 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    删除选中{selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+          <GridTimeline
+            items={items}
+            onOpen={openPost}
+            selectMode={selectable && selectMode}
+            selectedIds={selectedIds}
+            onToggle={toggleSelect}
+          />
+        </>
       ) : isDesktop ? (
         <HorizontalTimeline items={items} onOpen={openPost} />
       ) : (
@@ -780,6 +906,30 @@ export default function PostTimeline({
           isAdmin={isAdmin}
         />
       )}
+
+      <AlertDialog open={confirmOpen} onOpenChange={(o) => !deleting && setConfirmOpen(o)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认删除</AlertDialogTitle>
+            <AlertDialogDescription>
+              确定删除选中的 {selectedIds.size} 个帖子吗？此操作不可撤销，帖子的评论与点赞也会一并删除。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault()
+                doDelete()
+              }}
+              disabled={deleting}
+              className="bg-red-500 text-white hover:bg-red-600"
+            >
+              {deleting ? "删除中…" : "确认删除"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
 }

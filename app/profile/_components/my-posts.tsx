@@ -45,7 +45,7 @@ export default function MyPosts({ posts, loading }: { posts: Post[]; loading: bo
       {loading ? (
         <div className="flex items-center justify-center py-16 text-sm text-white/40">加载中…</div>
       ) : posts.length > 0 ? (
-        <PostTimeline posts={posts} layout="grid" />
+        <PostTimeline posts={posts} layout="grid" selectable />
       ) : (
         <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-white/10 py-16 text-center text-white/40">
           <div className="mb-2 text-4xl">🌱</div>
