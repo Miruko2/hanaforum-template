@@ -137,7 +137,7 @@ function JumpModal({
 }
 
 // ───────── 共享卡片 ─────────
-function TimelineCard({
+export function TimelineCard({
   post,
   onOpen,
   className = "",
@@ -655,8 +655,38 @@ function HorizontalTimeline({ items, onOpen }: { items: Post[]; onOpen: (p: Post
   )
 }
 
+// ───────── 网格视图（个人主页「我的帖子」用） ─────────
+// 复用 TimelineCard 卡面，按响应式网格排列（移动 2 列 / 桌面 3 列），
+// stagger 高斯模糊渐入。点开走父组件同一套详情弹窗 + 点赞逻辑。
+function GridTimeline({ items, onOpen }: { items: Post[]; onOpen: (p: Post) => void }) {
+  return (
+    <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3">
+      {items.map((post, i) => (
+        <TimelineCard
+          key={post.id}
+          post={post}
+          onOpen={onOpen}
+          enter={{
+            initial: { opacity: 0, y: 18, filter: "blur(8px)" },
+            whileInView: { opacity: 1, y: 0, filter: "blur(0px)" },
+            viewport: { once: true, margin: "-40px" },
+            transition: { duration: 0.45, ease: "easeOut", delay: Math.min(i * 0.05, 0.4) },
+          }}
+        />
+      ))}
+    </div>
+  )
+}
+
 // ───────── 父组件：状态 + 详情弹窗，按断点切视图 ─────────
-export default function PostTimeline({ posts }: { posts: Post[] }) {
+// layout="grid" → 个人主页网格；默认 "timeline" → 社交页响应式时间轴。
+export default function PostTimeline({
+  posts,
+  layout = "timeline",
+}: {
+  posts: Post[]
+  layout?: "timeline" | "grid"
+}) {
   const { user, isAdmin } = useSimpleAuth()
   const { toast } = useToast()
   const isMobile = useIsMobile()
@@ -726,7 +756,9 @@ export default function PostTimeline({ posts }: { posts: Post[] }) {
 
   return (
     <>
-      {isDesktop ? (
+      {layout === "grid" ? (
+        <GridTimeline items={items} onOpen={openPost} />
+      ) : isDesktop ? (
         <HorizontalTimeline items={items} onOpen={openPost} />
       ) : (
         <VerticalTimeline items={items} onOpen={openPost} />

@@ -18,6 +18,9 @@ import {
 } from "@/lib/profiles"
 import ProfileHeader from "./_components/profile-header"
 import FollowStats from "./_components/follow-stats"
+import MyPosts from "./_components/my-posts"
+import { getUserPosts } from "@/lib/supabase-optimized"
+import type { Post } from "@/lib/types"
 
 // 「我的」页 = 编排层：持有页面级状态，handler 薄封装调用 lib/profiles 数据层，
 // 再把状态/回调下发给 Banner 头部与设置菜单。头像、背景图各有一个隐藏文件 input
@@ -31,6 +34,10 @@ export default function ProfilePage() {
   const [backgroundUrl, setBackgroundUrl] = useState<string | null>(null)
   const [bio, setBio] = useState("")
   const [loading, setLoading] = useState(true)
+
+  // 「我的帖子」
+  const [posts, setPosts] = useState<Post[]>([])
+  const [postsLoading, setPostsLoading] = useState(true)
 
   // 上传态
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
@@ -68,6 +75,26 @@ export default function ProfilePage() {
       fetchProfile()
     } else {
       setLoading(false)
+    }
+  }, [user])
+
+  // 拉取「我的帖子」（复用社交页同款数据源 getUserPosts）
+  useEffect(() => {
+    if (!user) {
+      setPostsLoading(false)
+      return
+    }
+    let alive = true
+    setPostsLoading(true)
+    getUserPosts(user.id)
+      .then((ps) => {
+        if (alive) setPosts(ps)
+      })
+      .finally(() => {
+        if (alive) setPostsLoading(false)
+      })
+    return () => {
+      alive = false
     }
   }, [user])
 
@@ -263,8 +290,9 @@ export default function ProfilePage() {
         onChange={handleBgFileChange}
       />
 
-      <div className="flex items-center justify-center min-h-screen px-4 pt-20 pb-10">
-        <div className="w-full max-w-lg space-y-6">
+      <div className="container mx-auto max-w-6xl px-4 pt-20 pb-10">
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+          <div className="w-full space-y-6 lg:w-[360px] lg:shrink-0">
           <ProfileHeader
             fallbackLetter={avatarLetter}
             avatarUrl={avatarUrl}
@@ -296,6 +324,12 @@ export default function ProfilePage() {
           />
 
           {user && <FollowStats userId={user.id} />}
+          </div>
+
+          {/* 右栏：我的帖子（移动端落到资料下方） */}
+          <div className="min-w-0 flex-1">
+            <MyPosts posts={posts} loading={postsLoading} />
+          </div>
         </div>
       </div>
     </main>
