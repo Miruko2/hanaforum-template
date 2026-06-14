@@ -273,12 +273,14 @@ export function GlobalMiniPlayer() {
   const visible = !!currentTrack && pathname !== "/music"
 
   // 弹幕墙(/live) 是一整块 position:fixed inset-0、z-index:80 的不透明全屏面板，
-  // 会盖住普通 z-[45] 的迷你卡片。故在 live 页把卡片层级抬到 live 墙之上（z-[85]），
-  // 并上移避开底部全宽的输入框。其他页面保持低层级（z-[45]，在移动端菜单 z-[55] 之下）。
+  // 会盖住普通 z-[45] 的迷你卡片。故在 live 页把卡片层级抬到 live 墙之上（z-[85]）。
+  // 垂直位置：移动端保持底部（bottom-4，live 页 bottom-24 避开输入框）；
+  // PC 端(md+)改到页面高度正中（top-1/2 + -translate-y-1/2，按自身高度居中，
+  // 收起/展开高度变化时仍保持居中），水平仍贴左 left-4 不变。
   const onLive = pathname === "/live"
   const wrapperClass = onLive
-    ? "pointer-events-none fixed bottom-24 left-4 z-[85]"
-    : "pointer-events-none fixed bottom-4 left-4 z-[45]"
+    ? "pointer-events-none fixed left-4 z-[85] bottom-24 md:bottom-auto md:top-1/2 md:-translate-y-1/2"
+    : "pointer-events-none fixed left-4 z-[45] bottom-4 md:bottom-auto md:top-1/2 md:-translate-y-1/2"
 
   const sizeW = collapsed ? COLLAPSED : fullW
   const sizeH = collapsed ? COLLAPSED : FULL_H
