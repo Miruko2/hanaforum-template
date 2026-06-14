@@ -326,7 +326,7 @@ export async function getPosts() {
     
     // 获取帖子基本信息
     const withUrls = await postsHaveImageUrls()
-    const { data: posts, error: postsError } = await supabase
+    const { data: postsData, error: postsError } = await supabase
       .from("posts")
       .select(
         `id, title, content, description, category, image_url, ${withUrls ? "image_urls, " : ""}image_ratio, created_at, user_id`
@@ -338,6 +338,9 @@ export async function getPosts() {
       console.error("获取帖子错误:", postsError)
       throw postsError
     }
+
+    // 动态 select 字符串下 supabase-js 推断不出行类型，统一按 any[] 处理
+    const posts = (postsData as any[]) || []
 
     if (!posts || posts.length === 0) {
       console.debug("没有找到帖子");

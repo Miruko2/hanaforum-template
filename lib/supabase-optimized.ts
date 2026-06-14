@@ -60,11 +60,13 @@ export const getPostsOptimized = withCache(
     try {
       // 获取帖子基本数据和计数，不包含用户信息
       const withUrls = await postsHaveImageUrls()
-      const { data: postsWithCounts, error } = await supabase
+      const { data, error } = await supabase
         .from("posts")
         .select(postSelect(withUrls))
         .order("created_at", { ascending: false })
         .limit(1000) // 增加加载数量限制到1000，确保能显示足够多的帖子
+      // 动态 select 字符串下 supabase-js 推断不出行类型，这里统一按 any[] 处理
+      const postsWithCounts = (data as any[]) || []
 
       if (error) {
         console.error("❌ 获取帖子失败:", error);
