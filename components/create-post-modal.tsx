@@ -18,6 +18,7 @@ import { CATEGORIES } from "@/lib/categories"
 import type { Post } from "@/lib/types"
 import { compressImage } from "@/lib/image-compress"
 import { postThumbName, POST_THUMB_EDGE } from "@/lib/post-image-thumb"
+import ImageLightbox from "@/components/image-lightbox"
 
 interface CreatePostModalProps {
   onClose: () => void
@@ -54,6 +55,8 @@ export function CreatePostForm({
   const { user } = useSimpleAuth()
   const { toast } = useToast()
   const [imageRatio, setImageRatio] = useState<number>(editPost?.image_ratio || 0.75)
+  // 点击预览图后，原图在屏幕中心聚焦放大（复用帖子详情页的灯箱）
+  const [lightboxOpen, setLightboxOpen] = useState(false)
 
   // 处理图片上传
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -360,25 +363,30 @@ export function CreatePostForm({
               />
             </div>
 
-            {/* 图片预览 */}
+            {/* 图片预览：固定尺寸方形缩略图，外层用 flex-wrap 容器，便于后续扩展为多图 */}
             {imagePreview && (
-              <div className="relative mt-4 rounded-lg overflow-hidden border border-white/[0.12]">
-                <img
-                  src={imagePreview || "/placeholder.svg"}
-                  alt="Preview"
-                  className="w-full h-auto max-h-[200px] object-contain"
-                />
-                <button
-                  className="absolute top-2 right-2 rounded-full bg-black/50 backdrop-blur-md p-1 text-white hover:text-white/80"
-                  onClick={() => {
-                    setImagePreview(null)
-                    setImageFile(null)
-                    setImageCleared(true)
-                  }}
-                  disabled={isSubmitting}
-                >
-                  <X className="h-4 w-4" />
-                </button>
+              <div className="mt-4 flex flex-wrap gap-3">
+                <div className="group relative h-28 w-28 overflow-hidden rounded-lg border border-white/[0.12]">
+                  <img
+                    src={imagePreview || "/placeholder.svg"}
+                    alt="Preview"
+                    className="h-full w-full object-cover cursor-pointer transition-transform duration-300 ease-out [@media(hover:hover)]:group-hover:scale-110"
+                    onClick={() => setLightboxOpen(true)}
+                  />
+                  <button
+                    className="absolute top-1.5 right-1.5 z-10 rounded-full bg-black/50 backdrop-blur-md p-1 text-white hover:text-white/80"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setImagePreview(null)
+                      setImageFile(null)
+                      setImageCleared(true)
+                      setLightboxOpen(false)
+                    }}
+                    disabled={isSubmitting}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
               </div>
             )}
 
@@ -427,6 +435,13 @@ export function CreatePostForm({
             </div>
           </div>
         </div>
+
+      {/* 图片放大灯箱：点击预览图后原图居中聚焦放大（portal 到 body，盖在发帖面板之上） */}
+      <ImageLightbox
+        src={lightboxOpen ? imagePreview : null}
+        alt="Preview"
+        onClose={() => setLightboxOpen(false)}
+      />
     </>
   )
 }
