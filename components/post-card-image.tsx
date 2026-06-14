@@ -3,9 +3,10 @@
 import { useState, useCallback, useEffect, useRef } from "react"
 import { cn } from "@/lib/utils"
 import type { Post } from "@/lib/types"
-import { ImageOff } from "lucide-react"
+import { ImageOff, Copy } from "lucide-react"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { postThumbUrl } from "@/lib/post-image-thumb"
+import { postImageList } from "@/lib/post-images"
 import { cdnUrl } from "@/lib/cdn-url"
 
 interface PostCardImageProps {
@@ -42,6 +43,9 @@ export default function PostCardImage({
 
   // 检查是否有图片内容或imageContent
   const hasImageContent = !!post.imageContent
+
+  // 多图角标：列表卡片上显示图片总数（详情页不显示，详情走轮播）
+  const imageCount = postImageList(post).length
 
   // 图片直连 Supabase（Vercel 图片优化额度爆掉后 /_next/image 对新图 502，弃用）：
   // 列表与详情统一加载 640px 缩略图（同一 URL → 详情命中列表缓存、hero 飞入即时
@@ -174,6 +178,13 @@ export default function PostCardImage({
         onLoad={(e) => handleImageLoaded(e.currentTarget)}
         onError={handleError}
       />
+      {/* 多图角标：仅列表卡片显示（详情页走轮播，不显示） */}
+      {!inDetailView && imageCount > 1 && (
+        <div className="pointer-events-none absolute right-2 top-2 z-10 flex items-center gap-1 rounded-full bg-black/55 px-2 py-1 text-xs font-medium text-white backdrop-blur-sm">
+          <Copy className="h-3.5 w-3.5" />
+          {imageCount}
+        </div>
+      )}
     </div>
   )
 } 

@@ -41,34 +41,38 @@ const admin = createClient(SUPABASE_URL, SERVICE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
 })
 
-// 从 posts.image_url 解析出「被引用的文件名」集合（分页读全表）。
+// 从 posts.image_url + posts.image_urls 解析出「被引用的文件名」集合（分页读全表）。
+// 多图帖子的非封面图只存在 image_urls 里，必须一并纳入，否则会被误判为孤儿删除。
 async function getReferencedFilenames() {
   const referenced = new Set()
   const marker = `/${BUCKET}/`
+  // 把一条 public URL 解析成文件名并登记（连同其缩略图）
+  const addUrl = (url) => {
+    if (typeof url !== "string") return
+    const idx = url.indexOf(marker)
+    if (idx === -1) return
+    const name = decodeURIComponent(url.slice(idx + marker.length).split("?")[0])
+    if (!name) return
+    referenced.add(name)
+    // 缩略图与主图同生共死：主图被引用 ⇒ 对应 `<base>_thumb.webp` 也算被引用
+    //（路径约定见 lib/post-image-thumb.ts；gif 无缩略图，多加个名字无害）。
+    const dot = name.lastIndexOf(".")
+    const base = dot > 0 ? name.slice(0, dot) : name
+    referenced.add(`${base}_thumb.webp`)
+  }
   const pageSize = 1000
   let from = 0
   for (;;) {
     const { data, error } = await admin
       .from("posts")
-      .select("image_url")
-      .not("image_url", "is", null)
+      .select("image_url, image_urls")
       .range(from, from + pageSize - 1)
     if (error) throw error
     if (!data || data.length === 0) break
     for (const row of data) {
-      const url = row.image_url
-      if (typeof url !== "string") continue
-      const idx = url.indexOf(marker)
-      if (idx === -1) continue
-      const name = decodeURIComponent(url.slice(idx + marker.length).split("?")[0])
-      if (name) {
-        referenced.add(name)
-        // 缩略图与主图同生共死：主图被引用 ⇒ 对应 `<base>_thumb.webp` 也算被引用
-        //（路径约定见 lib/post-image-thumb.ts；gif 无缩略图，多加个名字无害）。
-        // 主图被删帖后，主图+缩略图一起变孤儿、一起被清。
-        const dot = name.lastIndexOf(".")
-        const base = dot > 0 ? name.slice(0, dot) : name
-        referenced.add(`${base}_thumb.webp`)
+      addUrl(row.image_url)
+      if (Array.isArray(row.image_urls)) {
+        for (const u of row.image_urls) addUrl(u)
       }
     }
     if (data.length < pageSize) break

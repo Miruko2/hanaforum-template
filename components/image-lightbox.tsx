@@ -1,63 +1,74 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { motion, AnimatePresence } from "framer-motion"
-import { X, Loader2 } from "lucide-react"
+import { X, Loader2, ChevronLeft, ChevronRight } from "lucide-react"
+import { cn } from "@/lib/utils"
 
 interface ImageLightboxProps {
-  /** 图片直链；为 null/空时不展示灯箱 */
-  src: string | null
+  /** 单图直链；为 null/空时不展示灯箱（向后兼容） */
+  src?: string | null
+  /** 多图直链数组；非空时优先于 src，启用左右切换 + 圆点指示器 */
+  images?: string[] | null
+  /** 多图当前索引（受控） */
+  index?: number
+  /** 索引变化回调（滑动/箭头/键盘切换时） */
+  onIndexChange?: (i: number) => void
   alt?: string
   onClose: () => void
 }
 
 /**
- * 图片灯箱：点击帖子详情页的图片后，原图在屏幕中心聚焦放大。
+ * 图片灯箱：点击图片后在屏幕中心聚焦放大。
  *
- * 交互时序（关键）：点击 → 遮罩立即淡入 + 居中 loading（不再阻塞等原图下载完才出现）；
- * 原图在后台加载，加载完成后图片才做「轻弹跳」入场。这样：
- *   1. 点击即时有反馈（遮罩 + spinner），不再「干等一会儿才弹出」；
- *   2. 弹跳发生在图片已解码之后，避免「一边解码大图一边做 spring」导致的掉帧。
+ * - 单图：原图后台加载、解码完成后做「轻弹跳」入场（时序见下）。
+ * - 多图：横向 scroll-snap 轮播，支持触摸滑动 / 桌面箭头 / 键盘左右，
+ *   顶部显示「当前/总数」，底部圆点指示器（当前页为绿色椭圆）。
  *
- * portal 到 body：避开详情模态框的 overflow-hidden 裁切与 z-index 层叠陷阱，
- * 始终盖在最上层。用原生 <img> 直接加载原图，拿到原始分辨率，也免去 next/image 白名单。
+ * portal 到 body：避开父容器的 overflow-hidden 裁切与 z-index 层叠陷阱，始终盖在最上层。
  */
-export default function ImageLightbox({ src, alt = "", onClose }: ImageLightboxProps) {
-  // 原图是否加载完成 —— 决定何时触发弹入动画
+export default function ImageLightbox({
+  src,
+  images,
+  index = 0,
+  onIndexChange,
+  alt = "",
+  onClose,
+}: ImageLightboxProps) {
+  // 归一化图片列表：多图优先，否则回退单图
+  const list = (images && images.length ? images : src ? [src] : []).filter(Boolean) as string[]
+  const open = list.length > 0
+  const isMulti = list.length > 1
+
+  // 原图是否加载完成 —— 决定单图何时触发弹入动画
   const [loaded, setLoaded] = useState(false)
   const imgRef = useRef<HTMLImageElement>(null)
-  // 安卓 WebView：backdrop-filter 叠加父级 opacity 动画会撕裂 backing buffer
-  // （放大/关闭那一瞬「鬼影/碎裂闪」，与 music 覆盖层同一类合成器 bug）。
-  // 同步判定（驱动样式、挂载即用，不能用异步 hook）。
+  // 多图轮播容器与当前索引
+  const trackRef = useRef<HTMLDivElement>(null)
+  const [current, setCurrent] = useState(index)
+  // 程序化滚动期间忽略 onScroll 反写，避免与受控 index 抖动
+  const lockScrollSync = useRef(false)
+
+  // 安卓 WebView：backdrop-filter 叠加父级 opacity 动画会撕裂 backing buffer。同步判定。
   const [isAndroid] = useState(
     () => typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent),
   )
-  // 进一步区分「安卓 app（Capacitor WebView）」：图片入场的 scale 动画在 app 的
-  // WebView 里，首次把未缓存大图栅格化成 GPU 合成层时与动画并发，仍会撕裂（鬼影闪）——
-  // decode() 只解决 CPU 解码、管不到 GPU 首次纹理化，故安卓网页端够、app 端不够。
-  // app 端图片入场去掉几何动画（见 imgAnim）。同步判定，与 MusicPlayer 的 isAndroidWebView 一致。
+  // 安卓 app（Capacitor WebView）：单图入场去掉 scale 几何动画（首次大图栅格化 + 动画并发会撕裂）。
   const [isAndroidApp] = useState(() => {
     if (typeof navigator === "undefined" || typeof window === "undefined") return false
     const ua = navigator.userAgent
-    return (
-      (/Android/.test(ua) && /wv|WebView/.test(ua)) || "Capacitor" in window
-    )
+    return (/Android/.test(ua) && /wv|WebView/.test(ua)) || "Capacitor" in window
   })
 
+  // ── 单图：解码后再弹入 ───────────────────────────────────────────────
   useEffect(() => {
-    if (!src) return
+    if (!open || isMulti) return
     setLoaded(false)
     let cancelled = false
     const reveal = () => {
       if (!cancelled) setLoaded(true)
     }
-    // 用 decode() 等「完全解码」再触发入场动画，而非 onLoad（仅代表下载完成）。
-    // decoding="async" 下，onLoad 后图片仍在后台异步解码；若此时就开始 scale spring，
-    // 安卓 WebView 会「边解码边合成」并发撕裂 backing buffer → 图片鬼影闪 —— 且只在
-    // 「首次未缓存的大原图」出现、缓存后消失（正是用户现象）。decode() resolve 时图已
-    // 解码就绪、动画流畅。下一帧执行确保 <img> 已挂载并绑定 src；decode 不支持时退回
-    // complete/load 兜底。
     const raf = requestAnimationFrame(() => {
       const el = imgRef.current
       if (!el) return
@@ -69,22 +80,67 @@ export default function ImageLightbox({ src, alt = "", onClose }: ImageLightboxP
         el.addEventListener("load", reveal, { once: true })
       }
     })
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose()
-    }
-    window.addEventListener("keydown", onKey)
     return () => {
       cancelled = true
       cancelAnimationFrame(raf)
-      window.removeEventListener("keydown", onKey)
     }
-  }, [src, onClose])
+  }, [open, isMulti, list[0]])
+
+  // 打开时把内部索引同步到受控 index，并把轮播滚到对应页（无动画，避免开场滑动）
+  useLayoutEffect(() => {
+    if (!open || !isMulti) return
+    setCurrent(index)
+    const el = trackRef.current
+    if (el) {
+      lockScrollSync.current = true
+      el.scrollLeft = index * el.clientWidth
+      // 下一帧解锁滚动同步
+      requestAnimationFrame(() => {
+        lockScrollSync.current = false
+      })
+    }
+    // 仅在打开/列表数量变化时复位；后续切换走 goTo
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, isMulti, list.length])
+
+  // 切到第 i 张（带平滑滚动）
+  const goTo = useCallback(
+    (i: number) => {
+      const el = trackRef.current
+      if (!el) return
+      const clamped = Math.max(0, Math.min(i, list.length - 1))
+      el.scrollTo({ left: clamped * el.clientWidth, behavior: "smooth" })
+    },
+    [list.length],
+  )
+
+  // 监听滚动，推导当前页
+  const handleScroll = useCallback(() => {
+    if (lockScrollSync.current) return
+    const el = trackRef.current
+    if (!el || el.clientWidth === 0) return
+    const i = Math.round(el.scrollLeft / el.clientWidth)
+    setCurrent((prev) => {
+      if (i !== prev) onIndexChange?.(i)
+      return i
+    })
+  }, [onIndexChange])
+
+  // 键盘：Esc 关闭，左右切换
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose()
+      else if (isMulti && e.key === "ArrowLeft") goTo(current - 1)
+      else if (isMulti && e.key === "ArrowRight") goTo(current + 1)
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [open, isMulti, current, goTo, onClose])
 
   if (typeof window === "undefined") return null
 
-  // 图片入场/退场动画：安卓 app（WebView）去掉 scale 几何动画，仅按 loaded 控制
-  // 显隐（decode 完瞬显），消除「首次大图栅格化 + 动画并发」撕裂；其它平台（含安卓
-  // 网页，已靠 decode() 解决）保留 spring 弹跳。
+  // 单图入场动画：安卓 app 去几何动画，其余 spring 弹跳
   const imgAnim = isAndroidApp
     ? {
         initial: { opacity: 0 },
@@ -101,9 +157,9 @@ export default function ImageLightbox({ src, alt = "", onClose }: ImageLightboxP
 
   return createPortal(
     <AnimatePresence>
-      {src && (
+      {open && (
         <motion.div
-          className="fixed inset-0 z-[80] flex items-center justify-center p-4 sm:p-10"
+          className="fixed inset-0 z-[80] flex items-center justify-center"
           onClick={onClose}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -111,9 +167,6 @@ export default function ImageLightbox({ src, alt = "", onClose }: ImageLightboxP
           transition={{ duration: 0.22 }}
           style={{
             background: "rgba(0,0,0,0.82)",
-            // 安卓去掉背景模糊：backdrop-filter 叠加本元素的 opacity 动画会撕裂
-            // backing buffer（鬼影/碎裂闪）。82% 黑实底已够暗、视觉损失极小；
-            // 桌面/iOS 保留毛玻璃。
             backdropFilter: isAndroid ? undefined : "blur(10px)",
             WebkitBackdropFilter: isAndroid ? undefined : "blur(10px)",
           }}
@@ -126,7 +179,7 @@ export default function ImageLightbox({ src, alt = "", onClose }: ImageLightboxP
               e.stopPropagation()
               onClose()
             }}
-            className="absolute top-4 right-4 z-10 grid h-10 w-10 place-items-center rounded-full bg-white/10 text-white/90 hover:bg-white/20 hover:text-white"
+            className="absolute top-4 right-4 z-20 grid h-10 w-10 place-items-center rounded-full bg-white/10 text-white/90 hover:bg-white/20 hover:text-white"
             whileHover={{ scale: 1.08 }}
             whileTap={{ scale: 0.92 }}
             initial={{ opacity: 0 }}
@@ -136,26 +189,114 @@ export default function ImageLightbox({ src, alt = "", onClose }: ImageLightboxP
             <X className="h-5 w-5" />
           </motion.button>
 
-          {/* 加载中：图片还没就绪时居中显示 spinner，避免点开后一片空白的「等待感」 */}
-          {!loaded && (
-            <Loader2 className="pointer-events-none absolute h-8 w-8 animate-spin text-white/70" />
-          )}
+          {isMulti ? (
+            <>
+              {/* 计数（当前/总数） */}
+              <motion.div
+                className="absolute top-5 left-1/2 z-20 -translate-x-1/2 rounded-full bg-black/55 px-3 py-1 text-sm font-semibold text-white tabular-nums"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1, transition: { delay: 0.15 } }}
+                exit={{ opacity: 0 }}
+              >
+                {current + 1} / {list.length}
+              </motion.div>
 
-          {/* 居中放大的原图：加载完成后才做轻弹跳入场（此时图已解码，spring 流畅）。
-              幅度从 0.35→1 收敛到 0.6→1、阻尼调大，减小移动端的合成压力与过冲抖动。 */}
-          <motion.img
-            ref={imgRef}
-            src={src}
-            alt={alt}
-            draggable={false}
-            decoding="async"
-            onClick={(e) => e.stopPropagation()}
-            className="max-h-full max-w-full select-none rounded-2xl object-contain shadow-[0_30px_90px_-20px_rgba(0,0,0,0.8)] cursor-zoom-out"
-            initial={imgAnim.initial}
-            animate={imgAnim.animate}
-            exit={imgAnim.exit}
-            transition={imgAnim.transition}
-          />
+              {/* 横向 scroll-snap 轮播：滑动 / 箭头 / 键盘切换 */}
+              <div
+                ref={trackRef}
+                onScroll={handleScroll}
+                onClick={(e) => e.stopPropagation()}
+                className="flex h-full w-full snap-x snap-mandatory overflow-x-auto overflow-y-hidden overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              >
+                {list.map((url, i) => (
+                  <div
+                    key={i}
+                    className="flex h-full w-full shrink-0 snap-center items-center justify-center p-4 sm:p-12"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={url}
+                      alt={alt}
+                      draggable={false}
+                      decoding="async"
+                      onClick={onClose}
+                      className="max-h-full max-w-full select-none rounded-2xl object-contain shadow-[0_30px_90px_-20px_rgba(0,0,0,0.8)]"
+                    />
+                  </div>
+                ))}
+              </div>
+
+              {/* 左右箭头（仅 hover 设备显示，移动端靠滑动） */}
+              <button
+                type="button"
+                aria-label="上一张"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  goTo(current - 1)
+                }}
+                className={cn(
+                  "absolute left-3 top-1/2 z-20 hidden -translate-y-1/2 grid h-11 w-11 place-items-center rounded-full bg-black/45 text-white transition-colors hover:bg-black/70 [@media(hover:hover)]:grid",
+                  current === 0 && "pointer-events-none opacity-30",
+                )}
+              >
+                <ChevronLeft className="h-6 w-6" />
+              </button>
+              <button
+                type="button"
+                aria-label="下一张"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  goTo(current + 1)
+                }}
+                className={cn(
+                  "absolute right-3 top-1/2 z-20 hidden -translate-y-1/2 grid h-11 w-11 place-items-center rounded-full bg-black/45 text-white transition-colors hover:bg-black/70 [@media(hover:hover)]:grid",
+                  current === list.length - 1 && "pointer-events-none opacity-30",
+                )}
+              >
+                <ChevronRight className="h-6 w-6" />
+              </button>
+
+              {/* 底部圆点指示器：当前页为绿色椭圆，其余为半透明小圆点 */}
+              <div
+                className="absolute bottom-6 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {list.map((_, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    aria-label={`第 ${i + 1} 张`}
+                    onClick={() => goTo(i)}
+                    className={cn(
+                      "h-2 rounded-full transition-all duration-300",
+                      i === current ? "w-6 bg-lime-400" : "w-2 bg-white/45 hover:bg-white/70",
+                    )}
+                  />
+                ))}
+              </div>
+            </>
+          ) : (
+            <>
+              {/* 单图加载中 spinner */}
+              {!loaded && (
+                <Loader2 className="pointer-events-none absolute h-8 w-8 animate-spin text-white/70" />
+              )}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <motion.img
+                ref={imgRef}
+                src={list[0]}
+                alt={alt}
+                draggable={false}
+                decoding="async"
+                onClick={(e) => e.stopPropagation()}
+                className="max-h-full max-w-full select-none rounded-2xl object-contain p-4 shadow-[0_30px_90px_-20px_rgba(0,0,0,0.8)] cursor-zoom-out sm:p-10"
+                initial={imgAnim.initial}
+                animate={imgAnim.animate}
+                exit={imgAnim.exit}
+                transition={imgAnim.transition}
+              />
+            </>
+          )}
         </motion.div>
       )}
     </AnimatePresence>,

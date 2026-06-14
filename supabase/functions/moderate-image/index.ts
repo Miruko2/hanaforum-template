@@ -53,6 +53,19 @@ const json = (body: unknown, status = 200) =>
 const num = (v: unknown) => (typeof v === "number" ? v : 0)
 const str = (v: unknown) => (typeof v === "string" ? v : "")
 
+// 从一行帖子记录里收集所有图片 URL（封面 image_url + 多图 image_urls），去重去空。
+const collectImages = (rec: Record<string, unknown> | null): string[] => {
+  if (!rec) return []
+  const out: string[] = []
+  const push = (v: unknown) => {
+    if (typeof v === "string" && v) out.push(v)
+  }
+  push(rec.image_url)
+  const arr = rec.image_urls
+  if (Array.isArray(arr)) for (const u of arr) push(u)
+  return [...new Set(out)]
+}
+
 Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "method not allowed" }, 405)
 
@@ -81,84 +94,102 @@ Deno.serve(async (req) => {
 
   const postId = str(record?.id)
   const userId = str(record?.user_id)
-  const imageUrl = str(record?.image_url)
-  const oldImageUrl = str(oldRecord?.image_url)
-
-  // UPDATE 时只在"图片真的变了"才审：避免点赞/评论计数等无关更新浪费额度、误删，
-  // 也避免本函数清空图片后再次触发 Webhook 造成死循环。
-  if (eventType === "UPDATE" && imageUrl === oldImageUrl) {
-    return json({ skipped: "image unchanged" })
-  }
+  // 多图：审核 image_url(封面) + image_urls(全部图) 去重后的集合。
+  const allImages = collectImages(record)
+  const oldImages = new Set(collectImages(oldRecord))
+  // UPDATE 只审「新增的图」：未变化的图之前审过，避免浪费额度，也避免本函数
+  // 改写图片后再次触发 Webhook 造成死循环。
+  const toModerate =
+    eventType === "UPDATE" ? allImages.filter((u) => !oldImages.has(u)) : allImages
 
   // 无(新)图片：无需审核，直接放过(不消耗 Sightengine 额度)
-  if (!imageUrl) return json({ skipped: "no image" })
+  if (toModerate.length === 0) {
+    return json({ skipped: eventType === "UPDATE" ? "images unchanged" : "no image" })
+  }
 
   const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
   // 密钥没配好：按降级策略处理
   if (!SIGHTENGINE_API_USER || !SIGHTENGINE_API_SECRET) {
     console.error("[moderate-image] Sightengine 密钥未配置，按降级策略处理")
-    if (ENFORCE_ON_MODERATION_ERROR) await enforce(admin, eventType, postId, userId, imageUrl)
+    if (ENFORCE_ON_MODERATION_ERROR) {
+      await enforce(admin, eventType, postId, userId, allImages, new Set(toModerate))
+    }
     return json({ degraded: true, reason: "not configured" })
   }
 
-  // 调 Sightengine 裸露检测(nudity-2.1，1 次请求 = 1 次额度)
-  let data: any
-  try {
-    const params = new URLSearchParams({
-      url: imageUrl,
-      models: "nudity-2.1",
-      api_user: SIGHTENGINE_API_USER,
-      api_secret: SIGHTENGINE_API_SECRET,
+  // 逐张调 Sightengine 裸露检测(nudity-2.1，1 张图 = 1 次额度)，收集违规图。
+  const blocked = new Set<string>()
+  for (const url of toModerate) {
+    let data: any
+    try {
+      const params = new URLSearchParams({
+        url,
+        models: "nudity-2.1",
+        api_user: SIGHTENGINE_API_USER,
+        api_secret: SIGHTENGINE_API_SECRET,
+      })
+      const res = await fetch(`https://api.sightengine.com/1.0/check.json?${params.toString()}`)
+      data = await res.json()
+    } catch (e) {
+      console.error("[moderate-image] Sightengine 请求失败:", e)
+      if (ENFORCE_ON_MODERATION_ERROR) blocked.add(url)
+      continue
+    }
+
+    if (data?.status !== "success") {
+      console.error("[moderate-image] Sightengine 返回错误:", data?.error)
+      if (ENFORCE_ON_MODERATION_ERROR) blocked.add(url)
+      continue
+    }
+
+    // 判定
+    const n = data.nudity ?? {}
+    const explicit = Math.max(num(n.sexual_activity), num(n.sexual_display), num(n.erotica))
+    let isBad = explicit >= EXPLICIT_THRESHOLD
+    if (!isBad && VERY_SUGGESTIVE_THRESHOLD !== null && num(n.very_suggestive) >= VERY_SUGGESTIVE_THRESHOLD) {
+      isBad = true
+    }
+    if (isBad) blocked.add(url)
+  }
+
+  if (blocked.size > 0) {
+    await enforce(admin, eventType, postId, userId, allImages, blocked)
+    return json({
+      removed: eventType === "INSERT" ? "post" : "image",
+      blocked: blocked.size,
     })
-    const res = await fetch(`https://api.sightengine.com/1.0/check.json?${params.toString()}`)
-    data = await res.json()
-  } catch (e) {
-    console.error("[moderate-image] Sightengine 请求失败:", e)
-    if (ENFORCE_ON_MODERATION_ERROR) await enforce(admin, eventType, postId, userId, imageUrl)
-    return json({ degraded: true, reason: "request failed" })
   }
 
-  if (data?.status !== "success") {
-    console.error("[moderate-image] Sightengine 返回错误:", data?.error)
-    if (ENFORCE_ON_MODERATION_ERROR) await enforce(admin, eventType, postId, userId, imageUrl)
-    return json({ degraded: true, reason: data?.error?.message ?? "moderation error" })
-  }
-
-  // 判定
-  const n = data.nudity ?? {}
-  const explicit = Math.max(num(n.sexual_activity), num(n.sexual_display), num(n.erotica))
-  let blocked = explicit >= EXPLICIT_THRESHOLD
-  if (!blocked && VERY_SUGGESTIVE_THRESHOLD !== null && num(n.very_suggestive) >= VERY_SUGGESTIVE_THRESHOLD) {
-    blocked = true
-  }
-
-  if (blocked) {
-    await enforce(admin, eventType, postId, userId, imageUrl)
-    return json({ removed: eventType === "INSERT" ? "post" : "image", score: Number(explicit.toFixed(4)) })
-  }
-
-  return json({ allowed: true, score: Number(explicit.toFixed(4)) })
+  return json({ allowed: true, checked: toModerate.length })
 })
 
-// 按事件类型执行移除：新发帖删整帖，编辑换图只删图保留正文。
+// 按事件类型执行移除：
+//   · 新发帖(INSERT)有任一图违规 → 删整帖 + 删该帖全部图；
+//   · 编辑(UPDATE)有图违规 → 仅剔除违规图（保留正文与其余干净图），重算封面。
 async function enforce(
   admin: SupabaseClient,
   eventType: string,
   postId: string,
   userId: string,
-  imageUrl: string,
+  allImages: string[],
+  blocked: Set<string>,
 ): Promise<void> {
   if (eventType === "INSERT") {
-    await removePost(admin, postId, userId, imageUrl)
+    await removePost(admin, postId, userId, allImages)
   } else {
-    await stripImage(admin, postId, userId, imageUrl)
+    await stripImages(admin, postId, userId, allImages, blocked)
   }
 }
 
-// 删整帖 + 删图 + 通知作者(用于新发帖违规)。
-async function removePost(admin: SupabaseClient, postId: string, userId: string, imageUrl: string): Promise<void> {
-  await deleteStorageImage(admin, imageUrl)
+// 删整帖 + 删该帖全部图 + 通知作者(用于新发帖违规)。
+async function removePost(
+  admin: SupabaseClient,
+  postId: string,
+  userId: string,
+  allImages: string[],
+): Promise<void> {
+  for (const url of allImages) await deleteStorageImage(admin, url)
   if (postId) {
     const { error } = await admin.from("posts").delete().eq("id", postId)
     if (error) console.error("[moderate-image] 删帖失败:", error)
@@ -166,12 +197,26 @@ async function removePost(admin: SupabaseClient, postId: string, userId: string,
   await notifyUser(admin, userId, MSG_POST_REMOVED)
 }
 
-// 只删图(把帖子 image_url 清空)+ 删图 + 通知作者(用于编辑换图违规，保留正文)。
-async function stripImage(admin: SupabaseClient, postId: string, userId: string, imageUrl: string): Promise<void> {
-  await deleteStorageImage(admin, imageUrl)
+// 剔除违规图(保留正文 + 干净图)+ 删违规图 + 通知作者(用于编辑违规)。
+// 重算封面：剩余图的第一张作 image_url；全被剔除则两列都置空。
+async function stripImages(
+  admin: SupabaseClient,
+  postId: string,
+  userId: string,
+  allImages: string[],
+  blocked: Set<string>,
+): Promise<void> {
+  const remaining = allImages.filter((u) => !blocked.has(u))
+  for (const url of blocked) await deleteStorageImage(admin, url)
   if (postId) {
-    const { error } = await admin.from("posts").update({ image_url: null }).eq("id", postId)
-    if (error) console.error("[moderate-image] 清空帖子图片失败:", error)
+    const { error } = await admin
+      .from("posts")
+      .update({
+        image_url: remaining[0] ?? null,
+        image_urls: remaining.length ? remaining : null,
+      })
+      .eq("id", postId)
+    if (error) console.error("[moderate-image] 剔除违规图失败:", error)
   }
   await notifyUser(admin, userId, MSG_IMAGE_REMOVED)
 }

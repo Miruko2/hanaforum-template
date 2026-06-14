@@ -6,7 +6,8 @@ export interface Post {
   category: string
   content: string // 数据库中的内容字段
   description: string // 数据库中的描述字段
-  image_url?: string
+  image_url?: string // 封面图（= image_urls[0]），单图/缩略图/审核等链路以它为准
+  image_urls?: string[] // 全部图片（按上传顺序，第一张为封面）；单图老帖可能为空，按 [image_url] 回退
   image_ratio?: number
   likes_count?: number // UI使用
   comments_count?: number // UI使用
@@ -32,6 +33,7 @@ export interface PostInput {
   content: string
   description: string
   image_url?: string
+  image_urls?: string[]
   image_ratio?: number
 }
 

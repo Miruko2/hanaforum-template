@@ -18,6 +18,8 @@ import { CATEGORIES } from "@/lib/categories"
 import type { Post } from "@/lib/types"
 import { compressImage } from "@/lib/image-compress"
 import { postThumbName, POST_THUMB_EDGE } from "@/lib/post-image-thumb"
+import { postImageList, postsHaveImageUrls } from "@/lib/post-images"
+import { cdnUrl } from "@/lib/cdn-url"
 import ImageLightbox from "@/components/image-lightbox"
 
 interface CreatePostModalProps {
@@ -30,6 +32,18 @@ interface CreatePostModalProps {
 }
 
 // 客户端压缩函数已抽到 @/lib/image-compress（帖子图与头像共用），见顶部 import。
+
+// 发帖最多可上传的图片数
+const MAX_IMAGES = 9
+
+// 编辑区里的一张图片：可能是「已存在的图」（带 url，提交时直接复用）
+// 或「新选的文件」（带 file，提交时上传）。preview 用于 <img> 即时显示。
+type EditableImage = {
+  id: string
+  preview: string // data URL（新图）或 cdn 直链（已存在图）
+  file?: File // 新选文件
+  url?: string // 已存在图片的 public URL
+}
 
 /**
  * 表单本体（无外壳）：标题/分类/内容/图片 + 提交逻辑。
@@ -46,48 +60,100 @@ export function CreatePostForm({
   const [description, setDescription] = useState(editPost?.description || editPost?.content || "")
   const [title, setTitle] = useState(editPost?.title || "")
   const [category, setCategory] = useState(editPost?.category || "general")
-  const [imagePreview, setImagePreview] = useState<string | null>(editPost?.image_url || null)
-  const [imageFile, setImageFile] = useState<File | null>(null)
-  // 记录用户是否主动移除了原图，以便提交时把 image_url 置空
-  const [imageCleared, setImageCleared] = useState(false)
+  // 多图编辑列表（首张为封面）。编辑模式用帖子已有图片初始化。
+  const [images, setImages] = useState<EditableImage[]>(() => {
+    if (!editPost) return []
+    return postImageList(editPost).map((url, i) => ({
+      id: `existing-${i}`,
+      preview: cdnUrl(url) || url,
+      url,
+    }))
+  })
   const [isSubmitting, setIsSubmitting] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const { user } = useSimpleAuth()
   const { toast } = useToast()
   const [imageRatio, setImageRatio] = useState<number>(editPost?.image_ratio || 0.75)
-  // 点击预览图后，原图在屏幕中心聚焦放大（复用帖子详情页的灯箱）
+  // 点击预览图后，原图在屏幕中心聚焦放大（复用帖子详情页的灯箱）；记录看哪一张
   const [lightboxOpen, setLightboxOpen] = useState(false)
+  const [lightboxIndex, setLightboxIndex] = useState(0)
 
-  // 处理图片上传
+  // 封面比例 = 第一张图的比例（沿用原约定 height/width）。首图变化时重算。
+  useEffect(() => {
+    const first = images[0]
+    if (!first) return
+    const img = new Image()
+    img.onload = () => {
+      if (img.naturalWidth > 0) setImageRatio(img.naturalHeight / img.naturalWidth)
+    }
+    img.src = first.preview
+  }, [images])
+
+  // 处理图片上传（支持多选）：逐个校验大小、读为预览，追加进列表，最多 MAX_IMAGES 张
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (file) {
-      // 检查文件大小，限制为5MB
+    const files = Array.from(e.target.files || [])
+    if (files.length === 0) return
+
+    const remaining = MAX_IMAGES - images.length
+    if (remaining <= 0) {
+      toast({
+        title: "图片数量已达上限",
+        description: `最多只能上传 ${MAX_IMAGES} 张图片`,
+        variant: "destructive",
+      })
+      e.target.value = ""
+      return
+    }
+
+    let overSized = false
+    const accepted = files.filter((file) => {
       if (file.size > 5 * 1024 * 1024) {
-        toast({
-          title: "文件过大",
-          description: "图片大小不能超过5MB",
-          variant: "destructive",
-        })
-        return
+        overSized = true
+        return false
       }
+      return true
+    })
 
-      setImageFile(file)
-      setImageCleared(false)
+    if (overSized) {
+      toast({
+        title: "部分图片过大",
+        description: "单张图片大小不能超过 5MB，已自动跳过",
+        variant: "destructive",
+      })
+    }
+
+    const tooMany = accepted.length > remaining
+    accepted.slice(0, remaining).forEach((file) => {
       const reader = new FileReader()
-      reader.onload = (e) => {
-        setImagePreview(e.target?.result as string)
-
-        // 计算图片比例
-        const img = new Image()
-        img.onload = () => {
-          const ratio = img.height / img.width
-          setImageRatio(ratio)
-        }
-        img.src = e.target?.result as string
+      reader.onload = (ev) => {
+        const preview = ev.target?.result as string
+        setImages((prev) => [
+          ...prev,
+          { id: `new-${Date.now()}-${Math.random().toString(36).slice(2)}`, preview, file },
+        ])
       }
       reader.readAsDataURL(file)
+    })
+
+    if (tooMany) {
+      toast({
+        title: "图片数量已达上限",
+        description: `最多只能上传 ${MAX_IMAGES} 张图片，多余的已忽略`,
+        variant: "destructive",
+      })
     }
+
+    // 清空 input，允许再次选择相同文件
+    e.target.value = ""
+  }
+
+  // 移除一张图（首张被移除后，下一张自动成为新封面）
+  const removeImage = (id: string) => {
+    setImages((prev) => {
+      const next = prev.filter((img) => img.id !== id)
+      if (next.length === 0) setLightboxOpen(false)
+      return next
+    })
   }
 
   // 上传图片到Supabase Storage（上传前先客户端压缩，从源头降存储与 egress）
@@ -180,27 +246,44 @@ export function CreatePostForm({
       setIsSubmitting(true)
       console.debug("当前用户:", user.id)
 
-      // 处理图片上传
-      // 新建模式：undefined 表示没图；
-      // 编辑模式：undefined 表示保持原图不变，null 表示清空，字符串表示换新图
-      let image_url: string | null | undefined = undefined
-      if (imageFile) {
-        try {
-          console.debug("开始上传图片...")
-          image_url = await uploadImage(imageFile)
-          console.debug("上传的图片URL:", image_url)
-        } catch (uploadErr: any) {
-          console.error("图片上传过程中出错:", uploadErr)
-          toast({
-            title: "图片上传失败",
-            description: `错误: ${uploadErr.message || "未知错误"}`,
-            variant: "destructive",
-          })
-          setIsSubmitting(false)
-          return
+      // 处理图片上传（多图）：保留已有图片的 URL，上传新选文件，按列表顺序组装。
+      // 首张为封面（image_url），全部进 image_urls。
+      // 编辑模式语义：undefined=保持不变，null=清空，数组=替换。
+      const hadImages = isEditMode && !!editPost && postImageList(editPost).length > 0
+      let finalUrls: string[] = []
+      try {
+        for (const item of images) {
+          if (item.url) {
+            finalUrls.push(item.url)
+          } else if (item.file) {
+            console.debug("开始上传图片...")
+            finalUrls.push(await uploadImage(item.file))
+          }
         }
-      } else if (isEditMode && imageCleared) {
+      } catch (uploadErr: any) {
+        console.error("图片上传过程中出错:", uploadErr)
+        toast({
+          title: "图片上传失败",
+          description: `错误: ${uploadErr.message || "未知错误"}`,
+          variant: "destructive",
+        })
+        setIsSubmitting(false)
+        return
+      }
+
+      const cover = finalUrls[0]
+      // 编辑模式：清空了所有图（之前有图）→ 置 null；否则按是否有图决定
+      let image_url: string | null | undefined
+      let image_urls: string[] | null | undefined
+      if (finalUrls.length > 0) {
+        image_url = cover
+        image_urls = finalUrls
+      } else if (isEditMode && hadImages) {
         image_url = null
+        image_urls = null
+      } else {
+        image_url = undefined
+        image_urls = undefined
       }
 
       if (isEditMode && editPost) {
@@ -212,6 +295,7 @@ export function CreatePostForm({
           description,
           category,
           image_url,
+          image_urls,
           image_ratio: imageRatio,
         })
 
@@ -233,6 +317,9 @@ export function CreatePostForm({
           if (image_url !== undefined) {
             patch.image_url = image_url === null ? undefined : image_url
           }
+          if (image_urls !== undefined) {
+            patch.image_urls = image_urls === null ? undefined : image_urls
+          }
           onPostUpdated(editPost.id, patch)
         }
 
@@ -244,12 +331,14 @@ export function CreatePostForm({
       console.debug("准备创建帖子，用户ID:", user.id)
 
       // 创建帖子 - 同时设置content和description字段
+      const withUrls = await postsHaveImageUrls()
       const result = await createPost({
         title,
         category,
         description,
         content: description,
-        image_url: image_url || undefined,
+        image_url: cover || undefined,
+        ...(withUrls && finalUrls.length ? { image_urls: finalUrls } : {}),
         image_ratio: imageRatio,
         user_id: user.id,
         likes: 0,
@@ -363,39 +452,66 @@ export function CreatePostForm({
               />
             </div>
 
-            {/* 图片预览：固定尺寸方形缩略图，外层用 flex-wrap 容器，便于后续扩展为多图 */}
-            {imagePreview && (
+            {/* 图片预览：固定尺寸方形缩略图网格。首张为封面，支持多图，末尾带「添加」格子。 */}
+            {images.length > 0 && (
               <div className="mt-4 flex flex-wrap gap-3">
-                <div className="group relative h-28 w-28 overflow-hidden rounded-lg border border-white/[0.12]">
-                  <img
-                    src={imagePreview || "/placeholder.svg"}
-                    alt="Preview"
-                    className="h-full w-full object-cover cursor-pointer transition-transform duration-300 ease-out [@media(hover:hover)]:group-hover:scale-110"
-                    onClick={() => setLightboxOpen(true)}
-                  />
-                  <button
-                    className="absolute top-1.5 right-1.5 z-10 rounded-full bg-black/50 backdrop-blur-md p-1 text-white hover:text-white/80"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setImagePreview(null)
-                      setImageFile(null)
-                      setImageCleared(true)
-                      setLightboxOpen(false)
-                    }}
-                    disabled={isSubmitting}
+                {images.map((item, idx) => (
+                  <div
+                    key={item.id}
+                    className="group relative h-28 w-28 overflow-hidden rounded-lg border border-white/[0.12]"
                   >
-                    <X className="h-3.5 w-3.5" />
+                    <img
+                      src={item.preview || "/placeholder.svg"}
+                      alt={`图片 ${idx + 1}`}
+                      className="h-full w-full object-cover cursor-pointer transition-transform duration-300 ease-out [@media(hover:hover)]:group-hover:scale-110"
+                      onClick={() => {
+                        setLightboxIndex(idx)
+                        setLightboxOpen(true)
+                      }}
+                    />
+                    {/* 封面角标（首张） */}
+                    {idx === 0 && (
+                      <span className="pointer-events-none absolute bottom-1.5 left-1.5 rounded bg-lime-400/90 px-1.5 py-0.5 text-[10px] font-semibold text-black">
+                        封面
+                      </span>
+                    )}
+                    <button
+                      className="absolute top-1.5 right-1.5 z-10 rounded-full bg-black/50 backdrop-blur-md p-1 text-white hover:text-white/80"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        removeImage(item.id)
+                      }}
+                      disabled={isSubmitting}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+
+                {/* 添加更多 */}
+                {images.length < MAX_IMAGES && (
+                  <button
+                    type="button"
+                    onClick={handleImageButtonClick}
+                    disabled={isSubmitting}
+                    className="flex h-28 w-28 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-white/20 bg-white/[0.04] text-white/50 transition-colors hover:border-white/35 hover:bg-white/[0.08] hover:text-white/80 disabled:opacity-50"
+                  >
+                    <ImageIcon className="h-5 w-5" />
+                    <span className="text-xs">
+                      {images.length}/{MAX_IMAGES}
+                    </span>
                   </button>
-                </div>
+                )}
               </div>
             )}
 
-            {/* 隐藏的文件输入 */}
+            {/* 隐藏的文件输入（多选） */}
             <input
               type="file"
               ref={fileInputRef}
               onChange={handleImageUpload}
               accept="image/*"
+              multiple
               className="hidden"
               id="image-upload"
               disabled={isSubmitting}
@@ -408,10 +524,10 @@ export function CreatePostForm({
                 variant="outline"
                 onClick={handleImageButtonClick}
                 className="bg-white/[0.08] border-white/[0.12] text-white/80 hover:bg-white/[0.12] hover:text-white backdrop-blur-md rounded-full"
-                disabled={isSubmitting}
+                disabled={isSubmitting || images.length >= MAX_IMAGES}
               >
                 <ImageIcon className="h-4 w-4 mr-2" />
-                上传图片
+                {images.length > 0 ? `添加图片 (${images.length}/${MAX_IMAGES})` : "上传图片"}
               </Button>
 
               <Button
@@ -436,9 +552,11 @@ export function CreatePostForm({
           </div>
         </div>
 
-      {/* 图片放大灯箱：点击预览图后原图居中聚焦放大（portal 到 body，盖在发帖面板之上） */}
+      {/* 图片放大灯箱：点击任一预览图后原图居中聚焦放大，可左右切换（portal 到 body） */}
       <ImageLightbox
-        src={lightboxOpen ? imagePreview : null}
+        images={lightboxOpen ? images.map((i) => i.preview) : null}
+        index={lightboxIndex}
+        onIndexChange={setLightboxIndex}
         alt="Preview"
         onClose={() => setLightboxOpen(false)}
       />

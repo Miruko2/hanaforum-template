@@ -10,11 +10,13 @@ import type { Post } from "@/lib/types"
 import { Button } from "@/components/ui/button"
 import GlassMorph from "./glass-morph"
 import PostCardImage from "./post-card-image"
+import PostImageCarousel from "./post-image-carousel"
 import ImageLightbox from "./image-lightbox"
 import TextualHero from "./textual-hero"
 import CommentList, { prefetchComments } from "./comment/comment-list"
 import LikeButton from "./ui/like-button"
 import { CATEGORIES } from "@/lib/categories"
+import { postImageList } from "@/lib/post-images"
 
 // 安卓（含 Capacitor WebView）：合成器对 backdrop-filter 的逐帧重采样远弱于
 // iOS/桌面，开/关帖动画期间的玻璃面板与渐进模糊带在安卓上降级（实底/纯渐变）。
@@ -68,6 +70,12 @@ export default function PostDetailModal({
   const router = useRouter()
 
   const [lightboxOpen, setLightboxOpen] = useState(false)
+  // 多图：详情页轮播当前页 / 灯箱起始页（两者共享，点开即看同一张）
+  const [imageIndex, setImageIndex] = useState(0)
+
+  // 帖子全部图片（封面在首位）。单图老帖回退 [image_url]。
+  const images = postImageList(post)
+  const hasMultipleImages = images.length > 1
 
   // 是否使用横版布局：桌面端一律走横版
   // （有图 → 左侧图片；无图 → 左侧 TextualHero 文字大标题）
@@ -164,6 +172,7 @@ export default function PostDetailModal({
   React.useEffect(() => {
     if (!isOpen) {
       setLightboxOpen(false)
+      setImageIndex(0)
     }
   }, [isOpen])
 
@@ -470,26 +479,45 @@ export default function PostDetailModal({
                   {/* 左：图片区或文字 Hero，占 45%。ref 供 hero 转场测量目标矩形。 */}
                   <div ref={heroRef} className="relative w-[45%] shrink-0 bg-black/20">
                     {post.image_url ? (
-                      <div
-                        className="group relative h-full w-full overflow-hidden rounded-t-md md:rounded-l-[24px] md:rounded-tr-none"
-                        onClick={handleOpenLightbox}
-                      >
+                      hasMultipleImages ? (
+                        // 多图：轮播（飞入期间隐藏，交接给飞行图）
                         <div
-                          className="h-full w-full transition-transform duration-500 ease-out group-hover:scale-[1.06]"
-                          // hero 飞行期间隐藏真实图，避免和飞行图重叠；飞到位（flyDone）后显示。
-                          // 回飞（closing）时同样隐藏，交给回飞图，避免详情图与回飞图重叠。
-                          // flyTarget 没量到时不隐藏 → 兜底直接显示真实图，避免「空框先出现」。
+                          className="relative h-full w-full overflow-hidden rounded-t-md md:rounded-l-[24px] md:rounded-tr-none"
                           style={{ opacity: heroActive && flyTarget && (!flyDone || closing) ? 0 : 1 }}
                         >
-                          <PostCardImage
-                            post={post}
-                            isMobile={isMobile}
-                            inDetailView={true}
-                            fillParent={true}
+                          <PostImageCarousel
+                            images={images}
+                            alt={post.title}
+                            fillParent
+                            onIndexChange={setImageIndex}
+                            onImageClick={(i) => {
+                              setImageIndex(i)
+                              setLightboxOpen(true)
+                            }}
                           />
                         </div>
-                        {imageHoverOverlay}
-                      </div>
+                      ) : (
+                        <div
+                          className="group relative h-full w-full overflow-hidden rounded-t-md md:rounded-l-[24px] md:rounded-tr-none"
+                          onClick={handleOpenLightbox}
+                        >
+                          <div
+                            className="h-full w-full transition-transform duration-500 ease-out group-hover:scale-[1.06]"
+                            // hero 飞行期间隐藏真实图，避免和飞行图重叠；飞到位（flyDone）后显示。
+                            // 回飞（closing）时同样隐藏，交给回飞图，避免详情图与回飞图重叠。
+                            // flyTarget 没量到时不隐藏 → 兜底直接显示真实图，避免「空框先出现」。
+                            style={{ opacity: heroActive && flyTarget && (!flyDone || closing) ? 0 : 1 }}
+                          >
+                            <PostCardImage
+                              post={post}
+                              isMobile={isMobile}
+                              inDetailView={true}
+                              fillParent={true}
+                            />
+                          </div>
+                          {imageHoverOverlay}
+                        </div>
+                      )
                     ) : (
                       <TextualHero post={post} />
                     )}
@@ -505,10 +533,27 @@ export default function PostDetailModal({
                 <div className="relative flex flex-col">
                   <div ref={heroRef} className="relative w-full overflow-hidden">
                     {post.image_url ? (
-                      <div
-                        className="group relative overflow-hidden rounded-t-md"
-                        onClick={handleOpenLightbox}
-                      >
+                      hasMultipleImages ? (
+                        // 多图（手机竖版）：轮播。飞入期间不隐藏（详情图缓存秒出做兜底），仅回飞时隐藏。
+                        <div
+                          className="relative overflow-hidden rounded-t-md"
+                          style={{ opacity: heroActive && closing ? 0 : 1 }}
+                        >
+                          <PostImageCarousel
+                            images={images}
+                            alt={post.title}
+                            onIndexChange={setImageIndex}
+                            onImageClick={(i) => {
+                              setImageIndex(i)
+                              setLightboxOpen(true)
+                            }}
+                          />
+                        </div>
+                      ) : (
+                        <div
+                          className="group relative overflow-hidden rounded-t-md"
+                          onClick={handleOpenLightbox}
+                        >
                         <div
                           className="transition-transform duration-500 ease-out group-hover:scale-[1.06]"
                           // 竖版（手机）：飞入期间「不」隐藏真实图 —— 详情图是缓存、秒出，作为「目的地兜底」
@@ -522,8 +567,9 @@ export default function PostDetailModal({
                             inDetailView={true}
                           />
                         </div>
-                        {imageHoverOverlay}
-                      </div>
+                          {imageHoverOverlay}
+                        </div>
+                      )
                     ) : (
                       // 无图帖子：跟 PC 端横版一样走 TextualHero，避免出现孤零零的三角占位
                       // 高度 280px：够展示标题 + 装饰，又不喧宾夺主挤压内容区
@@ -585,10 +631,12 @@ export default function PostDetailModal({
               )}
             </GlassMorph>
 
-            {/* 图片灯箱：点击详情页图片后居中聚焦放大（弹跳进出）。
+            {/* 图片灯箱：点击详情页图片后居中聚焦放大；多图可左右滑动 + 圆点指示。
                 自带 portal 到 body，盖在详情框之上 */}
             <ImageLightbox
-              src={lightboxOpen ? cdnUrl(post.image_url) : null}
+              images={lightboxOpen ? images.map((u) => cdnUrl(u) || u) : null}
+              index={imageIndex}
+              onIndexChange={setImageIndex}
               alt={post.title}
               onClose={() => setLightboxOpen(false)}
             />

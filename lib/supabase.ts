@@ -1,6 +1,7 @@
 import { supabase } from "./supabaseClient"
 import type { Comment } from "./types"
 import { queueNewPost, removePostFromQueue } from "./post-realtime-update"
+import { postsHaveImageUrls } from "./post-images"
 
 // 本地缓存点赞状态，避免频繁请求
 const likeStatusCache = new Map<string, boolean>()
@@ -76,6 +77,7 @@ export async function createPost({
   description,
   category,
   image_url,
+  image_urls,
   image_ratio,
 }: {
   title: string
@@ -83,6 +85,7 @@ export async function createPost({
   description: string
   category: string
   image_url?: string
+  image_urls?: string[]
   image_ratio?: number
 }) {
   // 增加超时时间，以适应移动网络可能的延迟
@@ -165,6 +168,8 @@ export async function createPost({
     const safeDescription = description?.trim() || "";
     const safeCategory = category?.trim() || "general";
     const safeImageRatio = image_ratio || 1.0;
+    // 多图列是否已迁移：未迁移则插入时不带 image_urls 键，避免列不存在导致发帖失败
+    const withUrls = await postsHaveImageUrls();
 
     // 如果有会话，尝试刷新
     if (userSession && userSession.access_token) {
@@ -185,6 +190,7 @@ export async function createPost({
           description: safeDescription,
           category: safeCategory,
           image_url: image_url || null,
+          ...(withUrls ? { image_urls: image_urls && image_urls.length ? image_urls : null } : {}),
           image_ratio: safeImageRatio,
           user_id: userId,
           likes: 0,
@@ -220,6 +226,7 @@ export async function createPost({
                   description: safeDescription,
                   category: safeCategory,
                   image_url: image_url || null,
+                  ...(withUrls ? { image_urls: image_urls && image_urls.length ? image_urls : null } : {}),
                   image_ratio: safeImageRatio,
                   user_id: userId,
                   likes: 0,
@@ -318,10 +325,11 @@ export async function getPosts() {
     console.debug("从服务器获取最新帖子列表");
     
     // 获取帖子基本信息
+    const withUrls = await postsHaveImageUrls()
     const { data: posts, error: postsError } = await supabase
       .from("posts")
       .select(
-        "id, title, content, description, category, image_url, image_ratio, created_at, user_id"
+        `id, title, content, description, category, image_url, ${withUrls ? "image_urls, " : ""}image_ratio, created_at, user_id`
       )
       .order("created_at", { ascending: false })
       .limit(1000) // 增加获取的帖子数量限制到1000
@@ -1165,6 +1173,7 @@ export async function updatePost({
   description,
   category,
   image_url,
+  image_urls,
   image_ratio,
 }: {
   postId: string
@@ -1173,6 +1182,7 @@ export async function updatePost({
   description: string
   category: string
   image_url?: string | null
+  image_urls?: string[] | null
   image_ratio?: number
 }) {
   const timeout = new Promise((_, reject) => 
@@ -1210,6 +1220,8 @@ export async function updatePost({
     const safeDescription = description?.trim() || ""
     const safeCategory = category?.trim() || "general"
     const safeImageRatio = image_ratio && image_ratio > 0 ? image_ratio : 1.0
+    // 多图列是否已迁移：未迁移则更新时不带 image_urls 键
+    const withUrls = await postsHaveImageUrls()
 
     // 更新帖子数据
     const updatePromise = supabase
@@ -1220,6 +1232,10 @@ export async function updatePost({
         description: safeDescription,
         category: safeCategory,
         image_url: image_url === null ? null : (image_url || undefined),
+        // image_urls: null=清空多图、数组=替换、undefined=保持不变
+        ...(withUrls
+          ? { image_urls: image_urls === null ? null : (image_urls && image_urls.length ? image_urls : undefined) }
+          : {}),
         image_ratio: safeImageRatio,
       })
       .eq("id", postId)
