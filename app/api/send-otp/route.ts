@@ -80,10 +80,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ status: "skipped" })
     }
 
-    // Resend 未配置 → 视为发不出，兜底放行
+    // Resend 未配置（本地无 env / 部署遗漏）→ 仅放行当前用户，【不动全局开关】。
+    // 关键：本地 dev 连的是同一个线上 Supabase，若在此 disableVerificationToday()
+    // 会把线上验证全局关到当天 —— 故这里绝不碰 verification_state。
     if (!RESEND_API_KEY || !RESEND_FROM) {
-      console.warn("[send-otp] RESEND_API_KEY / RESEND_FROM 未配置，兜底放行")
-      await disableVerificationToday()
+      console.warn("[send-otp] RESEND_API_KEY / RESEND_FROM 未配置，仅放行当前用户")
       await markVerified(user.id)
       return NextResponse.json({ status: "skipped" })
     }
@@ -110,7 +111,7 @@ export async function POST(req: NextRequest) {
     )
 
     // 通过 Resend REST API 发信
-    let sendOk = false
+    let status = 0 // 0 = 网络异常 / 未发出
     try {
       const r = await fetch("https://api.resend.com/emails", {
         method: "POST",
@@ -129,23 +130,39 @@ export async function POST(req: NextRequest) {
 </div>`,
         }),
       })
-      sendOk = r.ok
+      status = r.status
       if (!r.ok) {
         const t = await r.text().catch(() => "")
         console.error("[send-otp] Resend 发送失败:", r.status, t.slice(0, 300))
       }
     } catch (e) {
       console.error("[send-otp] Resend 请求异常:", e)
+      status = 0
     }
 
-    // 发不出（超额/域名/网络）→ 当日关闭验证 + 放行本用户（核心兜底）
-    if (!sendOk) {
+    // 发送成功
+    if (status >= 200 && status < 300) {
+      return NextResponse.json({ status: "sent" })
+    }
+
+    // 仅「429 超额/限流」走当日兜底放行 —— 这才是“发不出邮件”的预期场景（用户的核心需求）。
+    // 其它失败（无效邮箱 4xx / Resend 5xx / 网络）一律【如实报错、不放行】，
+    // 避免「随便填个邮箱 → 发送失败 → 自动通过」绕过验证。
+    if (status === 429) {
       await disableVerificationToday()
       await markVerified(user.id)
       return NextResponse.json({ status: "skipped" })
     }
 
-    return NextResponse.json({ status: "sent" })
+    return NextResponse.json(
+      {
+        error:
+          status === 0
+            ? "网络异常，验证码发送失败，请稍后重试"
+            : "验证码发送失败，请确认邮箱地址是否正确",
+      },
+      { status: 502 },
+    )
   } catch (e: any) {
     console.error("[send-otp] 未知错误:", e)
     return NextResponse.json({ error: e?.message || "服务器错误" }, { status: 500 })

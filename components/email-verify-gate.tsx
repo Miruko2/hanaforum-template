@@ -1,6 +1,7 @@
 "use client"
 
-import { useCallback, useEffect, useState, type CSSProperties } from "react"
+import { useCallback, useEffect, useState } from "react"
+import { createPortal } from "react-dom"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { supabase } from "@/lib/supabaseClient"
 import { apiUrl } from "@/lib/api-base"
@@ -8,19 +9,19 @@ import { useToast } from "@/hooks/use-toast"
 import { MailCheck, X } from "lucide-react"
 
 /**
- * 邮箱验证门禁（懒触发 OTP）。自包含：
- *  - 自行判断当前账号是否“需验证”（注册晚于 enforce_since、未验证、且未处于超额兜底窗口）；
- *  - 需验证则显示顶部提示条；点开后弹验证码框（发码 → 回填 → 校验）。
- * 真正的拦截在 DB 触发器；本组件是引导用户完成验证的 UX。
- * gate 默认关闭（enforce_since=NULL）时本组件恒不显示。
+ * 邮箱验证门禁（懒触发 OTP）—— 绝区零风格弹窗。
+ * 视觉与页面转场（PageRibbonTransition / globals.css .ptr-*）同源，但走「深色高对比 +
+ * 霓虹描边」而非绿色实心：深色磨砂面板 + 霓虹绿描边/警告条/角标 + 细网点扫描线。
+ * 入场：一颗发光圆球从顶部坠落 → 炸开成深色面板（内容随后淡入）。
+ * 关闭=缩成发光小球，点它再展开。真正拦截在 DB 触发器；gate 关闭时恒不显示。
  */
 export default function EmailVerifyGate() {
   const { user } = useSimpleAuth()
   const { toast } = useToast()
 
   const [needsVerify, setNeedsVerify] = useState(false)
-  const [dismissed, setDismissed] = useState(false)
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(true)
+  const [openCount, setOpenCount] = useState(0)
   const [step, setStep] = useState<"send" | "code">("send")
   const [code, setCode] = useState("")
   const [busy, setBusy] = useState(false)
@@ -56,7 +57,6 @@ export default function EmailVerifyGate() {
         createdAt > enforceSince
       setNeedsVerify(need)
     } catch {
-      // 查询失败不打扰用户（DB 触发器仍是兜底）
       setNeedsVerify(false)
     }
   }, [user])
@@ -84,12 +84,9 @@ export default function EmailVerifyGate() {
         setStep("code")
         toast({ title: "验证码已发送", description: "请查收邮箱（含垃圾箱）" })
       } else if (res.ok && (data.status === "skipped" || data.status === "already_verified")) {
-        // 兜底放行 / 已验证 → 直接关闭
         toast({ title: "已通过验证", description: "现在可以正常发言了" })
-        setOpen(false)
         await check()
       } else if (data.status === "cooldown") {
-        // 冷却中：可能之前已发过，引导去输码
         setStep("code")
         toast({ title: "验证码已发送", description: data.error || "请查收邮箱后输入", variant: "destructive" })
       } else {
@@ -119,7 +116,6 @@ export default function EmailVerifyGate() {
       const data = await res.json().catch(() => ({}))
       if (res.ok && (data.status === "verified" || data.status === "already_verified")) {
         toast({ title: "验证成功", description: "现在可以正常发言了" })
-        setOpen(false)
         setCode("")
         setStep("send")
         await check()
@@ -133,164 +129,212 @@ export default function EmailVerifyGate() {
     }
   }
 
-  if (!needsVerify) return null
+  if (!needsVerify || typeof document === "undefined") return null
 
-  const overlay: CSSProperties = {
-    position: "fixed",
-    inset: 0,
-    zIndex: 99998,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 20,
-    background: "rgba(5,5,7,0.7)",
-  }
-  const card: CSSProperties = {
-    position: "relative",
-    width: "100%",
-    maxWidth: 380,
-    borderRadius: 16,
-    border: "1px solid rgba(163,230,53,0.25)",
-    background: "linear-gradient(180deg, rgba(20,24,16,0.96), rgba(12,12,14,0.96))",
-    padding: "28px 22px",
-    fontFamily: "system-ui, sans-serif",
-    color: "#e5e7eb",
-    textAlign: "center",
-  }
-  const btn: CSSProperties = {
-    marginTop: 16,
-    width: "100%",
-    padding: "11px 16px",
-    borderRadius: 10,
-    border: "none",
-    background: "#65a30d",
-    color: "#0a0a0a",
-    fontSize: 15,
-    fontWeight: 600,
-    cursor: busy ? "default" : "pointer",
-    opacity: busy ? 0.6 : 1,
+  const minimize = () => setOpen(false)
+  const expand = () => {
+    setStep("send")
+    setOpen(true)
+    setOpenCount((c) => c + 1)
   }
 
-  return (
+  return createPortal(
     <>
-      {/* 顶部提示条 */}
-      {!dismissed && (
-        <div
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            zIndex: 9998,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 12,
-            padding: "8px 14px",
-            background: "rgba(101,163,13,0.16)",
-            borderBottom: "1px solid rgba(163,230,53,0.3)",
-            backdropFilter: "blur(6px)",
-            color: "#d9f99d",
-            fontSize: 13,
-            fontFamily: "system-ui, sans-serif",
-          }}
-        >
-          <span>发言前需先验证邮箱</span>
-          <button
-            type="button"
-            onClick={() => {
-              setOpen(true)
-              setStep("send")
-            }}
-            style={{
-              padding: "4px 12px",
-              borderRadius: 999,
-              border: "1px solid rgba(163,230,53,0.5)",
-              background: "rgba(101,163,13,0.3)",
-              color: "#ecfccb",
-              fontSize: 12,
-              fontWeight: 600,
-              cursor: "pointer",
-            }}
-          >
-            立即验证
-          </button>
-          <button
-            type="button"
-            aria-label="关闭提示"
-            onClick={() => setDismissed(true)}
-            style={{ background: "none", border: "none", color: "#a3a3a3", cursor: "pointer", lineHeight: 0 }}
-          >
-            <X style={{ width: 16, height: 16 }} />
-          </button>
-        </div>
-      )}
+      <style>{EVG_CSS}</style>
+      {open ? (
+        <div className="evg-root" role="dialog" aria-modal="true" aria-label="验证邮箱">
+          <div className="evg-backdrop" onClick={minimize}>
+            <span className="evg-bg-band evg-bg-band-1" aria-hidden />
+            <span className="evg-bg-band evg-bg-band-2" aria-hidden />
+            <span className="evg-flash" aria-hidden />
+          </div>
 
-      {/* 验证码弹窗 */}
-      {open && (
-        <div style={overlay} onClick={() => !busy && setOpen(false)}>
-          <div style={card} onClick={(e) => e.stopPropagation()}>
-            <button
-              type="button"
-              aria-label="关闭"
-              onClick={() => !busy && setOpen(false)}
-              style={{ position: "absolute", top: 12, right: 12, background: "none", border: "none", color: "#9ca3af", cursor: "pointer", lineHeight: 0 }}
-            >
-              <X style={{ width: 18, height: 18 }} />
+          {/* 入场圆球：坠落后炸开（独立元素，避免缩放把面板压成椭圆蛋） */}
+          <span key={`orb-${openCount}`} className="evg-orb" aria-hidden />
+
+          <div key={`panel-${openCount}`} className="evg-panel" onClick={(e) => e.stopPropagation()}>
+            <span className="evg-tex" aria-hidden />
+            <span className="evg-glow" aria-hidden />
+            <span className="evg-haz" aria-hidden />
+            <span className="evg-corner evg-corner-tl" aria-hidden />
+            <span className="evg-corner evg-corner-br" aria-hidden />
+            <button type="button" className="evg-close" aria-label="收起" onClick={minimize}>
+              <X style={{ width: 16, height: 16 }} />
             </button>
-            <MailCheck style={{ width: 36, height: 36, margin: "0 auto 12px", display: "block", color: "#a3e635" }} />
-            <h3 style={{ fontSize: 18, fontWeight: 700, color: "#ecfccb", margin: "0 0 8px" }}>验证邮箱</h3>
 
-            {step === "send" ? (
-              <>
-                <p style={{ fontSize: 14, color: "#cbd5e1", margin: 0 }}>
-                  我们会向 <b style={{ color: "#fff" }}>{user?.email}</b> 发送一个 6 位验证码。
-                </p>
-                <button type="button" style={btn} onClick={handleSend} disabled={busy}>
-                  {busy ? "发送中..." : "发送验证码"}
-                </button>
-              </>
-            ) : (
-              <>
-                <p style={{ fontSize: 14, color: "#cbd5e1", margin: 0 }}>
-                  验证码已发到 <b style={{ color: "#fff" }}>{user?.email}</b>，输入它：
-                </p>
-                <input
-                  value={code}
-                  onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                  inputMode="numeric"
-                  maxLength={6}
-                  placeholder="6 位验证码"
-                  style={{
-                    marginTop: 14,
-                    width: "100%",
-                    padding: "11px 14px",
-                    borderRadius: 10,
-                    border: "1px solid #3f3f46",
-                    background: "#18181b",
-                    color: "#fff",
-                    fontSize: 20,
-                    letterSpacing: 6,
-                    textAlign: "center",
-                    fontFamily: "monospace",
-                  }}
-                />
-                <button type="button" style={btn} onClick={handleVerify} disabled={busy}>
-                  {busy ? "验证中..." : "验证"}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSend}
-                  disabled={busy}
-                  style={{ marginTop: 10, background: "none", border: "none", color: "#a3e635", fontSize: 13, cursor: busy ? "default" : "pointer" }}
-                >
-                  重新发送
-                </button>
-              </>
-            )}
+            <div className="evg-body">
+              <MailCheck className="evg-icon" />
+              <span className="evg-chip">認証 · VERIFY</span>
+              <h3 className="evg-title">验证邮箱</h3>
+
+              {step === "send" ? (
+                <>
+                  <p className="evg-sub">
+                    向 <b>{user?.email}</b> 发送 6 位验证码
+                  </p>
+                  <button type="button" className="evg-btn" onClick={handleSend} disabled={busy}>
+                    {busy ? "发送中..." : "发送验证码"}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p className="evg-sub">
+                    验证码已发到 <b>{user?.email}</b>
+                  </p>
+                  <input
+                    className="evg-input"
+                    value={code}
+                    onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                    inputMode="numeric"
+                    maxLength={6}
+                    placeholder="······"
+                    autoFocus
+                  />
+                  <button type="button" className="evg-btn" onClick={handleVerify} disabled={busy}>
+                    {busy ? "验证中..." : "验证"}
+                  </button>
+                  <button type="button" className="evg-btn-ghost" onClick={handleSend} disabled={busy}>
+                    重新发送
+                  </button>
+                </>
+              )}
+            </div>
           </div>
         </div>
+      ) : (
+        <button type="button" className="evg-ball" aria-label="验证邮箱" onClick={expand}>
+          <MailCheck style={{ width: 22, height: 22 }} />
+        </button>
       )}
-    </>
+    </>,
+    document.body,
   )
 }
+
+// ── 样式（绝区零同源：深色磨砂 + 霓虹描边 + 警告条 + 网点扫描线 + 角标）──
+const EVG_CSS = `
+.evg-root{
+  position:fixed; inset:0; z-index:99990;
+  --acc:#2ee36b; --acc-rgb:46,227,107; --soft-rgb:122,240,166; --flash:#dcffe8; --ink:#06140c;
+  font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+}
+.evg-backdrop{
+  position:absolute; inset:0; overflow:hidden;
+  background:rgba(2,5,3,0.80);
+  background-image:
+    radial-gradient(circle, rgba(var(--soft-rgb),0.07) 1px, transparent 1.2px),
+    repeating-linear-gradient(0deg, rgba(0,0,0,0.22) 0, rgba(0,0,0,0.22) 1px, transparent 1px, transparent 5px);
+  background-size:22px 22px, auto;
+  animation:evg-fade .26s ease-out both;
+}
+.evg-bg-band{
+  position:absolute; left:-25%; right:-25%; height:40px; opacity:.09;
+  transform:rotate(-12deg); will-change:transform; pointer-events:none;
+  background:repeating-linear-gradient(-55deg,
+    rgba(var(--acc-rgb),0.9) 0, rgba(var(--acc-rgb),0.9) 12px,
+    transparent 12px, transparent 28px);
+}
+.evg-bg-band-1{ top:24%; animation:evg-drift 4.2s linear infinite; }
+.evg-bg-band-2{ bottom:22%; animation:evg-drift-rev 5s linear infinite; }
+.evg-flash{ position:absolute; inset:0; background:var(--flash); opacity:0; pointer-events:none; animation:evg-flash .5s ease-out .04s both; }
+
+/* 入场圆球：真·圆形，坠落→落定→炸开淡出 */
+.evg-orb{
+  position:absolute; left:50%; top:50%; width:54px; height:54px; border-radius:50%;
+  background:var(--acc);
+  box-shadow:0 0 30px rgba(var(--acc-rgb),0.65);
+  transform:translate(-50%,-50%); pointer-events:none;
+  animation:evg-orb .82s cubic-bezier(0.2,0.9,0.3,1) both;
+}
+
+.evg-panel{
+  position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+  width:clamp(312px,88vw,392px); padding:30px 32px 26px; box-sizing:border-box;
+  background:linear-gradient(166deg, rgba(13,28,19,0.93), rgba(5,15,10,0.96));
+  -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px);
+  border:1px solid rgba(var(--acc-rgb),0.45); border-radius:22px;
+  box-shadow:0 24px 70px rgba(0,0,0,0.6), 0 0 46px rgba(var(--acc-rgb),0.16);
+  color:#e7f6ec; text-align:center; overflow:hidden; transform-origin:center;
+  animation:evg-panel-in .4s cubic-bezier(0.16,1,0.3,1) .5s both;
+}
+.evg-tex{
+  position:absolute; inset:0; pointer-events:none; opacity:.5;
+  background-image:
+    radial-gradient(circle, rgba(var(--soft-rgb),0.10) 1px, transparent 1.2px),
+    repeating-linear-gradient(0deg, rgba(0,0,0,0.18) 0, rgba(0,0,0,0.18) 1px, transparent 1px, transparent 5px);
+  background-size:14px 14px, auto;
+}
+.evg-glow{
+  position:absolute; inset:0; pointer-events:none;
+  background:radial-gradient(120% 62% at 50% 0%, rgba(var(--acc-rgb),0.20), transparent 62%);
+  opacity:.7; animation:evg-flicker 3.4s ease-in-out 1.2s infinite;
+}
+.evg-haz{
+  position:absolute; top:0; left:0; right:0; height:7px; transform-origin:left center;
+  background:repeating-linear-gradient(-55deg,
+    var(--acc) 0, var(--acc) 10px, rgba(var(--acc-rgb),0.15) 10px, rgba(var(--acc-rgb),0.15) 20px);
+  animation:evg-haz-in .3s cubic-bezier(0.2,1,0.3,1) .9s both;
+}
+.evg-corner{ position:absolute; width:15px; height:15px; border:2px solid var(--acc); opacity:.65; pointer-events:none; }
+.evg-corner-tl{ top:11px; left:11px; border-right:none; border-bottom:none; border-top-left-radius:5px; }
+.evg-corner-br{ bottom:11px; right:11px; border-left:none; border-top:none; border-bottom-right-radius:5px; }
+.evg-close{ position:absolute; top:11px; right:13px; z-index:3; background:none; border:none; color:#9fd9b4; cursor:pointer; line-height:0; opacity:.75; }
+.evg-close:hover{ opacity:1; }
+
+.evg-body{ position:relative; z-index:2; animation:evg-content-in .34s ease-out .72s both; }
+.evg-icon{ width:32px; height:32px; color:var(--acc); display:block; margin:4px auto 8px; filter:drop-shadow(0 0 7px rgba(var(--acc-rgb),0.6)); }
+.evg-chip{ display:inline-flex; align-items:center; padding:3px 11px; border-radius:4px; background:var(--acc); color:var(--ink); font-size:10.5px; font-weight:800; font-style:italic; letter-spacing:.22em; text-transform:uppercase; }
+.evg-title{ font-size:19px; font-weight:800; font-style:italic; letter-spacing:.03em; color:#ecfccb; margin:11px 0 6px; }
+.evg-sub{ font-size:13px; color:#9fc3ab; margin:0; line-height:1.6; }
+.evg-sub b{ color:#d9f99d; font-weight:700; }
+.evg-input{
+  display:block; width:100%; margin-top:16px; padding:11px 14px; box-sizing:border-box;
+  border:1px solid rgba(var(--acc-rgb),0.4); border-radius:10px; background:rgba(4,12,8,0.7); color:#fff;
+  font-family:monospace; font-size:24px; letter-spacing:12px; text-align:center; outline:none;
+  transition:border-color .15s, box-shadow .15s;
+}
+.evg-input::placeholder{ color:#3d5a48; letter-spacing:8px; }
+.evg-input:focus{ border-color:var(--acc); box-shadow:0 0 0 3px rgba(var(--acc-rgb),0.2); }
+.evg-btn{
+  width:100%; margin-top:16px; padding:12px 18px; box-sizing:border-box; border:none; border-radius:10px;
+  background:var(--acc); color:var(--ink); font-size:15px; font-weight:800; letter-spacing:.04em; cursor:pointer;
+  box-shadow:0 6px 18px rgba(var(--acc-rgb),0.28); transition:filter .15s, transform .1s;
+}
+.evg-btn:hover:not(:disabled){ filter:brightness(1.08); }
+.evg-btn:active:not(:disabled){ transform:translateY(1px); }
+.evg-btn:disabled{ opacity:.5; cursor:default; box-shadow:none; }
+.evg-btn-ghost{ margin-top:12px; background:none; border:none; color:var(--acc); font-size:13px; cursor:pointer; }
+.evg-btn-ghost:disabled{ opacity:.5; cursor:default; }
+
+.evg-ball{
+  position:fixed; left:18px; bottom:96px; z-index:9998; width:50px; height:50px; border-radius:50%;
+  border:none; color:var(--ink); cursor:pointer;
+  background:var(--acc);
+  display:flex; align-items:center; justify-content:center;
+  box-shadow:0 8px 22px rgba(0,0,0,0.4), 0 0 20px rgba(var(--acc-rgb),0.5);
+  animation:evg-ball-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes evg-fade{ from{opacity:0} to{opacity:1} }
+@keyframes evg-flash{ 0%{opacity:0} 35%{opacity:.18} 100%{opacity:0} }
+@keyframes evg-orb{
+  0%   { opacity:0; transform:translate(-50%, calc(-50% - 300px)) scale(1); }
+  16%  { opacity:1; }
+  46%  { transform:translate(-50%, calc(-50% + 8px)) scale(1); }
+  60%  { transform:translate(-50%, calc(-50% - 4px)) scale(1); }
+  72%  { opacity:1; transform:translate(-50%,-50%) scale(1); }
+  100% { opacity:0; transform:translate(-50%,-50%) scale(6); }
+}
+@keyframes evg-panel-in{ from{opacity:0; transform:translate(-50%,-50%) scale(0.36)} to{opacity:1; transform:translate(-50%,-50%) scale(1)} }
+@keyframes evg-content-in{ from{opacity:0; transform:translateY(9px)} to{opacity:1; transform:none} }
+@keyframes evg-haz-in{ from{opacity:0; transform:skewX(-12deg) scaleX(0)} to{opacity:1; transform:skewX(-12deg) scaleX(1)} }
+@keyframes evg-flicker{ 0%,100%{opacity:.55} 45%{opacity:.85} 72%{opacity:.62} }
+@keyframes evg-drift{ from{transform:translate3d(5%,0,0) rotate(-12deg)} to{transform:translate3d(-5%,0,0) rotate(-12deg)} }
+@keyframes evg-drift-rev{ from{transform:translate3d(-5%,0,0) rotate(-12deg)} to{transform:translate3d(5%,0,0) rotate(-12deg)} }
+@keyframes evg-ball-pulse{ 0%,100%{box-shadow:0 8px 22px rgba(0,0,0,0.4), 0 0 14px rgba(var(--acc-rgb),0.45)} 50%{box-shadow:0 8px 22px rgba(0,0,0,0.4), 0 0 28px rgba(var(--acc-rgb),0.78)} }
+@media (prefers-reduced-motion: reduce){
+  .evg-orb{ display:none; }
+  .evg-panel{ animation-duration:.01ms; animation-delay:0s; }
+  .evg-bg-band,.evg-glow,.evg-ball,.evg-flash{ animation:none; }
+}
+`
