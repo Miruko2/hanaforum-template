@@ -15,6 +15,7 @@ import { TrackCover } from "./TrackCover"
 import { LyricsEcho } from "./LyricsEcho"
 import { SoundField } from "./SoundField"
 import { LiquidRefraction } from "./LiquidRefraction"
+import { SnowOverlay } from "./SnowOverlay"
 
 /** Screen-space rect of the card that was clicked — used as flight start. */
 export type ExpandRect = { left: number; top: number; width: number; height: number }
@@ -259,13 +260,18 @@ function ExpandedInner({
       {isMobile ? (
         <SoundField hue={hue} active={playing} reducedMotion={reducedMotion} vw={vw} />
       ) : liquidFx === "off" ? null : (
-        <LiquidRefraction
-          hue={hue}
-          playing={playing}
-          volume={volume}
-          getIntensity={getAudioIntensity}
-          mode={liquidFx}
-        />
+        <>
+          <LiquidRefraction
+            hue={hue}
+            playing={playing}
+            volume={volume}
+            getIntensity={getAudioIntensity}
+            mode={liquidFx}
+          />
+          {/* 雪花叠层（库的 snowflakes1，透明叠在液面之上、卡片之下；不与水面交互）。
+              仅 rain 模式：rain = 雪花飘落 + 液面；center 是中间涟漪、不挂雪花。 */}
+          {liquidFx === "rain" && <SnowOverlay />}
+        </>
       )}
 
       {/* Panel */}

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Pause, Play, SkipBack, SkipForward, History as HistoryIcon, Heart, Repeat, Repeat1, Square, CloudRain, Target, Droplet } from "lucide-react"
+import { Pause, Play, SkipBack, SkipForward, History as HistoryIcon, Heart, Repeat, Repeat1, Square, CloudSnow, Target, Droplet } from "lucide-react"
 import { usePlayback, usePlaybackTime } from "../_context/PlaybackContext"
 import { useDominantHue } from "../_lib/useDominantHue"
 import { useIsAndroidApp } from "../_lib/useIsAndroid"
@@ -302,10 +302,10 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
                 aria-label="水波效果"
                 title={
                   liquidFx === "rain"
-                    ? "水波：下雨（点击切中间冒泡）"
+                    ? "水波：雪花飘落（点击切中间涟漪）"
                     : liquidFx === "center"
-                      ? "水波：中间冒泡（点击切默认）"
-                      : "水波：默认（点击切下雨）"
+                      ? "水波：中间涟漪（点击切默认）"
+                      : "水波：默认（点击切雪花）"
                 }
                 className="h-8 w-8 grid place-items-center rounded-full hover:bg-white/10 transition-colors"
                 style={{
@@ -319,7 +319,7 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
                 }}
               >
                 {liquidFx === "rain" ? (
-                  <CloudRain size={15} />
+                  <CloudSnow size={15} />
                 ) : liquidFx === "center" ? (
                   <Target size={15} />
                 ) : (

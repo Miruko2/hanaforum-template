@@ -223,10 +223,6 @@ export function LiquidRefraction({
   }, [])
 
   return (
-    <canvas
-      ref={canvasRef}
-      aria-hidden
-      className="absolute inset-0 block h-full w-full"
-    />
+    <canvas ref={canvasRef} aria-hidden className="absolute inset-0 block h-full w-full" />
   )
 }
