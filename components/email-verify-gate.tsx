@@ -15,6 +15,33 @@ const TICK_B = "SECURITY · 認証 · HANAKO · VERIFY · CODE · ACCESS · "
 const TICK_C = "ACCESS · OTP · 萤火虫之国 · 認証 · VERIFY · SECURE · "
 const TICK_D = "VERIFY · CODE · 認証 · SECURITY · HANAKO · ACCESS · "
 
+// 5×7 点阵数字字模（'1'=亮珠 '0'=灭珠），用于验证码点阵显示
+const GLYPHS: Record<string, string[]> = {
+  "0": ["01110", "10001", "10011", "10101", "11001", "10001", "01110"],
+  "1": ["00100", "01100", "00100", "00100", "00100", "00100", "01110"],
+  "2": ["01110", "10001", "00001", "00010", "00100", "01000", "11111"],
+  "3": ["11111", "00010", "00100", "00010", "00001", "10001", "01110"],
+  "4": ["00010", "00110", "01010", "10010", "11111", "00010", "00010"],
+  "5": ["11111", "10000", "11110", "00001", "00001", "10001", "01110"],
+  "6": ["00110", "01000", "10000", "11110", "10001", "10001", "01110"],
+  "7": ["11111", "00001", "00010", "00100", "01000", "01000", "01000"],
+  "8": ["01110", "10001", "10001", "01110", "10001", "10001", "01110"],
+  "9": ["01110", "10001", "10001", "01111", "00001", "00010", "01100"],
+}
+
+// 一个验证码位：有数字则点亮对应 5×7 点阵，否则全灭（淡珠占位）；active=当前待输入位
+function DotDigit({ char, active }: { char?: string; active?: boolean }) {
+  const rows = char && GLYPHS[char] ? GLYPHS[char] : null
+  return (
+    <div className={`evg-cell${active ? " is-active" : ""}`}>
+      {Array.from({ length: 35 }).map((_, k) => {
+        const on = rows ? rows[Math.floor(k / 5)][k % 5] === "1" : false
+        return <span key={k} className={on ? "on" : undefined} />
+      })}
+    </div>
+  )
+}
+
 /**
  * 邮箱验证门禁（懒触发 OTP）—— 绝区零风格弹窗。
  * 深色切角面板 + 霓虹描边 + 型号头部条 + 卡内斜向水印文字 + 网点扫描线 + 角标/十字标 + 酸性切角按钮。
@@ -204,15 +231,22 @@ export default function EmailVerifyGate() {
                     <p className="evg-sub">
                       验证码已发到 <b>{user?.email}</b>
                     </p>
-                    <input
-                      className="evg-input"
-                      value={code}
-                      onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                      inputMode="numeric"
-                      maxLength={6}
-                      placeholder="······"
-                      autoFocus
-                    />
+                    <div className="evg-code">
+                      <input
+                        className="evg-code-input"
+                        value={code}
+                        onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                        inputMode="numeric"
+                        maxLength={6}
+                        autoFocus
+                        aria-label="6 位验证码"
+                      />
+                      <div className="evg-code-cells" aria-hidden>
+                        {Array.from({ length: 6 }).map((_, i) => (
+                          <DotDigit key={i} char={code[i]} active={i === code.length} />
+                        ))}
+                      </div>
+                    </div>
                     <button type="button" className="evg-btn" onClick={handleVerify} disabled={busy} data-loading={busy || undefined} aria-busy={busy || undefined}>
                       {busy ? null : <><span className="evg-btn-cv" aria-hidden>»</span>验证</>}
                     </button>
@@ -359,15 +393,26 @@ const EVG_CSS = `
 .evg-title::after{ content:attr(data-text); position:absolute; left:50%; top:0; transform:translate(-50%,0) translate(2px,1.5px); color:rgba(var(--acc-rgb),0.4); z-index:-1; pointer-events:none; }
 .evg-sub{ font-size:13px; color:#a6aeb6; margin:0; line-height:1.6; }
 .evg-sub b{ color:#e8edf1; font-weight:700; }
-.evg-input{
-  display:block; width:100%; margin-top:16px; padding:11px 14px; box-sizing:border-box;
-  border:1px solid rgba(var(--acc-rgb),0.4); background:rgba(4,12,8,0.7); color:#fff;
+/* 验证码点阵输入：透明 input 覆盖捕获键盘，下层 6 个 5×7 绿点阵格显示数字 */
+.evg-code{
+  position:relative; margin-top:16px; min-height:56px; cursor:text;
+  border:1px solid rgba(var(--acc-rgb),0.4); background:rgba(4,10,7,0.65);
   clip-path:polygon(0 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%);
-  font-family:monospace; font-size:24px; letter-spacing:12px; text-align:center; outline:none;
+  display:flex; align-items:center; justify-content:center;
   transition:border-color .15s, box-shadow .15s;
 }
-.evg-input::placeholder{ color:#3d5a48; letter-spacing:8px; }
-.evg-input:focus{ border-color:var(--acc); box-shadow:0 0 0 3px rgba(var(--acc-rgb),0.2); }
+.evg-code:focus-within{ border-color:var(--acc); box-shadow:0 0 0 3px rgba(var(--acc-rgb),0.2); }
+.evg-code-input{
+  position:absolute; inset:0; width:100%; height:100%; margin:0; padding:0;
+  border:none; background:none; outline:none; color:transparent; caret-color:transparent;
+  font-size:16px; cursor:text;
+}
+.evg-code-cells{ display:flex; gap:12px; pointer-events:none; }
+.evg-cell{ display:grid; grid-template-columns:repeat(5,4px); grid-template-rows:repeat(7,4px); gap:1.6px; }
+.evg-cell span{ width:4px; height:4px; border-radius:50%; background:rgba(var(--acc-rgb),0.09); }
+.evg-cell span.on{ background:var(--acc); box-shadow:0 0 3px rgba(var(--acc-rgb),0.85); }
+.evg-cell.is-active span{ background:rgba(var(--acc-rgb),0.18); animation:evg-cell-blink 1s steps(1,end) infinite; }
+.evg-cell.is-active span.on{ background:var(--acc); }
 .evg-btn{
   position:relative; overflow:hidden; width:100%; margin-top:16px; padding:12px 18px; box-sizing:border-box; border:none;
   display:flex; align-items:center; justify-content:center; min-height:46px;
@@ -445,11 +490,12 @@ const EVG_CSS = `
 /* 加载点阵彩带：上层斜向遮罩流动 1 周期(28/sin55≈34.2px) → 亮带斜扫过绿点阵屏；点阵/底固定 */
 @keyframes evg-led-flow{ from{ background-position:0 0,0 0,0 0 } to{ background-position:34.2px 0,0 0,0 0 } }
 @keyframes evg-blink{ 0%,60%{opacity:1} 61%,100%{opacity:.18} }
+@keyframes evg-cell-blink{ 0%,55%{opacity:1} 56%,100%{opacity:.4} }
 @keyframes evg-ball-breathe{ 0%,100%{ transform:translate(-50%,-50%) scale(0.66); opacity:.4 } 50%{ transform:translate(-50%,-50%) scale(1.3); opacity:.85 } }
 @media (prefers-reduced-motion: reduce){
   .evg-orb{ display:none; }
   .evg-panel{ animation-duration:.01ms; animation-delay:0s; }
-  .evg-bg-band,.evg-glow,.evg-ball-ring,.evg-flash,.evg-tick-row,.evg-dot,.evg-btn[data-loading="true"]{ animation:none; }
+  .evg-bg-band,.evg-glow,.evg-ball-ring,.evg-flash,.evg-tick-row,.evg-dot,.evg-btn[data-loading="true"],.evg-cell.is-active span{ animation:none; }
   .evg-btn::after{ animation:none; display:none; }
 }
 `
