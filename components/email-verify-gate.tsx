@@ -157,8 +157,11 @@ export default function EmailVerifyGate() {
             <span className="evg-flash" aria-hidden />
           </div>
 
-          {/* 入场圆球：坠落后炸开（独立元素，避免缩放把面板压成椭圆蛋） */}
-          <span key={`orb-${openCount}`} className="evg-orb" aria-hidden />
+          {/* 入场坠落球：掉落→停住呼吸→炸开成弹窗（外层管坠落/炸开，内层 core 实心球 + ring 呼吸灯） */}
+          <span key={`orb-${openCount}`} className="evg-orb" aria-hidden>
+            <span className="evg-orb-ring" aria-hidden />
+            <span className="evg-orb-core" aria-hidden />
+          </span>
 
           {/* 外层=霓虹切角边框，内层=深色主体（卡片所有内容都在内层、被裁切） */}
           <div key={`panel-${openCount}`} className="evg-panel" onClick={(e) => e.stopPropagation()}>
@@ -268,14 +271,23 @@ const EVG_CSS = `
 .evg-flash{ position:absolute; inset:0; background:var(--flash); opacity:0; pointer-events:none; animation:evg-flash .5s ease-out .04s both; }
 
 /* 入场圆球：真·圆形，坠落→落定→炸开淡出 */
+/* 入场坠落球：外层管坠落+炸开；内层 core 实心小球、ring 半透明呼吸灯光球。
+   时序：掉落落定(0~0.8s) → 停住呼吸(0.8~1.55s) → 炸开成弹窗(1.55~1.9s)。 */
 .evg-orb{
-  position:absolute; left:50%; top:50%; width:34px; height:34px; border-radius:50%;
-  /* 纯实心绿球（坠落 → 炸开成弹窗）。orb 本就带 transform 动画(坠落+scale)走合成层、
-     圆边 GPU 抗锯齿，不需要 radial 羽化——羽化=实心+透明边+外发光叠成「甜甜圈」，正是之前看着丑的根因 */
-  background:var(--acc);
-  box-shadow:0 0 18px rgba(var(--acc-rgb),0.6);
+  position:absolute; left:50%; top:50%; width:30px; height:30px;
   transform:translate(-50%,-50%); pointer-events:none;
-  animation:evg-orb .82s cubic-bezier(0.2,0.9,0.3,1) both;
+  animation:evg-orb 1.9s cubic-bezier(0.2,0.9,0.3,1) both;
+}
+.evg-orb-ring{
+  position:absolute; left:50%; top:50%; width:30px; height:30px; border-radius:50%;
+  transform:translate(-50%,-50%);
+  background:radial-gradient(circle, rgba(var(--acc-rgb),0.5) 0%, rgba(var(--acc-rgb),0.16) 46%, transparent 72%);
+  animation:evg-orb-breathe 0.95s ease-in-out 0.72s infinite;
+}
+.evg-orb-core{
+  position:absolute; left:50%; top:50%; width:18px; height:18px; border-radius:50%;
+  transform:translate(-50%,-50%);
+  background:var(--acc); box-shadow:0 0 8px rgba(var(--acc-rgb),0.6);
 }
 
 /* ── 面板：外层=霓虹切角边框，内层=深色主体（切角一致，露出 ~1.6px 当霓虹边） ── */
@@ -286,7 +298,7 @@ const EVG_CSS = `
   clip-path:polygon(0 0, calc(100% - var(--notch)) 0, 100% var(--notch), 100% 100%, var(--notch) 100%, 0 calc(100% - var(--notch)));
   filter:drop-shadow(0 22px 50px rgba(0,0,0,0.6)) drop-shadow(0 0 26px rgba(var(--acc-rgb),0.22));
   transform-origin:center;
-  animation:evg-panel-in .4s cubic-bezier(0.16,1,0.3,1) .5s both;
+  animation:evg-panel-in .4s cubic-bezier(0.16,1,0.3,1) 1.5s both;
 }
 .evg-inner{
   position:relative; overflow:hidden; box-sizing:border-box;
@@ -352,7 +364,7 @@ const EVG_CSS = `
 .evg-close{ background:none; border:none; color:#9fd9b4; cursor:pointer; line-height:0; opacity:.8; padding:0; }
 .evg-close:hover{ opacity:1; }
 
-.evg-body{ position:relative; z-index:3; animation:evg-content-in .34s ease-out .72s both; }
+.evg-body{ position:relative; z-index:3; animation:evg-content-in .34s ease-out 1.72s both; }
 .evg-icon{ width:30px; height:30px; color:var(--acc); display:block; margin:2px auto 8px; filter:drop-shadow(0 0 7px rgba(var(--acc-rgb),0.6)); }
 .evg-chip{ display:inline-flex; align-items:center; padding:3px 11px; border-radius:3px; background:var(--acc); color:var(--ink); font-size:10.5px; font-weight:800; font-style:italic; letter-spacing:.22em; text-transform:uppercase; }
 .evg-title{ position:relative; font-size:20px; font-weight:800; font-style:italic; letter-spacing:.03em; color:#ecfccb; margin:11px 0 6px; }
@@ -412,12 +424,14 @@ const EVG_CSS = `
 @keyframes evg-flash{ 0%{opacity:0} 35%{opacity:.18} 100%{opacity:0} }
 @keyframes evg-orb{
   0%   { opacity:0; transform:translate(-50%, calc(-50% - 300px)) scale(1); }
-  16%  { opacity:1; }
-  46%  { transform:translate(-50%, calc(-50% + 8px)) scale(1); }
-  60%  { transform:translate(-50%, calc(-50% - 4px)) scale(1); }
-  72%  { opacity:1; transform:translate(-50%,-50%) scale(1); }
+  8%   { opacity:1; }
+  26%  { transform:translate(-50%, calc(-50% + 7px)) scale(1); }
+  34%  { transform:translate(-50%, calc(-50% - 3px)) scale(1); }
+  42%  { opacity:1; transform:translate(-50%,-50%) scale(1); }
+  82%  { opacity:1; transform:translate(-50%,-50%) scale(1); }
   100% { opacity:0; transform:translate(-50%,-50%) scale(6); }
 }
+@keyframes evg-orb-breathe{ 0%,100%{ transform:translate(-50%,-50%) scale(0.7); opacity:.4 } 50%{ transform:translate(-50%,-50%) scale(1.35); opacity:.85 } }
 @keyframes evg-panel-in{ from{opacity:0; transform:translate(-50%,-50%) scale(0.36)} to{opacity:1; transform:translate(-50%,-50%) scale(1)} }
 @keyframes evg-content-in{ from{opacity:0; transform:translateY(9px)} to{opacity:1; transform:none} }
 @keyframes evg-flicker{ 0%,100%{opacity:.55} 45%{opacity:.85} 72%{opacity:.62} }
@@ -434,7 +448,8 @@ const EVG_CSS = `
 @keyframes evg-ball-breathe{ 0%,100%{ transform:translate(-50%,-50%) scale(0.66); opacity:.4 } 50%{ transform:translate(-50%,-50%) scale(1.3); opacity:.85 } }
 @media (prefers-reduced-motion: reduce){
   .evg-orb{ display:none; }
-  .evg-panel{ animation-duration:.01ms; animation-delay:0s; }
+  .evg-panel,.evg-body{ animation-duration:.01ms; animation-delay:0s; }
+  .evg-orb-ring,.evg-orb-core{ animation:none; }
   .evg-bg-band,.evg-glow,.evg-ball-ring,.evg-flash,.evg-tick-row,.evg-dot{ animation:none; }
   .evg-btn::after{ animation:none; display:none; }
 }
