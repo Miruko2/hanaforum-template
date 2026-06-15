@@ -13,17 +13,9 @@ import { useIsAndroid } from "../_lib/useIsAndroid"
 import { useIsMobile } from "../_lib/useIsMobile"
 import { TrackCover } from "./TrackCover"
 import { LyricsEcho } from "./LyricsEcho"
-import { LyricsRefraction } from "./LyricsRefraction"
 import { SoundField } from "./SoundField"
 import { LiquidRefraction } from "./LiquidRefraction"
 import { SnowOverlay } from "./SnowOverlay"
-
-// 歌词水波实现切换（仅桌面生效，移动端一律纯残影）：
-//   "svg"   —— 参考 time_line 项目 hover 水波：SVG feTurbulence+feDisplacementMap，
-//             流动 + 越远越强，轻、无 WebGL（当前默认）。挂在 LyricsEcho 上。
-//   "webgl" —— 自定义 WebGL 折射(LyricsRefraction)，第二个 GL 上下文、较重。保留可对比。
-//   "off"   —— 纯 DOM 残影，无水波。
-const LYRICS_FX: "svg" | "webgl" | "off" = "svg"
 
 /** Screen-space rect of the card that was clicked — used as flight start. */
 export type ExpandRect = { left: number; top: number; width: number; height: number }
@@ -282,13 +274,6 @@ function ExpandedInner({
         </>
       )}
 
-      {/* 歌词水波之 WebGL 折射版（仅 LYRICS_FX="webgl" 且桌面）：全屏 WebGL canvas，挂在
-          面板外（面板有 framer transform，position 会失真），铺在背景之上、卡片之下。
-          其余情况此层不挂、改由面板内的 LyricsEcho 出水波/残影。 */}
-      {isCurrent && lyricsEnabled && lyrics && !isMobile && LYRICS_FX === "webgl" && (
-        <LyricsRefraction lines={lyrics} compact={compact} panelH={PANEL_H} playing={playing} />
-      )}
-
       {/* Panel */}
       <motion.div
         onClick={(e) => e.stopPropagation()}
@@ -463,13 +448,12 @@ function ExpandedInner({
           </div>
         </div>
 
-        {/* 歌词 echo 堆叠（面板上下两侧）。桌面 svg 模式：water=true 挂流动水波；
-            webgl 模式：让位给面板外的 LyricsRefraction；off / 移动端：纯残影。 */}
-        {isCurrent && lyricsEnabled && lyrics && !(LYRICS_FX === "webgl" && !isMobile) && (
+        {/* 歌词 echo 堆叠（面板上下两侧）。桌面挂流动水波(water=true)、移动端纯残影。 */}
+        {isCurrent && lyricsEnabled && lyrics && (
           <LyricsEcho
             lines={lyrics}
             compact={compact}
-            water={!isMobile && LYRICS_FX === "svg"}
+            water={!isMobile}
             playing={playing}
             isAndroid={isAndroid}
           />
