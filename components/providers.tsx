@@ -3,6 +3,7 @@
 import { useState, useEffect, type ReactNode } from "react"
 import { ThemeProvider } from "@/components/theme-provider"
 import { SimpleAuthProvider } from "@/contexts/auth-context-simple"
+import BannedGate from "@/components/banned-gate"
 import { PostsProvider } from "@/contexts/posts-context"
 import { CinemaModeProvider } from "@/contexts/cinema-mode-context"
 import PageTransition from "@/components/page-transition"
@@ -58,6 +59,7 @@ export function Providers({ children }: { children: ReactNode }) {
       disableTransitionOnChange
     >
       <SimpleAuthProvider>
+        <BannedGate>
         <PostsProvider>
           <Script id="page-refresh-detection" strategy="beforeInteractive">
             {`
@@ -117,6 +119,7 @@ export function Providers({ children }: { children: ReactNode }) {
             </CinemaModeProvider>
           </NotificationProvider>
         </PostsProvider>
+        </BannedGate>
       </SimpleAuthProvider>
     </ThemeProvider>
   )

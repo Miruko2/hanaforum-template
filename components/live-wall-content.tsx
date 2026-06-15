@@ -86,6 +86,11 @@ export default function LiveWallContent() {
   const [onlineCount, setOnlineCount] = useState(0)
   const listRef = useRef<HTMLDivElement>(null)
 
+  // 封禁状态：被管理员封禁的用户禁止发言（真正的拦截在 RLS，这里仅作 UX 提示，
+  // 否则被封用户只会看到一条莫名其妙的“发送失败”）。reason 仅本人可见（RLS select-self）。
+  const [isBanned, setIsBanned] = useState(false)
+  const [banReason, setBanReason] = useState("")
+
   // 主播画面折叠：手机端一键收起 hanako 视频，给聊天腾出更多空间。
   // 收起后视频区缩成接缝处的一条细按钮，聊天区自动撑满；AI 回复本就会写入
   // live_comments、在聊天流里照常显示，所以收起视频不会丢任何内容。
@@ -121,6 +126,40 @@ export default function LiveWallContent() {
   useEffect(() => {
     userRef.current = user
   }, [user])
+
+  // 查询并更新自己的封禁状态，返回 { banned, reason }。
+  // 仅能查到自己的行（RLS select-self）。表未建/异常时按“未封禁”处理，
+  // 不误伤正常用户（真正的拦截始终在 RLS 写策略层）。
+  const checkBanStatus = useCallback(
+    async (userId: string): Promise<{ banned: boolean; reason: string }> => {
+      const { data, error } = await supabase
+        .from("banned_users")
+        .select("reason, expires_at")
+        .eq("user_id", userId)
+        .maybeSingle()
+      if (error || !data) {
+        setIsBanned(false)
+        setBanReason("")
+        return { banned: false, reason: "" }
+      }
+      const stillBanned = !data.expires_at || new Date(data.expires_at) > new Date()
+      const reason = stillBanned ? data.reason || "" : ""
+      setIsBanned(stillBanned)
+      setBanReason(reason)
+      return { banned: stillBanned, reason }
+    },
+    [],
+  )
+
+  // 进场 / 切换账号时查一次封禁状态
+  useEffect(() => {
+    if (!user) {
+      setIsBanned(false)
+      setBanReason("")
+      return
+    }
+    checkBanStatus(user.id).catch(() => {})
+  }, [user, checkBanStatus])
 
   // 入场
   useEffect(() => {
@@ -504,6 +543,14 @@ export default function LiveWallContent() {
       })
       return
     }
+    if (isBanned) {
+      toast({
+        title: "你已被封禁",
+        description: banReason ? `原因：${banReason}` : "无法发送弹幕",
+        variant: "destructive",
+      })
+      return
+    }
     if (content.length > MAX_LENGTH) return
 
     try {
@@ -524,17 +571,31 @@ export default function LiveWallContent() {
       }
     } catch (err: any) {
       console.error("[LiveWall] 发送失败:", err)
-      // PostgreSQL 42501 = RLS 拒绝；这里是被速率限制策略挡了（3 秒最多 2 条）
-      const isRateLimited =
+      // PostgreSQL 42501 = RLS WITH CHECK 拒绝。同一条 INSERT 策略有两种拒因：
+      //   1) 被封禁（NOT is_banned 不满足）   2) 速率限制（3 秒最多 2 条）
+      // 错误码区分不了，这里回查一次封禁状态：被封则给出正确文案并即时禁用输入，
+      // 否则才是限流。覆盖“正在页面上、被管理员中途封禁”的场景。
+      const isRlsReject =
         err?.code === "42501" ||
         (typeof err?.message === "string" &&
           err.message.toLowerCase().includes("row-level security"))
-      if (isRateLimited) {
-        toast({
-          title: "发太快了",
-          description: "弹幕速率受限，请慢一点（3 秒内最多 2 条）",
-          variant: "destructive",
-        })
+      if (isRlsReject) {
+        const res = user
+          ? await checkBanStatus(user.id)
+          : { banned: false, reason: "" }
+        if (res.banned) {
+          toast({
+            title: "你已被封禁",
+            description: res.reason ? `原因：${res.reason}` : "无法发送弹幕",
+            variant: "destructive",
+          })
+        } else {
+          toast({
+            title: "发太快了",
+            description: "弹幕速率受限，请慢一点（3 秒内最多 2 条）",
+            variant: "destructive",
+          })
+        }
       } else {
         toast({
           title: "发送失败",
@@ -545,7 +606,7 @@ export default function LiveWallContent() {
     } finally {
       setSending(false)
     }
-  }, [input, sending, user, toast, triggerAIReply])
+  }, [input, sending, user, isBanned, banReason, checkBanStatus, toast, triggerAIReply])
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -554,7 +615,11 @@ export default function LiveWallContent() {
     }
   }
 
-  const placeholder = user ? "> 发送弹幕... (Enter 发送)  @hanako 呼叫AI" : "> 登录后发送弹幕"
+  const placeholder = isBanned
+    ? "> 你已被封禁，无法发言"
+    : user
+      ? "> 发送弹幕... (Enter 发送)  @hanako 呼叫AI"
+      : "> 登录后发送弹幕"
 
   // 展示态
   const shown = mounted && !closing
@@ -676,6 +741,23 @@ export default function LiveWallContent() {
 
       {/* 输入框 */}
       <footer className="live-wall-footer">
+        {isBanned && (
+          <div
+            role="alert"
+            style={{
+              margin: "0 0 8px",
+              padding: "8px 12px",
+              borderRadius: 8,
+              border: "1px solid rgba(248,113,113,0.4)",
+              background: "rgba(127,29,29,0.25)",
+              color: "#fca5a5",
+              fontSize: 13,
+              fontFamily: "monospace",
+            }}
+          >
+            你已被封禁，无法发送弹幕{banReason ? `（原因：${banReason}）` : ""}
+          </div>
+        )}
         <form
           className={`live-wall-input-wrap ${inputFocused ? "is-focused" : ""}`}
           onSubmit={(e) => {
@@ -691,7 +773,7 @@ export default function LiveWallContent() {
             onBlur={() => setInputFocused(false)}
             onKeyDown={handleKeyDown}
             placeholder={placeholder}
-            disabled={!user || sending}
+            disabled={!user || sending || isBanned}
             maxLength={MAX_LENGTH}
             className="live-wall-input"
           />
@@ -700,7 +782,7 @@ export default function LiveWallContent() {
           </span>
           <button
             type="submit"
-            disabled={!user || sending || !input.trim()}
+            disabled={!user || sending || isBanned || !input.trim()}
             className="live-wall-send"
             aria-label="发送"
           >

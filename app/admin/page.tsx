@@ -5,7 +5,7 @@ import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { apiUrl } from "@/lib/api-base"
-import { Shield, Users, FileText, Trash2, AlertCircle, Bot, Cpu, Save, RefreshCw, Megaphone } from "lucide-react"
+import { Shield, Users, FileText, Trash2, AlertCircle, Bot, Cpu, Save, RefreshCw, Megaphone, Ban, ShieldCheck } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -37,6 +37,8 @@ type CachedAdminData = {
   posts: any[]
   admins: any[]
   hanakoAllowedUsers: any[]
+  // 被封禁用户原始行（user_id / reason / created_at / expires_at）
+  bannedUsers: any[]
 }
 type CachedAiConfig = {
   base_url: string
@@ -75,6 +77,17 @@ export default function AdminPage() {
   const [addingAllowedUser, setAddingAllowedUser] = useState(false)
   // 白名单开关切换中的临时态（防止重复点击）
   const [togglingWhitelist, setTogglingWhitelist] = useState(false)
+
+  // 用户封禁状态
+  // bannedUsers：被封禁原始行；bannedIds：派生的 Set，行内 O(1) 判断是否已封
+  const [bannedUsers, setBannedUsers] = useState<any[]>(cachedAdminData?.bannedUsers || [])
+  const bannedIds = new Set(bannedUsers.map((b) => b.user_id))
+  // 用户列表搜索词（按用户名 / 用户 ID 客户端过滤已加载列表）
+  const [userSearch, setUserSearch] = useState("")
+  // 封禁确认弹窗
+  const [banTarget, setBanTarget] = useState<{ id: string; username: string } | null>(null)
+  const [banReason, setBanReason] = useState("")
+  const [banning, setBanning] = useState(false)
 
   // AI 模型配置状态
   const [aiConfig, setAiConfig] = useState<CachedAiConfig | null>(cachedAiConfig)
@@ -143,7 +156,7 @@ export default function AdminPage() {
     setLoading(true)
     try {
       // 并行查询所有表
-      const [usersResult, postsResult, adminsResult, allowedResult] = await Promise.allSettled([
+      const [usersResult, postsResult, adminsResult, allowedResult, bannedResult] = await Promise.allSettled([
         supabase
           .from("profiles")
           .select("id, username, avatar_url, updated_at", { count: "exact" })
@@ -160,6 +173,10 @@ export default function AdminPage() {
           .from("hanako_allowed_users")
           .select("id, user_id, added_by, created_at")
           .order("created_at", { ascending: false }),
+        supabase
+          .from("banned_users")
+          .select("user_id, reason, created_at, expires_at")
+          .order("created_at", { ascending: false }),
       ])
 
       // 收集本次拉到的结果到 snapshot，最后一并写 state + 缓存
@@ -170,6 +187,7 @@ export default function AdminPage() {
         posts,
         admins,
         hanakoAllowedUsers,
+        bannedUsers,
       }
 
       // 处理用户列表
@@ -256,12 +274,18 @@ export default function AdminPage() {
         }))
       }
 
+      // 处理封禁列表（表未建/迁移没跑时这条会失败，保留上次值不清空）
+      if (bannedResult.status === "fulfilled" && !bannedResult.value.error) {
+        snapshot.bannedUsers = bannedResult.value.data || []
+      }
+
       // 一并提交：组件 state + 模块缓存
       setUsers(snapshot.users)
       setUserCount(snapshot.userCount)
       setPosts(snapshot.posts)
       setAdmins(snapshot.admins)
       setHanakoAllowedUsers(snapshot.hanakoAllowedUsers)
+      setBannedUsers(snapshot.bannedUsers)
       cachedAdminData = snapshot
     } catch (error) {
       console.error("加载数据错误:", error)
@@ -678,6 +702,93 @@ export default function AdminPage() {
     }
   }
 
+  // 执行封禁：写 banned_users（RLS 要求操作者在 admin_users 表内），
+  // 并顺手删除该用户已有弹幕（realtime DELETE 会让它从所有人屏幕消失）。
+  const confirmBan = async () => {
+    if (!banTarget || banning) return
+    setBanning(true)
+    try {
+      const { error } = await supabase.from("banned_users").insert([
+        {
+          user_id: banTarget.id,
+          reason: banReason.trim() || null,
+          banned_by: user?.id,
+        },
+      ])
+      if (error) {
+        // 23505 = 已存在（已被封），当作成功的幂等结果
+        if (error.code !== "23505") throw error
+      }
+
+      // 清掉该用户已有弹幕（失败不阻断封禁本身，仅记录）
+      const { error: delError } = await supabase
+        .from("live_comments")
+        .delete()
+        .eq("user_id", banTarget.id)
+      if (delError) console.warn("删除被封用户弹幕失败:", delError.message)
+
+      // 本地更新封禁集合 + 缓存，避免再拉一次
+      const newRow = {
+        user_id: banTarget.id,
+        reason: banReason.trim() || null,
+        created_at: new Date().toISOString(),
+        expires_at: null,
+      }
+      setBannedUsers((prev) => {
+        const next = prev.some((b) => b.user_id === banTarget.id)
+          ? prev
+          : [newRow, ...prev]
+        if (cachedAdminData) cachedAdminData.bannedUsers = next
+        return next
+      })
+
+      toast({
+        title: "已封禁",
+        description: `${banTarget.username} 已被全站封禁并即时下线`,
+      })
+    } catch (error: any) {
+      console.error("封禁失败:", error)
+      toast({
+        title: "封禁失败",
+        description: error?.message || "请稍后重试（确认你的账号在 admin_users 表内）",
+        variant: "destructive",
+      })
+    } finally {
+      setBanning(false)
+      setBanTarget(null)
+      setBanReason("")
+    }
+  }
+
+  // 解封：删 banned_users 行，用户立即恢复发言能力（RLS 实时重判）
+  const handleUnban = async (targetUserId: string, username: string) => {
+    try {
+      const { error } = await supabase
+        .from("banned_users")
+        .delete()
+        .eq("user_id", targetUserId)
+      if (error) throw error
+
+      setBannedUsers((prev) => {
+        const next = prev.filter((b) => b.user_id !== targetUserId)
+        if (cachedAdminData) cachedAdminData.bannedUsers = next
+        return next
+      })
+
+      toast({
+        title: "已解封",
+        description: `${username} 已恢复发言`,
+      })
+    } catch (error: any) {
+      console.error("解封失败:", error)
+      toast({
+        title: "解封失败",
+        description: error?.message || "请稍后重试",
+        variant: "destructive",
+      })
+    }
+  }
+
   if (loading) {
     return (
       <div className="container mx-auto py-10 flex items-center justify-center min-h-[60vh]">
@@ -709,6 +820,16 @@ export default function AdminPage() {
       </div>
     )
   }
+
+  // 用户列表按搜索词过滤（用户名 / 用户 ID，大小写不敏感）
+  const userQuery = userSearch.trim().toLowerCase()
+  const filteredUsers = userQuery
+    ? users.filter(
+        (u) =>
+          (u.username || "").toLowerCase().includes(userQuery) ||
+          (u.id || "").toLowerCase().includes(userQuery),
+      )
+    : users
 
   return (
     <div className="container mx-auto py-10">
@@ -845,25 +966,84 @@ export default function AdminPage() {
               </div>
             </CardHeader>
             <CardContent>
+              {/* 搜索：按用户名 / 用户 ID 过滤已加载列表 */}
+              <div className="mb-4">
+                <Input
+                  placeholder="搜索用户名或用户 ID..."
+                  value={userSearch}
+                  onChange={(e) => setUserSearch(e.target.value)}
+                  className="bg-gray-800 border-gray-700"
+                />
+                {userQuery && (
+                  <p className="mt-1.5 text-xs text-gray-500">
+                    匹配到 {filteredUsers.length} 个用户
+                    {users.length >= 1000 && (
+                      <span className="text-amber-400/80">
+                        （列表上限 1000 行，若搜不到目标可改用精确用户 ID）
+                      </span>
+                    )}
+                  </p>
+                )}
+              </div>
+
               <div className="border rounded-md border-gray-800">
-                <div className="grid grid-cols-3 gap-4 p-4 font-medium text-gray-400 border-b border-gray-800">
+                <div className="grid grid-cols-[1fr_1fr_auto] gap-4 p-4 font-medium text-gray-400 border-b border-gray-800">
                   <div>用户名</div>
                   <div>用户 ID</div>
                   <div className="text-right">操作</div>
                 </div>
-                {users.length === 0 ? (
-                  <div className="p-4 text-center text-gray-500">暂无数据</div>
+                {filteredUsers.length === 0 ? (
+                  <div className="p-4 text-center text-gray-500">
+                    {userQuery ? "没有匹配的用户" : "暂无数据"}
+                  </div>
                 ) : (
-                  users.map((u) => (
-                    <div
-                      key={u.id}
-                      className="grid grid-cols-3 gap-4 p-4 border-b border-gray-800 last:border-0 items-center"
-                    >
-                      <div className="text-white">{u.username || "未设置"}</div>
-                      <div className="text-gray-300 font-mono text-xs truncate">{u.id}</div>
-                      <div className="text-right">{/* 这里可以添加用户管理操作，如封禁等 */}</div>
-                    </div>
-                  ))
+                  filteredUsers.map((u) => {
+                    const banned = bannedIds.has(u.id)
+                    return (
+                      <div
+                        key={u.id}
+                        className="grid grid-cols-[1fr_1fr_auto] gap-4 p-4 border-b border-gray-800 last:border-0 items-center"
+                      >
+                        <div className="text-white flex items-center gap-2 min-w-0">
+                          <span className="truncate">{u.username || "未设置"}</span>
+                          {banned && (
+                            <span className="shrink-0 text-[11px] px-1.5 py-0.5 rounded bg-red-900/40 text-red-300 border border-red-800">
+                              已封禁
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-gray-300 font-mono text-xs truncate">{u.id}</div>
+                        <div className="text-right">
+                          {u.id === user?.id ? (
+                            <span className="text-xs text-gray-600">本人</span>
+                          ) : banned ? (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleUnban(u.id, u.username || u.id)}
+                              className="text-lime-400 hover:text-lime-300 hover:bg-lime-900/20"
+                            >
+                              <ShieldCheck className="h-4 w-4 mr-1" />
+                              解封
+                            </Button>
+                          ) : (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                setBanTarget({ id: u.id, username: u.username || u.id })
+                                setBanReason("")
+                              }}
+                              className="text-red-400 hover:text-red-300 hover:bg-red-900/20"
+                            >
+                              <Ban className="h-4 w-4 mr-1" />
+                              封禁
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })
                 )}
               </div>
             </CardContent>
@@ -1270,6 +1450,48 @@ export default function AdminPage() {
             </AlertDialogCancel>
             <AlertDialogAction className="bg-red-900 hover:bg-red-800 text-white" onClick={confirmDelete}>
               确认删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* 封禁确认弹窗（带可选理由） */}
+      <AlertDialog open={!!banTarget} onOpenChange={(open) => { if (!open) { setBanTarget(null); setBanReason("") } }}>
+        <AlertDialogContent className="bg-gray-900 border-gray-800 text-white">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-red-400 flex items-center">
+              <Ban className="mr-2 h-5 w-5" />
+              确认封禁
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-gray-300">
+              将封禁用户 <span className="text-white font-medium">{banTarget?.username}</span>。
+              封禁后该账号一登录即被锁定、无法使用站内任何功能（发帖 / 评论 / 私聊 / 弹幕 / 改资料等），
+              其已有弹幕会被清除。此操作可随时解封。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-2 py-2">
+            <label className="text-sm text-gray-400">封禁理由（可选，仅自己可见）</label>
+            <Textarea
+              placeholder="例如：辱骂他人"
+              value={banReason}
+              onChange={(e) => setBanReason(e.target.value)}
+              className="bg-gray-800 border-gray-700 min-h-[72px]"
+              maxLength={200}
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="bg-gray-800 text-white hover:bg-gray-700 border-gray-700">
+              取消
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-900 hover:bg-red-800 text-white"
+              onClick={(e) => {
+                e.preventDefault()
+                confirmBan()
+              }}
+              disabled={banning}
+            >
+              {banning ? "封禁中..." : "确认封禁"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -8,6 +8,9 @@ import { useToast } from "@/hooks/use-toast"
 interface SimpleAuthContextType {
   user: User | null
   isAdmin: boolean
+  // 当前账号是否被封禁（账号级全站封锁，由 BannedGate 据此整屏接管）
+  isBanned: boolean
+  banReason: string
   loading: boolean
   signIn: (email: string, password: string) => Promise<{ error: any }>
   signUp: (email: string, password: string, username: string) => Promise<{ error: any; data: any }>
@@ -17,6 +20,8 @@ interface SimpleAuthContextType {
 const SimpleAuthContext = createContext<SimpleAuthContextType>({
   user: null,
   isAdmin: false,
+  isBanned: false,
+  banReason: "",
   loading: true,
   signIn: async () => ({ error: null }),
   signUp: async () => ({ error: null, data: null }),
@@ -33,10 +38,62 @@ const ADMIN_IDS = [
 export const SimpleAuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
+  const [isBanned, setIsBanned] = useState(false)
+  const [banReason, setBanReason] = useState("")
   const { toast } = useToast()
 
   // 简化的管理员检查
   const isAdmin = user ? ADMIN_IDS.includes(user.id) : false
+
+  // 账号封禁检查：登录后查 banned_users（RLS select-self 只能查到自己），
+  // 并订阅 realtime —— 管理员封禁/解封即时生效（无需用户刷新）。
+  // 表未建/查询异常按“未封禁”处理，不误锁正常用户（真正写入拦截在 RLS/RPC 层）。
+  useEffect(() => {
+    if (!user) {
+      setIsBanned(false)
+      setBanReason("")
+      return
+    }
+    let alive = true
+    const apply = (row: { reason?: string | null; expires_at?: string | null } | null) => {
+      if (!alive) return
+      if (!row) {
+        setIsBanned(false)
+        setBanReason("")
+        return
+      }
+      const active = !row.expires_at || new Date(row.expires_at) > new Date()
+      setIsBanned(active)
+      setBanReason(active ? row.reason || "" : "")
+    }
+    const fetchBan = async () => {
+      const { data, error } = await supabase
+        .from("banned_users")
+        .select("reason, expires_at")
+        .eq("user_id", user.id)
+        .maybeSingle()
+      if (error) {
+        apply(null)
+        return
+      }
+      apply(data as any)
+    }
+    fetchBan()
+    const channel = supabase
+      .channel(`ban_watch_${user.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "banned_users", filter: `user_id=eq.${user.id}` },
+        () => {
+          fetchBan()
+        },
+      )
+      .subscribe()
+    return () => {
+      alive = false
+      supabase.removeChannel(channel)
+    }
+  }, [user])
 
   // 初始化：获取当前会话
   useEffect(() => {
@@ -343,6 +400,8 @@ export const SimpleAuthProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const value = {
     user,
     isAdmin,
+    isBanned,
+    banReason,
     loading,
     signIn,
     signUp,
