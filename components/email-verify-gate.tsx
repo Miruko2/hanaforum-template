@@ -195,12 +195,8 @@ export default function EmailVerifyGate() {
                     <p className="evg-sub">
                       向 <b>{user?.email}</b> 发送 6 位验证码
                     </p>
-                    <button type="button" className="evg-btn" onClick={handleSend} disabled={busy} data-loading={busy || undefined}>
-                      {busy ? (
-                        <span className="evg-dots" aria-hidden><i /><i /><i /><i /><i /></span>
-                      ) : (
-                        <><span className="evg-btn-cv" aria-hidden>»</span>发送验证码</>
-                      )}
+                    <button type="button" className="evg-btn" onClick={handleSend} disabled={busy} data-loading={busy || undefined} aria-busy={busy || undefined}>
+                      {busy ? null : <><span className="evg-btn-cv" aria-hidden>»</span>发送验证码</>}
                     </button>
                   </>
                 ) : (
@@ -217,12 +213,8 @@ export default function EmailVerifyGate() {
                       placeholder="······"
                       autoFocus
                     />
-                    <button type="button" className="evg-btn" onClick={handleVerify} disabled={busy} data-loading={busy || undefined}>
-                      {busy ? (
-                        <span className="evg-dots" aria-hidden><i /><i /><i /><i /><i /></span>
-                      ) : (
-                        <><span className="evg-btn-cv" aria-hidden>»</span>验证</>
-                      )}
+                    <button type="button" className="evg-btn" onClick={handleVerify} disabled={busy} data-loading={busy || undefined} aria-busy={busy || undefined}>
+                      {busy ? null : <><span className="evg-btn-cv" aria-hidden>»</span>验证</>}
                     </button>
                     <button type="button" className="evg-btn-ghost" onClick={handleSend} disabled={busy}>
                       重新发送
@@ -378,6 +370,7 @@ const EVG_CSS = `
 .evg-input:focus{ border-color:var(--acc); box-shadow:0 0 0 3px rgba(var(--acc-rgb),0.2); }
 .evg-btn{
   position:relative; overflow:hidden; width:100%; margin-top:16px; padding:12px 18px; box-sizing:border-box; border:none;
+  display:flex; align-items:center; justify-content:center; min-height:46px;
   background:var(--acc); color:var(--ink); font-size:15px; font-weight:800; letter-spacing:.04em; cursor:pointer;
   clip-path:polygon(0 0, 100% 0, 100% calc(100% - 9px), calc(100% - 9px) 100%, 0 100%);
   box-shadow:0 6px 18px rgba(var(--acc-rgb),0.28); transition:filter .15s, transform .1s;
@@ -388,17 +381,17 @@ const EVG_CSS = `
 .evg-btn:active:not(:disabled){ transform:translateY(1px); }
 .evg-btn:disabled{ opacity:.5; cursor:default; box-shadow:none; }
 .evg-btn:disabled::after{ display:none; }
-/* 加载态：背景灰黑，中间一排绿色发光灯珠波浪流水点亮（ascii/LED 点阵感，无文字） */
+/* 加载态：整条彩带由密集绿色灯珠点阵构成——灰黑底铺满绿点阵(radial 平铺)，
+   一条斜向亮带(上层遮罩留出的透明窗)在点阵上流动；无文字 */
 .evg-btn[data-loading="true"]{
   opacity:1; box-shadow:0 6px 18px rgba(0,0,0,0.35);
-  background:#16181b;
+  background:
+    repeating-linear-gradient(-55deg, rgba(21,23,26,0) 0, rgba(21,23,26,0) 7px, rgba(21,23,26,0.8) 13px, rgba(21,23,26,0.8) 28px),
+    radial-gradient(circle, var(--acc) 1.5px, transparent 2.4px),
+    #15171a;
+  background-size: auto, 9px 9px, auto;
+  animation:evg-led-flow 1.05s linear infinite;
 }
-.evg-dots{ display:inline-flex; gap:7px; align-items:center; justify-content:center; }
-.evg-dots i{ width:9px; height:9px; border-radius:50%; background:var(--acc); box-shadow:0 0 7px rgba(var(--acc-rgb),0.85); animation:evg-dot-wave 1.1s ease-in-out infinite; }
-.evg-dots i:nth-child(2){ animation-delay:.13s }
-.evg-dots i:nth-child(3){ animation-delay:.26s }
-.evg-dots i:nth-child(4){ animation-delay:.39s }
-.evg-dots i:nth-child(5){ animation-delay:.52s }
 .evg-btn-ghost{ margin-top:12px; background:none; border:none; color:var(--acc); font-size:13px; cursor:pointer; }
 .evg-btn-ghost:disabled{ opacity:.5; cursor:default; }
 .evg-serial{ position:absolute; left:0; right:0; bottom:9px; z-index:3; text-align:center; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:9px; letter-spacing:.14em; color:rgba(var(--soft-rgb),0.34); pointer-events:none; }
@@ -449,14 +442,14 @@ const EVG_CSS = `
 @keyframes evg-tickL{ from{transform:translateX(0)} to{transform:translateX(-50%)} }
 @keyframes evg-tickR{ from{transform:translateX(-50%)} to{transform:translateX(0)} }
 @keyframes evg-sheen{ 0%{left:-40%} 58%{left:128%} 100%{left:128%} }
-/* 加载灯珠波浪：亮灭 + 缩放，各珠依次延迟 → 流水点亮 */
-@keyframes evg-dot-wave{ 0%,100%{ opacity:.22; transform:scale(.65) } 50%{ opacity:1; transform:scale(1) } }
+/* 加载点阵彩带：上层斜向遮罩流动 1 周期(28/sin55≈34.2px) → 亮带斜扫过绿点阵屏；点阵/底固定 */
+@keyframes evg-led-flow{ from{ background-position:0 0,0 0,0 0 } to{ background-position:34.2px 0,0 0,0 0 } }
 @keyframes evg-blink{ 0%,60%{opacity:1} 61%,100%{opacity:.18} }
 @keyframes evg-ball-breathe{ 0%,100%{ transform:translate(-50%,-50%) scale(0.66); opacity:.4 } 50%{ transform:translate(-50%,-50%) scale(1.3); opacity:.85 } }
 @media (prefers-reduced-motion: reduce){
   .evg-orb{ display:none; }
   .evg-panel{ animation-duration:.01ms; animation-delay:0s; }
-  .evg-bg-band,.evg-glow,.evg-ball-ring,.evg-flash,.evg-tick-row,.evg-dot,.evg-dots i{ animation:none; }
+  .evg-bg-band,.evg-glow,.evg-ball-ring,.evg-flash,.evg-tick-row,.evg-dot,.evg-btn[data-loading="true"]{ animation:none; }
   .evg-btn::after{ animation:none; display:none; }
 }
 `
