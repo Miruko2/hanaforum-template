@@ -387,7 +387,11 @@ const EVG_CSS = `
    core 带 scale 动画走合成层 → 圆边 GPU 抗锯齿、不再锯齿/甜甜圈。 */
 .evg-ball{
   position:fixed; left:18px; bottom:96px; z-index:9998; width:34px; height:34px;
-  border:none; background:none; padding:0; cursor:pointer; color:var(--ink);
+  border:none; background:none; padding:0; cursor:pointer;
+  /* 关键：小球在 .evg-root 外（portal 到 body），拿不到 root 的变量 → 必须自带，
+     否则 core 的 background:var(--acc) 失效变透明 = 只剩外环，看着像甜甜圈 */
+  --acc:#2ee36b; --acc-rgb:46,227,107; --ink:#06140c;
+  color:var(--ink);
   display:flex; align-items:center; justify-content:center;
 }
 .evg-ball-ring{
