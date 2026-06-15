@@ -58,6 +58,8 @@ export default function EmailVerifyGate() {
   const [step, setStep] = useState<"send" | "code">("send")
   const [code, setCode] = useState("")
   const [busy, setBusy] = useState(false)
+  const [errMsg, setErrMsg] = useState("") // 验证码错误提示条文案（空=不显示）
+  const [errKey, setErrKey] = useState(0)  // 每次报错 +1，强制重挂载重放入场动画
 
   const check = useCallback(async () => {
     if (!user) {
@@ -153,7 +155,9 @@ export default function EmailVerifyGate() {
         setStep("send")
         await check()
       } else {
-        toast({ title: "验证失败", description: data.error || "请重试", variant: "destructive" })
+        // 验证码错误/过期 → 弹绝区零红色提示条（替代普通 toast）
+        setErrMsg(data.error || "验证码错误")
+        setErrKey((k) => k + 1)
       }
     } catch (e: any) {
       toast({ title: "验证失败", description: e?.message || "网络错误", variant: "destructive" })
@@ -231,11 +235,17 @@ export default function EmailVerifyGate() {
                     <p className="evg-sub">
                       验证码已发到 <b>{user?.email}</b>
                     </p>
+                    {errMsg && (
+                      <div key={errKey} className="evg-err" role="alert">
+                        <span className="evg-err-haz" aria-hidden />
+                        <span className="evg-err-text">{errMsg}</span>
+                      </div>
+                    )}
                     <div className="evg-code">
                       <input
                         className="evg-code-input"
                         value={code}
-                        onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                        onChange={(e) => { setCode(e.target.value.replace(/\D/g, "").slice(0, 6)); setErrMsg("") }}
                         inputMode="numeric"
                         maxLength={6}
                         autoFocus
@@ -413,6 +423,26 @@ const EVG_CSS = `
 .evg-cell span.on{ background:var(--acc); box-shadow:0 0 3px rgba(var(--acc-rgb),0.85); }
 .evg-cell.is-active span{ background:rgba(var(--acc-rgb),0.18); animation:evg-cell-blink 1s steps(1,end) infinite; }
 .evg-cell.is-active span.on{ background:var(--acc); }
+
+/* 验证码错误提示条：圆球出现→闪动→变白→变红→伸长成暗红长椭圆（hazard 斜纹 + 白字） */
+.evg-err{
+  position:relative; overflow:hidden; box-sizing:border-box;
+  width:100%; height:38px; margin:14px auto 0;
+  display:flex; align-items:center; justify-content:center;
+  border-radius:999px; background:#561414;
+  border:1px solid rgba(255,90,90,0.5); box-shadow:0 0 16px rgba(220,40,40,0.4);
+  animation:evg-err-pop .9s cubic-bezier(0.5,0,0.2,1) both;
+}
+.evg-err-haz{
+  position:absolute; inset:0; border-radius:999px; pointer-events:none;
+  background:repeating-linear-gradient(-45deg, rgba(0,0,0,0.3) 0, rgba(0,0,0,0.3) 9px, transparent 9px, transparent 20px);
+  opacity:0; animation:evg-err-fade .3s ease-out .66s both;
+}
+.evg-err-text{
+  position:relative; z-index:1; color:#fff; font-size:13.5px; font-weight:800; letter-spacing:.08em;
+  white-space:nowrap; text-shadow:0 1px 3px rgba(0,0,0,0.55);
+  opacity:0; animation:evg-err-fade .3s ease-out .7s both;
+}
 .evg-btn{
   position:relative; overflow:hidden; width:100%; margin-top:16px; padding:12px 18px; box-sizing:border-box; border:none;
   display:flex; align-items:center; justify-content:center; min-height:46px;
@@ -491,11 +521,26 @@ const EVG_CSS = `
 @keyframes evg-led-flow{ from{ background-position:0 0,0 0,0 0 } to{ background-position:34.2px 0,0 0,0 0 } }
 @keyframes evg-blink{ 0%,60%{opacity:1} 61%,100%{opacity:.18} }
 @keyframes evg-cell-blink{ 0%,55%{opacity:1} 56%,100%{opacity:.4} }
+/* 错误条入场：小白球→闪→变白→变红→横向伸长成暗红长椭圆（border-radius:999 始终胶囊端） */
+@keyframes evg-err-pop{
+  0%   { width:18px; height:18px; opacity:0; background:#ffffff; box-shadow:0 0 14px rgba(255,255,255,0.75); }
+  5%   { opacity:1; }
+  9%   { opacity:.4; }
+  13%  { opacity:1; }
+  17%  { opacity:.4; }
+  22%  { opacity:1; background:#ffffff; }
+  29%  { width:18px; height:18px; background:#ffffff; }
+  37%  { width:22px; height:22px; background:#ff4d4d; box-shadow:0 0 18px rgba(255,70,70,0.7); }
+  47%  { width:22px; height:22px; background:#8a1f1f; }
+  100% { width:100%; height:38px; background:#561414; box-shadow:0 0 16px rgba(220,40,40,0.4); }
+}
+@keyframes evg-err-fade{ from{opacity:0} to{opacity:1} }
 @keyframes evg-ball-breathe{ 0%,100%{ transform:translate(-50%,-50%) scale(0.66); opacity:.4 } 50%{ transform:translate(-50%,-50%) scale(1.3); opacity:.85 } }
 @media (prefers-reduced-motion: reduce){
   .evg-orb{ display:none; }
   .evg-panel{ animation-duration:.01ms; animation-delay:0s; }
-  .evg-bg-band,.evg-glow,.evg-ball-ring,.evg-flash,.evg-tick-row,.evg-dot,.evg-btn[data-loading="true"],.evg-cell.is-active span{ animation:none; }
+  .evg-bg-band,.evg-glow,.evg-ball-ring,.evg-flash,.evg-tick-row,.evg-dot,.evg-btn[data-loading="true"],.evg-cell.is-active span,.evg-err{ animation:none; }
+  .evg-err-haz,.evg-err-text{ animation:none; opacity:1; }
   .evg-btn::after{ animation:none; display:none; }
 }
 `
