@@ -196,7 +196,11 @@ export default function EmailVerifyGate() {
                       向 <b>{user?.email}</b> 发送 6 位验证码
                     </p>
                     <button type="button" className="evg-btn" onClick={handleSend} disabled={busy} data-loading={busy || undefined}>
-                      <span className="evg-btn-cv" aria-hidden>»</span>{busy ? "发送中..." : "发送验证码"}
+                      {busy ? (
+                        <span className="evg-dots" aria-hidden><i /><i /><i /><i /><i /></span>
+                      ) : (
+                        <><span className="evg-btn-cv" aria-hidden>»</span>发送验证码</>
+                      )}
                     </button>
                   </>
                 ) : (
@@ -214,7 +218,11 @@ export default function EmailVerifyGate() {
                       autoFocus
                     />
                     <button type="button" className="evg-btn" onClick={handleVerify} disabled={busy} data-loading={busy || undefined}>
-                      <span className="evg-btn-cv" aria-hidden>»</span>{busy ? "验证中..." : "验证"}
+                      {busy ? (
+                        <span className="evg-dots" aria-hidden><i /><i /><i /><i /><i /></span>
+                      ) : (
+                        <><span className="evg-btn-cv" aria-hidden>»</span>验证</>
+                      )}
                     </button>
                     <button type="button" className="evg-btn-ghost" onClick={handleSend} disabled={busy}>
                       重新发送
@@ -380,14 +388,17 @@ const EVG_CSS = `
 .evg-btn:active:not(:disabled){ transform:translateY(1px); }
 .evg-btn:disabled{ opacity:.5; cursor:default; box-shadow:none; }
 .evg-btn:disabled::after{ display:none; }
-/* 加载态：保持亮绿不变灰，背景跑斜向警告条纹（百叶窗无缝循环）；斜纹层流动、绿底固定 */
+/* 加载态：背景灰黑，中间一排绿色发光灯珠波浪流水点亮（ascii/LED 点阵感，无文字） */
 .evg-btn[data-loading="true"]{
-  opacity:1; box-shadow:0 6px 18px rgba(var(--acc-rgb),0.28);
-  background:
-    repeating-linear-gradient(-55deg, rgba(0,0,0,0.24) 0, rgba(0,0,0,0.24) 12px, transparent 12px, transparent 24px),
-    var(--acc);
-  animation:evg-btn-haz .6s linear infinite;
+  opacity:1; box-shadow:0 6px 18px rgba(0,0,0,0.35);
+  background:#16181b;
 }
+.evg-dots{ display:inline-flex; gap:7px; align-items:center; justify-content:center; }
+.evg-dots i{ width:9px; height:9px; border-radius:50%; background:var(--acc); box-shadow:0 0 7px rgba(var(--acc-rgb),0.85); animation:evg-dot-wave 1.1s ease-in-out infinite; }
+.evg-dots i:nth-child(2){ animation-delay:.13s }
+.evg-dots i:nth-child(3){ animation-delay:.26s }
+.evg-dots i:nth-child(4){ animation-delay:.39s }
+.evg-dots i:nth-child(5){ animation-delay:.52s }
 .evg-btn-ghost{ margin-top:12px; background:none; border:none; color:var(--acc); font-size:13px; cursor:pointer; }
 .evg-btn-ghost:disabled{ opacity:.5; cursor:default; }
 .evg-serial{ position:absolute; left:0; right:0; bottom:9px; z-index:3; text-align:center; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:9px; letter-spacing:.14em; color:rgba(var(--soft-rgb),0.34); pointer-events:none; }
@@ -438,14 +449,14 @@ const EVG_CSS = `
 @keyframes evg-tickL{ from{transform:translateX(0)} to{transform:translateX(-50%)} }
 @keyframes evg-tickR{ from{transform:translateX(-50%)} to{transform:translateX(0)} }
 @keyframes evg-sheen{ 0%{left:-40%} 58%{left:128%} 100%{left:128%} }
-/* 加载按钮：斜纹层滚动正好 1 周期(24px / sin55° ≈ 29.3px) → 无缝；绿底层固定 */
-@keyframes evg-btn-haz{ from{ background-position:0 0, 0 0 } to{ background-position:29.3px 0, 0 0 } }
+/* 加载灯珠波浪：亮灭 + 缩放，各珠依次延迟 → 流水点亮 */
+@keyframes evg-dot-wave{ 0%,100%{ opacity:.22; transform:scale(.65) } 50%{ opacity:1; transform:scale(1) } }
 @keyframes evg-blink{ 0%,60%{opacity:1} 61%,100%{opacity:.18} }
 @keyframes evg-ball-breathe{ 0%,100%{ transform:translate(-50%,-50%) scale(0.66); opacity:.4 } 50%{ transform:translate(-50%,-50%) scale(1.3); opacity:.85 } }
 @media (prefers-reduced-motion: reduce){
   .evg-orb{ display:none; }
   .evg-panel{ animation-duration:.01ms; animation-delay:0s; }
-  .evg-bg-band,.evg-glow,.evg-ball-ring,.evg-flash,.evg-tick-row,.evg-dot,.evg-btn[data-loading="true"]{ animation:none; }
+  .evg-bg-band,.evg-glow,.evg-ball-ring,.evg-flash,.evg-tick-row,.evg-dot,.evg-dots i{ animation:none; }
   .evg-btn::after{ animation:none; display:none; }
 }
 `
