@@ -50,9 +50,20 @@ function WaterFilters() {
                 seed={2}
                 result="noise"
               />
+              {/* 把驱动「水平位移」的 R 通道方差压到 ~25%、仍居中于 0.5（R' = 0.25R + 0.375）。
+                  原因：feDisplacementMap 的 x/y 共用一个 scale，噪声在一行文字范围内的净偏移
+                  会把整行横向推离中心，scale 越大（远处行 6→11→17）推得越狠 = 「越远越偏」。
+                  压扁 R 后水波以「纵向起伏」为主、横向只剩轻微微光，歌词行钉回中线；
+                  G 通道（纵向位移）保持满量，水面感与原先一致。 */}
+              <feColorMatrix
+                in="noise"
+                type="matrix"
+                values="0.25 0 0 0 0.375  0 1 0 0 0  0 0 1 0 0  0 0 0 1 0"
+                result="shaped"
+              />
               <feDisplacementMap
                 in="SourceGraphic"
-                in2="noise"
+                in2="shaped"
                 scale={scale}
                 xChannelSelector="R"
                 yChannelSelector="G"
