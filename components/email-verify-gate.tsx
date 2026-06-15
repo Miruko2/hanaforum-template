@@ -268,10 +268,11 @@ const EVG_CSS = `
 
 /* 入场圆球：真·圆形，坠落→落定→炸开淡出 */
 .evg-orb{
-  position:absolute; left:50%; top:50%; width:44px; height:44px; border-radius:50%;
-  /* 同样羽化边缘：scale(6) 炸开时硬边会放大成锯齿，渐变边则始终干净 */
-  background:radial-gradient(circle at 50% 50%, var(--acc) 0, var(--acc) calc(50% - 1.2px), transparent calc(50% - 0.2px));
-  box-shadow:0 0 26px rgba(var(--acc-rgb),0.65);
+  position:absolute; left:50%; top:50%; width:34px; height:34px; border-radius:50%;
+  /* 纯实心绿球（坠落 → 炸开成弹窗）。orb 本就带 transform 动画(坠落+scale)走合成层、
+     圆边 GPU 抗锯齿，不需要 radial 羽化——羽化=实心+透明边+外发光叠成「甜甜圈」，正是之前看着丑的根因 */
+  background:var(--acc);
+  box-shadow:0 0 18px rgba(var(--acc-rgb),0.6);
   transform:translate(-50%,-50%); pointer-events:none;
   animation:evg-orb .82s cubic-bezier(0.2,0.9,0.3,1) both;
 }
