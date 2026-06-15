@@ -149,10 +149,10 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
     [seek],
   )
 
-  // Use the actual dominant cover color
-  const extracted = useDominantHue(
-    currentTrack?.userProvided ? null : currentTrack?.cover ?? null,
-  )
+  // Actual dominant cover color. User tracks extract too now: NetEase-imported
+  // covers go through the proxy, own-CDN uploads load direct (CORS) — both far
+  // better than the old id-hash hue, which had nothing to do with the artwork.
+  const extracted = useDominantHue(currentTrack?.cover ?? null)
   const hue = extracted ?? currentTrack?.hue ?? 0
 
   // Android WebView（app）：彻底去掉播放器的 backdrop-filter。

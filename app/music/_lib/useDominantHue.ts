@@ -2,27 +2,42 @@
 
 import { useEffect, useState } from "react"
 import { apiUrl } from "@/lib/api-base"
+import { cdnUrl } from "@/lib/cdn-url"
 
 /**
- * Extracts the dominant hue (0..359) from a remote cover image.
+ * Extracts the DOMINANT hue (0..359) from a remote cover image.
  *
- * How:
- *   1. Loads the image through /api/img-proxy so it's same-origin (NetEase CDN
- *      doesn't return CORS headers, so a direct <img> taints the canvas).
- *   2. Draws it into a 16×16 canvas — small enough that the pixel loop is
- *      essentially free and aliasing already averages out tiny details.
- *   3. Skips near-grayscale and near-black/white pixels (they don't contribute
- *      to perceived hue), then averages the remaining hues as unit vectors
- *      weighted by saturation. Vector averaging is the only correct way to
- *      average angles — naive arithmetic mean breaks across the 360°/0° seam.
+ * "Dominant", not "average": this used to average every saturated pixel's hue
+ * as a unit vector. On a multi-color cover that mean lands *between* the real
+ * colors — a blue cover with warm skin/accent tones averages to a muddy green
+ * that matches nothing on screen (the bug: the player/detail accent didn't look
+ * like the art). Instead we build a saturation-weighted hue histogram and return
+ * the centroid of the most-populated cluster, so the result is an actual
+ * prominent color, not a blend of opposite ones.
+ *
+ * Loading strategy (canvas getImageData needs an untainted, readable image):
+ *   · NetEase covers (music.126.net) send no CORS headers → routed through
+ *     /api/img-proxy (host-allow-listed) so they come back same-origin. Covers
+ *     built-in tracks AND user tracks imported from NetEase.
+ *   · Everything else (user uploads on Supabase / the img CDN, which both send
+ *     `Access-Control-Allow-Origin: *`) loads directly with crossOrigin. We do
+ *     NOT proxy these: the proxy fetches server-side and these URLs are
+ *     user-controlled (SSRF). Going through cdnUrl() also reuses the CF edge
+ *     cache, so extraction adds no Supabase egress. A non-CORS / unreachable
+ *     cover simply taints or errors → null → caller keeps its seeded fallback.
  *
  * Returns:
  *   - undefined while loading (caller should fall back to a default hue)
  *   - null if extraction failed or the image is effectively colorless
  *   - number 0..359 on success
  */
-const SAMPLE_SIZE = 16
+const SAMPLE_SIZE = 24 // 16→24: the histogram wants a few more samples than the old mean did
+const HUE_BINS = 36 // 10° per bin
 const cache = new Map<string, number | null>()
+
+function isNetease(url: string): boolean {
+  return /music\.126\.net/i.test(url)
+}
 
 export function useDominantHue(coverUrl: string | null | undefined): number | null | undefined {
   const [hue, setHue] = useState<number | null | undefined>(() =>
@@ -59,9 +74,13 @@ export function useDominantHue(coverUrl: string | null | undefined): number | nu
         ctx.drawImage(img, 0, 0, SAMPLE_SIZE, SAMPLE_SIZE)
         const { data } = ctx.getImageData(0, 0, SAMPLE_SIZE, SAMPLE_SIZE)
 
-        let sumX = 0
-        let sumY = 0
-        let weight = 0
+        // Saturation-weighted hue histogram. Per bin we keep both the weight
+        // (to locate the dominant cluster) and the summed unit vectors (to
+        // recover that cluster's precise hue without the 360°/0° seam problem).
+        const binW = new Float64Array(HUE_BINS)
+        const binX = new Float64Array(HUE_BINS)
+        const binY = new Float64Array(HUE_BINS)
+        const binSize = 360 / HUE_BINS
         for (let i = 0; i < data.length; i += 4) {
           const r = data[i]
           const g = data[i + 1]
@@ -70,8 +89,7 @@ export function useDominantHue(coverUrl: string | null | undefined): number | nu
           const min = Math.min(r, g, b)
           const delta = max - min
           const lum = (r + g + b) / 3
-          // Skip near-grayscale / very dark / very bright pixels — they carry
-          // almost no hue information and would bias the average toward 0.
+          // Skip near-grayscale / very dark / very bright pixels — no hue signal.
           if (delta < 30 || lum < 28 || lum > 228) continue
           let h: number
           if (max === r) h = ((g - b) / delta) % 6
@@ -79,20 +97,44 @@ export function useDominantHue(coverUrl: string | null | undefined): number | nu
           else h = (r - g) / delta + 4
           h *= 60
           if (h < 0) h += 360
-          // Weight by saturation so vivid pixels matter more than washed-out
-          // ones. Range [0, 1].
+          // Weight vivid pixels more than washed-out ones.
           const sat = max === 0 ? 0 : delta / max
           const rad = (h * Math.PI) / 180
-          sumX += Math.cos(rad) * sat
-          sumY += Math.sin(rad) * sat
-          weight += sat
+          let bin = Math.floor(h / binSize)
+          if (bin >= HUE_BINS) bin = HUE_BINS - 1
+          binW[bin] += sat
+          binX[bin] += Math.cos(rad) * sat
+          binY[bin] += Math.sin(rad) * sat
         }
-        if (weight < 0.5) {
+
+        let total = 0
+        for (let b = 0; b < HUE_BINS; b++) total += binW[b]
+        if (total < 0.5) {
           cache.set(coverUrl, null)
           setHue(null)
           return
         }
-        const angle = (Math.atan2(sumY, sumX) * 180) / Math.PI
+
+        // Dominant cluster = the bin whose ±1 neighborhood holds the most weight
+        // (a 3-bin / 30° window so a color straddling a bin edge isn't split in
+        // two and beaten by a lesser-but-undivided color).
+        let best = 0
+        let bestScore = -1
+        for (let b = 0; b < HUE_BINS; b++) {
+          const prev = (b - 1 + HUE_BINS) % HUE_BINS
+          const next = (b + 1) % HUE_BINS
+          const score = binW[prev] + binW[b] + binW[next]
+          if (score > bestScore) {
+            bestScore = score
+            best = b
+          }
+        }
+        // Precise hue = vector centroid of the winning 3-bin cluster (seam-safe).
+        const prev = (best - 1 + HUE_BINS) % HUE_BINS
+        const next = (best + 1) % HUE_BINS
+        const X = binX[prev] + binX[best] + binX[next]
+        const Y = binY[prev] + binY[best] + binY[next]
+        const angle = (Math.atan2(Y, X) * 180) / Math.PI
         const result = Math.round((angle + 360) % 360)
         cache.set(coverUrl, result)
         setHue(result)
@@ -106,13 +148,19 @@ export function useDominantHue(coverUrl: string | null | undefined): number | nu
       cache.set(coverUrl, null)
       setHue(null)
     }
-    // 取色只采 16×16：网易直链自带 param=WxH 缩图参数时换成 64y64 小图再走代理 ——
-    // 代理拉取/中转的字节数缩 ~40 倍（Vercel egress / 函数耗时双降），色相结果不变。
-    // 缓存键仍用原始 coverUrl，对调用方透明。
-    const sampleUrl = /music\.126\.net/i.test(coverUrl)
-      ? coverUrl.replace(/\bparam=\d+y\d+/, "param=64y64")
-      : coverUrl
-    img.src = apiUrl(`/api/img-proxy?url=${encodeURIComponent(sampleUrl)}`)
+
+    if (isNetease(coverUrl)) {
+      // NetEase: no CORS → same-origin proxy. Downscale via the CDN's own param
+      // (64×64 is plenty for a 24px sample) so the proxy moves ~40× fewer bytes.
+      // Cache key stays the original coverUrl, transparent to callers.
+      const sampleUrl = coverUrl.replace(/\bparam=\d+y\d+/, "param=64y64")
+      img.src = apiUrl(`/api/img-proxy?url=${encodeURIComponent(sampleUrl)}`)
+    } else {
+      // User / own-CDN cover: CORS-enabled (Supabase + CF Worker set ACAO:*).
+      // Load direct through cdnUrl() — no server proxy (no SSRF on user URLs),
+      // reuses the edge cache (no extra Supabase egress).
+      img.src = cdnUrl(coverUrl) || coverUrl
+    }
 
     return () => {
       cancelled = true

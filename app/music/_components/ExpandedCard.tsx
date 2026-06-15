@@ -215,11 +215,11 @@ function ExpandedInner({
     [tracks, shown.id, play],
   )
 
-  // Cover-derived hue overrides the seeded random hue from playlist.json.
-  // While extracting (undefined) or on failure (null) we fall back to shown.hue
-  // so the UI never goes monochrome.
-  // 用户自定义曲目跳过 img-proxy 取色（避免服务端 fetch 任意 URL，SSRF 安全）。
-  const extracted = useDominantHue(shown.userProvided ? null : shown.cover)
+  // Cover-derived hue overrides the seeded hue from playlist.json (and the id-hash
+  // hue of user tracks). While extracting (undefined) or on failure (null) we fall
+  // back to shown.hue so the UI never goes monochrome.
+  // 用户自定义封面也取色：自有 CDN 给 CORS，客户端直取、不经 img-proxy（无 SSRF）。
+  const extracted = useDominantHue(shown.cover ?? null)
   const hue = extracted ?? shown.hue
   // Thumb position (only shown while scrubbing).
   const thumbAngle = pct * 2 * Math.PI - Math.PI / 2

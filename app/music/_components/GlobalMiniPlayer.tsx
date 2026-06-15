@@ -199,10 +199,8 @@ export function GlobalMiniPlayer() {
   }, [])
   const fullW = Math.min(360, vw - 96)
 
-  // 与底部播放器一致：取封面主色驱动进度条/图标着色
-  const extracted = useDominantHue(
-    currentTrack?.userProvided ? null : currentTrack?.cover ?? null,
-  )
+  // 与底部播放器一致：取封面主色驱动进度条/图标着色（用户曲目封面也取色，见 useDominantHue）
+  const extracted = useDominantHue(currentTrack?.cover ?? null)
   const hue = extracted ?? currentTrack?.hue ?? 0
 
   // 安卓 WebView：去 backdrop-filter，换近实底（同底部播放器策略，避免合成器鬼影）
