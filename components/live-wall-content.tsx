@@ -12,6 +12,7 @@ import { supabase } from "@/lib/supabaseClient"
 import { apiUrl } from "@/lib/api-base"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useToast } from "@/hooks/use-toast"
+import { guardVerify } from "@/lib/verify-gate-bus"
 import LiveHostStage from "./live-host-stage"
 import {
   TRIGGER_REGEX,
@@ -552,6 +553,9 @@ export default function LiveWallContent() {
       return
     }
     if (content.length > MAX_LENGTH) return
+
+    // 懒触发邮箱验证：未验证 → 弹验证窗并中止本次发送（DB 触发器仍兜底）
+    if (guardVerify()) return
 
     try {
       setSending(true)

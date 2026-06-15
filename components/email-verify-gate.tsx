@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabaseClient"
 import { apiUrl } from "@/lib/api-base"
 import { useToast } from "@/hooks/use-toast"
 import { MailCheck, X } from "lucide-react"
+import { setVerifyNeeded, EVG_OPEN_EVENT } from "@/lib/verify-gate-bus"
 
 // 卡内斜向交错文字流：每行=一段重复短语，渲染两份 → translateX -50% 无缝循环。
 // 倾斜「╲」与移动轴一致：上段沿 ╲ 向左上流，下段向右下流，自然不违和。
@@ -53,6 +54,9 @@ export default function EmailVerifyGate() {
   const { toast } = useToast()
 
   const [needsVerify, setNeedsVerify] = useState(false)
+  // 懒触发：是否已被某个写操作（发帖/发弹幕）显式触发过。注册完/平时为 false → 不显示；
+  // 只有 guardVerify() 派发 evg:open 后才置 true、弹出验证窗（含坠落球→面板）。
+  const [triggered, setTriggered] = useState(false)
   const [open, setOpen] = useState(true)
   const [openCount, setOpenCount] = useState(0)
   const [step, setStep] = useState<"send" | "code">("send")
@@ -64,6 +68,7 @@ export default function EmailVerifyGate() {
   const check = useCallback(async () => {
     if (!user) {
       setNeedsVerify(false)
+      setVerifyNeeded(false)
       return
     }
     try {
@@ -91,14 +96,30 @@ export default function EmailVerifyGate() {
         !!createdAt &&
         createdAt > enforceSince
       setNeedsVerify(need)
+      setVerifyNeeded(need) // 同步给总线，供发帖/发弹幕入口在提交前同步判断是否拦截
     } catch {
       setNeedsVerify(false)
+      setVerifyNeeded(false)
     }
   }, [user])
 
   useEffect(() => {
     check()
   }, [check])
+
+  // 懒触发：监听全局 evg:open（发帖/发弹幕时由 guardVerify 派发）→ 弹出验证窗。
+  // 注册完 / 平时不会自动弹，只有用户真正要发言时才弹。
+  useEffect(() => {
+    const onOpen = () => {
+      setErrMsg("")
+      setStep("send")
+      setTriggered(true)
+      setOpen(true)
+      setOpenCount((c) => c + 1)
+    }
+    window.addEventListener(EVG_OPEN_EVENT, onOpen)
+    return () => window.removeEventListener(EVG_OPEN_EVENT, onOpen)
+  }, [])
 
   const getToken = useCallback(async () => {
     const { data } = await supabase.auth.getSession()
@@ -166,7 +187,8 @@ export default function EmailVerifyGate() {
     }
   }
 
-  if (!needsVerify || typeof document === "undefined") return null
+  // triggered=false（注册完/平时）即使 needsVerify 也不显示 —— 懒触发的关键开关
+  if (!needsVerify || !triggered || typeof document === "undefined") return null
 
   const minimize = () => setOpen(false)
   const expand = () => {

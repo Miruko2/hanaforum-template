@@ -20,6 +20,7 @@ import { compressImage } from "@/lib/image-compress"
 import { postThumbName, POST_THUMB_EDGE } from "@/lib/post-image-thumb"
 import { postImageList, postsHaveImageUrls } from "@/lib/post-images"
 import { cdnUrl } from "@/lib/cdn-url"
+import { guardVerify } from "@/lib/verify-gate-bus"
 import ImageLightbox from "@/components/image-lightbox"
 
 interface CreatePostModalProps {
@@ -239,6 +240,12 @@ export function CreatePostForm({
         description: "请填写标题、分类和内容",
         variant: "destructive",
       })
+      return
+    }
+
+    // 懒触发邮箱验证：仅新建帖子时拦。未验证 → 弹验证窗并中止本次发布
+    // （编辑已有帖子不拦；DB 触发器 block_unverified_write 仍是最终兜底）。
+    if (!isEditMode && guardVerify()) {
       return
     }
 
