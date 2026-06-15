@@ -291,9 +291,9 @@ const EVG_CSS = `
 .evg-inner{
   position:relative; overflow:hidden; box-sizing:border-box;
   padding:42px 28px 32px;
-  background:linear-gradient(165deg, rgba(14,30,20,0.98), rgba(5,14,9,0.99));
+  background:linear-gradient(165deg, rgba(24,26,30,0.985), rgba(12,13,16,0.99));
   clip-path:polygon(0 0, calc(100% - var(--notch)) 0, 100% var(--notch), 100% 100%, var(--notch) 100%, 0 calc(100% - var(--notch)));
-  color:#e7f6ec; text-align:center;
+  color:#e6e8eb; text-align:center;
 }
 
 /* 卡内斜向文字流：沿 ╲ 轴流动；上段→左上，下段→右下；2 份内容 translateX -50% 无缝 */
@@ -301,8 +301,8 @@ const EVG_CSS = `
 .evg-tick-row{
   display:inline-block; white-space:nowrap;
   font-size:clamp(22px,5.4vw,38px); font-weight:900; font-style:italic; letter-spacing:.05em;
-  color:rgba(var(--soft-rgb),0.05);
-  -webkit-text-stroke:1px rgba(var(--soft-rgb),0.085);
+  color:rgba(208,214,220,0.05);
+  -webkit-text-stroke:1px rgba(208,214,220,0.075);
   will-change:transform;
 }
 .evg-tick-1{ top:11%; transform:rotate(15deg); }
@@ -317,13 +317,13 @@ const EVG_CSS = `
 .evg-tex{
   position:absolute; inset:0; pointer-events:none; opacity:.5; z-index:1;
   background-image:
-    radial-gradient(circle, rgba(var(--soft-rgb),0.10) 1px, transparent 1.2px),
+    radial-gradient(circle, rgba(255,255,255,0.05) 1px, transparent 1.2px),
     repeating-linear-gradient(0deg, rgba(0,0,0,0.18) 0, rgba(0,0,0,0.18) 1px, transparent 1px, transparent 5px);
   background-size:14px 14px, auto;
 }
 .evg-glow{
   position:absolute; inset:0; pointer-events:none; z-index:1;
-  background:radial-gradient(120% 62% at 50% 0%, rgba(var(--acc-rgb),0.18), transparent 62%);
+  background:radial-gradient(120% 62% at 50% 0%, rgba(var(--acc-rgb),0.12), transparent 62%);
   opacity:.7; animation:evg-flicker 3.4s ease-in-out 1.2s infinite;
 }
 .evg-corner{ position:absolute; width:14px; height:14px; border:2px solid var(--acc); opacity:.7; pointer-events:none; z-index:3; }
@@ -349,16 +349,16 @@ const EVG_CSS = `
 .evg-head-label{ font-family:ui-monospace,Menlo,Consolas,monospace; font-size:10px; font-weight:700; letter-spacing:.12em; color:#9fe0b6; white-space:nowrap; }
 .evg-head-stat{ margin-left:auto; display:inline-flex; align-items:center; gap:5px; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:9.5px; font-weight:700; letter-spacing:.1em; color:#c2f3d3; }
 .evg-dot{ width:6px; height:6px; border-radius:50%; background:var(--acc); box-shadow:0 0 7px rgba(var(--acc-rgb),0.9); animation:evg-blink 1.6s steps(1,end) infinite; }
-.evg-close{ background:none; border:none; color:#9fd9b4; cursor:pointer; line-height:0; opacity:.8; padding:0; }
+.evg-close{ background:none; border:none; color:#aeb4bb; cursor:pointer; line-height:0; opacity:.8; padding:0; }
 .evg-close:hover{ opacity:1; }
 
 .evg-body{ position:relative; z-index:3; animation:evg-content-in .34s ease-out .72s both; }
 .evg-icon{ width:30px; height:30px; color:var(--acc); display:block; margin:2px auto 8px; filter:drop-shadow(0 0 7px rgba(var(--acc-rgb),0.6)); }
 .evg-chip{ display:inline-flex; align-items:center; padding:3px 11px; border-radius:3px; background:var(--acc); color:var(--ink); font-size:10.5px; font-weight:800; font-style:italic; letter-spacing:.22em; text-transform:uppercase; }
-.evg-title{ position:relative; font-size:20px; font-weight:800; font-style:italic; letter-spacing:.03em; color:#ecfccb; margin:11px 0 6px; }
+.evg-title{ position:relative; font-size:20px; font-weight:800; font-style:italic; letter-spacing:.03em; color:#eef1f4; margin:11px 0 6px; }
 .evg-title::after{ content:attr(data-text); position:absolute; left:50%; top:0; transform:translate(-50%,0) translate(2px,1.5px); color:rgba(var(--acc-rgb),0.4); z-index:-1; pointer-events:none; }
-.evg-sub{ font-size:13px; color:#9fc3ab; margin:0; line-height:1.6; }
-.evg-sub b{ color:#d9f99d; font-weight:700; }
+.evg-sub{ font-size:13px; color:#a6aeb6; margin:0; line-height:1.6; }
+.evg-sub b{ color:#e8edf1; font-weight:700; }
 .evg-input{
   display:block; width:100%; margin-top:16px; padding:11px 14px; box-sizing:border-box;
   border:1px solid rgba(var(--acc-rgb),0.4); background:rgba(4,12,8,0.7); color:#fff;
