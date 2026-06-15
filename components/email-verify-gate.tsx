@@ -229,7 +229,7 @@ export default function EmailVerifyGate() {
         </div>
       ) : (
         <button type="button" className="evg-ball" aria-label="验证邮箱" onClick={expand}>
-          <MailCheck style={{ width: 17, height: 17 }} />
+          <MailCheck style={{ width: 13, height: 13 }} />
         </button>
       )}
     </>,
@@ -256,19 +256,20 @@ const EVG_CSS = `
 }
 .evg-bg-band{
   position:absolute; left:-25%; right:-25%; height:40px; opacity:.09;
-  transform:rotate(-12deg); will-change:transform; pointer-events:none;
+  transform:rotate(-12deg); pointer-events:none;
   background:repeating-linear-gradient(-55deg,
     rgba(var(--acc-rgb),0.9) 0, rgba(var(--acc-rgb),0.9) 12px,
     transparent 12px, transparent 28px);
 }
-.evg-bg-band-1{ top:24%; animation:evg-march 1.9s linear infinite; }
-.evg-bg-band-2{ bottom:22%; animation:evg-march-rev 2.5s linear infinite; }
+.evg-bg-band-1{ top:24%; animation:evg-flow 2.4s linear infinite; }
+.evg-bg-band-2{ bottom:22%; animation:evg-flow-rev 3s linear infinite; }
 .evg-flash{ position:absolute; inset:0; background:var(--flash); opacity:0; pointer-events:none; animation:evg-flash .5s ease-out .04s both; }
 
 /* 入场圆球：真·圆形，坠落→落定→炸开淡出 */
 .evg-orb{
   position:absolute; left:50%; top:50%; width:44px; height:44px; border-radius:50%;
-  background:var(--acc);
+  /* 同样羽化边缘：scale(6) 炸开时硬边会放大成锯齿，渐变边则始终干净 */
+  background:radial-gradient(circle at 50% 50%, var(--acc) 0, var(--acc) calc(50% - 1.2px), transparent calc(50% - 0.2px));
   box-shadow:0 0 26px rgba(var(--acc-rgb),0.65);
   transform:translate(-50%,-50%); pointer-events:none;
   animation:evg-orb .82s cubic-bezier(0.2,0.9,0.3,1) both;
@@ -381,11 +382,12 @@ const EVG_CSS = `
 .evg-serial{ position:absolute; left:0; right:0; bottom:9px; z-index:3; text-align:center; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:9px; letter-spacing:.14em; color:rgba(var(--soft-rgb),0.34); pointer-events:none; }
 
 .evg-ball{
-  position:fixed; left:18px; bottom:96px; z-index:9998; width:38px; height:38px; border-radius:50%;
+  position:fixed; left:18px; bottom:96px; z-index:9998; width:30px; height:30px; border-radius:50%;
   border:none; color:var(--ink); cursor:pointer;
-  background:var(--acc);
+  /* 用 radial 羽化边缘（渐变边，无几何硬边）→ 任何 DPR 都不锯齿，主体仍纯色 */
+  background:radial-gradient(circle at 50% 50%, var(--acc) 0, var(--acc) calc(50% - 1.2px), transparent calc(50% - 0.2px));
   display:flex; align-items:center; justify-content:center;
-  box-shadow:0 6px 16px rgba(0,0,0,0.4), 0 0 16px rgba(var(--acc-rgb),0.5);
+  box-shadow:0 5px 14px rgba(0,0,0,0.4), 0 0 13px rgba(var(--acc-rgb),0.5);
   animation:evg-ball-pulse 2.4s ease-in-out infinite;
 }
 
@@ -402,10 +404,11 @@ const EVG_CSS = `
 @keyframes evg-panel-in{ from{opacity:0; transform:translate(-50%,-50%) scale(0.36)} to{opacity:1; transform:translate(-50%,-50%) scale(1)} }
 @keyframes evg-content-in{ from{opacity:0; transform:translateY(9px)} to{opacity:1; transform:none} }
 @keyframes evg-flicker{ 0%,100%{opacity:.55} 45%{opacity:.85} 72%{opacity:.62} }
-/* 警告带：沿条纹法向平移「正好 1 个周期(28px)」→ 首尾图案重合，无缝循环、不再跳位。
-   22.9/16.1 = 28 × (-55° 渐变方向单位向量)；rotate 必须写进关键帧，否则覆盖基础 transform */
-@keyframes evg-march{ from{transform:rotate(-12deg) translate(0,0)} to{transform:rotate(-12deg) translate(22.9px,16.1px)} }
-@keyframes evg-march-rev{ from{transform:rotate(-12deg) translate(0,0)} to{transform:rotate(-12deg) translate(-22.9px,-16.1px)} }
+/* 警告带：带子本身固定不动，只让内部斜条纹沿法向「流动」——滚动 background-position 正好
+   1 个周期(28px) → 首尾图案重合、无缝。22.9/16.1 = 28 × (-55° 渐变方向单位向量)。
+   band-1 朝左上、band-2 朝右下，两条互相斜向错动（而非整条带子上下平移）。 */
+@keyframes evg-flow{ from{background-position:0 0} to{background-position:-22.9px -16.1px} }
+@keyframes evg-flow-rev{ from{background-position:0 0} to{background-position:22.9px 16.1px} }
 /* 斜向文字：沿自身基线方向流；-50% = 平移 1 份内容 → 无缝；tickL 向左上、tickR 向右下 */
 @keyframes evg-tickL{ from{transform:translateX(0)} to{transform:translateX(-50%)} }
 @keyframes evg-tickR{ from{transform:translateX(-50%)} to{transform:translateX(0)} }
