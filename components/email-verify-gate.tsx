@@ -8,6 +8,11 @@ import { apiUrl } from "@/lib/api-base"
 import { useToast } from "@/hooks/use-toast"
 import { MailCheck, X } from "lucide-react"
 
+// 背景纵向交错滚动的「水印文字」流（绝区零味）：相邻 lane 方向相反。
+const STREAM_A = ["認証", "VERIFY", "ACCESS", "HANAKO", "OTP", "SECURE", "萤火虫之国", "CODE", "認証", "VERIFY", "SECURE", "ACCESS"]
+const STREAM_B = ["VERIFY", "萤火虫之国", "CODE", "認証", "ACCESS", "HANAKO", "SECURE", "OTP", "VERIFY", "認証", "ACCESS", "CODE"]
+const STREAM_C = ["ACCESS", "認証", "HANAKO", "VERIFY", "SECURE", "萤火虫之国", "CODE", "OTP", "ACCESS", "認証", "VERIFY", "SECURE"]
+
 /**
  * 邮箱验证门禁（懒触发 OTP）—— 绝区零风格弹窗。
  * 视觉与页面转场（PageRibbonTransition / globals.css .ptr-*）同源，但走「深色高对比 +
@@ -144,6 +149,21 @@ export default function EmailVerifyGate() {
       {open ? (
         <div className="evg-root" role="dialog" aria-modal="true" aria-label="验证邮箱">
           <div className="evg-backdrop" onClick={minimize}>
+            <span className="evg-stream evg-stream-a" aria-hidden>
+              <span className="evg-stream-track">
+                {[...STREAM_A, ...STREAM_A].map((w, i) => <i key={i}>{w}</i>)}
+              </span>
+            </span>
+            <span className="evg-stream evg-stream-b" aria-hidden>
+              <span className="evg-stream-track">
+                {[...STREAM_B, ...STREAM_B].map((w, i) => <i key={i}>{w}</i>)}
+              </span>
+            </span>
+            <span className="evg-stream evg-stream-c" aria-hidden>
+              <span className="evg-stream-track">
+                {[...STREAM_C, ...STREAM_C].map((w, i) => <i key={i}>{w}</i>)}
+              </span>
+            </span>
             <span className="evg-bg-band evg-bg-band-1" aria-hidden />
             <span className="evg-bg-band evg-bg-band-2" aria-hidden />
             <span className="evg-flash" aria-hidden />
@@ -203,7 +223,7 @@ export default function EmailVerifyGate() {
         </div>
       ) : (
         <button type="button" className="evg-ball" aria-label="验证邮箱" onClick={expand}>
-          <MailCheck style={{ width: 22, height: 22 }} />
+          <MailCheck style={{ width: 17, height: 17 }} />
         </button>
       )}
     </>,
@@ -234,15 +254,32 @@ const EVG_CSS = `
     rgba(var(--acc-rgb),0.9) 0, rgba(var(--acc-rgb),0.9) 12px,
     transparent 12px, transparent 28px);
 }
-.evg-bg-band-1{ top:24%; animation:evg-drift 4.2s linear infinite; }
-.evg-bg-band-2{ bottom:22%; animation:evg-drift-rev 5s linear infinite; }
+.evg-bg-band-1{ top:24%; animation:evg-march 1.9s linear infinite; }
+.evg-bg-band-2{ bottom:22%; animation:evg-march-rev 2.5s linear infinite; }
 .evg-flash{ position:absolute; inset:0; background:var(--flash); opacity:0; pointer-events:none; animation:evg-flash .5s ease-out .04s both; }
+
+/* 背景纵向交错文字流：相邻 lane 反向，无缝循环（轨道复制一份，平移 50% 回到原点） */
+.evg-stream{ position:absolute; top:0; bottom:0; overflow:hidden; pointer-events:none; user-select:none; }
+.evg-stream-track{
+  display:flex; flex-direction:column; gap:.05em; line-height:1.08; white-space:nowrap;
+  font-size:clamp(46px,9vw,108px); font-weight:900; font-style:italic; letter-spacing:.03em;
+  color:rgba(var(--soft-rgb),0.055);
+  -webkit-text-stroke:1px rgba(var(--soft-rgb),0.09);
+  will-change:transform;
+}
+.evg-stream-track i{ font-style:italic; }
+.evg-stream-a{ left:1%; }
+.evg-stream-b{ left:37%; }
+.evg-stream-c{ left:71%; }
+.evg-stream-a .evg-stream-track{ animation:evg-up 15s linear infinite; }
+.evg-stream-b .evg-stream-track{ animation:evg-down 19s linear infinite; }
+.evg-stream-c .evg-stream-track{ animation:evg-up 17s linear infinite; }
 
 /* 入场圆球：真·圆形，坠落→落定→炸开淡出 */
 .evg-orb{
-  position:absolute; left:50%; top:50%; width:54px; height:54px; border-radius:50%;
+  position:absolute; left:50%; top:50%; width:44px; height:44px; border-radius:50%;
   background:var(--acc);
-  box-shadow:0 0 30px rgba(var(--acc-rgb),0.65);
+  box-shadow:0 0 26px rgba(var(--acc-rgb),0.65);
   transform:translate(-50%,-50%); pointer-events:none;
   animation:evg-orb .82s cubic-bezier(0.2,0.9,0.3,1) both;
 }
@@ -307,11 +344,11 @@ const EVG_CSS = `
 .evg-btn-ghost:disabled{ opacity:.5; cursor:default; }
 
 .evg-ball{
-  position:fixed; left:18px; bottom:96px; z-index:9998; width:50px; height:50px; border-radius:50%;
+  position:fixed; left:18px; bottom:96px; z-index:9998; width:38px; height:38px; border-radius:50%;
   border:none; color:var(--ink); cursor:pointer;
   background:var(--acc);
   display:flex; align-items:center; justify-content:center;
-  box-shadow:0 8px 22px rgba(0,0,0,0.4), 0 0 20px rgba(var(--acc-rgb),0.5);
+  box-shadow:0 6px 16px rgba(0,0,0,0.4), 0 0 16px rgba(var(--acc-rgb),0.5);
   animation:evg-ball-pulse 2.4s ease-in-out infinite;
 }
 
@@ -329,12 +366,16 @@ const EVG_CSS = `
 @keyframes evg-content-in{ from{opacity:0; transform:translateY(9px)} to{opacity:1; transform:none} }
 @keyframes evg-haz-in{ from{opacity:0; transform:skewX(-12deg) scaleX(0)} to{opacity:1; transform:skewX(-12deg) scaleX(1)} }
 @keyframes evg-flicker{ 0%,100%{opacity:.55} 45%{opacity:.85} 72%{opacity:.62} }
-@keyframes evg-drift{ from{transform:translate3d(5%,0,0) rotate(-12deg)} to{transform:translate3d(-5%,0,0) rotate(-12deg)} }
-@keyframes evg-drift-rev{ from{transform:translate3d(-5%,0,0) rotate(-12deg)} to{transform:translate3d(5%,0,0) rotate(-12deg)} }
+/* 警告帯：沿条纹法向平移「正好 1 个周期(28px)」→ 首尾图案重合，无缝循环、不再跳位。
+   22.9/16.1 = 28 × (-55° 渐变方向单位向量)；rotate 必须写进关键帧，否则覆盖基础 transform */
+@keyframes evg-march{ from{transform:rotate(-12deg) translate(0,0)} to{transform:rotate(-12deg) translate(22.9px,16.1px)} }
+@keyframes evg-march-rev{ from{transform:rotate(-12deg) translate(0,0)} to{transform:rotate(-12deg) translate(-22.9px,-16.1px)} }
+@keyframes evg-up{ from{transform:translateY(0)} to{transform:translateY(-50%)} }
+@keyframes evg-down{ from{transform:translateY(-50%)} to{transform:translateY(0)} }
 @keyframes evg-ball-pulse{ 0%,100%{box-shadow:0 8px 22px rgba(0,0,0,0.4), 0 0 14px rgba(var(--acc-rgb),0.45)} 50%{box-shadow:0 8px 22px rgba(0,0,0,0.4), 0 0 28px rgba(var(--acc-rgb),0.78)} }
 @media (prefers-reduced-motion: reduce){
   .evg-orb{ display:none; }
   .evg-panel{ animation-duration:.01ms; animation-delay:0s; }
-  .evg-bg-band,.evg-glow,.evg-ball,.evg-flash{ animation:none; }
+  .evg-bg-band,.evg-glow,.evg-ball,.evg-flash,.evg-stream-track{ animation:none; }
 }
 `
