@@ -229,7 +229,9 @@ export default function EmailVerifyGate() {
         </div>
       ) : (
         <button type="button" className="evg-ball" aria-label="验证邮箱" onClick={expand}>
-          <MailCheck style={{ width: 13, height: 13 }} />
+          <span className="evg-ball-ring" aria-hidden />
+          <span className="evg-ball-core" aria-hidden />
+          <MailCheck className="evg-ball-icon" style={{ width: 10, height: 10 }} />
         </button>
       )}
     </>,
@@ -381,15 +383,25 @@ const EVG_CSS = `
 .evg-btn-ghost:disabled{ opacity:.5; cursor:default; }
 .evg-serial{ position:absolute; left:0; right:0; bottom:9px; z-index:3; text-align:center; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:9px; letter-spacing:.14em; color:rgba(var(--soft-rgb),0.34); pointer-events:none; }
 
+/* 小球：复刻首页加载帖子的 PulseLoading（实心绿球 + 外层脉动光环）。
+   core 带 scale 动画走合成层 → 圆边 GPU 抗锯齿、不再锯齿/甜甜圈。 */
 .evg-ball{
-  position:fixed; left:18px; bottom:96px; z-index:9998; width:30px; height:30px; border-radius:50%;
-  border:none; color:var(--ink); cursor:pointer;
-  /* 用 radial 羽化边缘（渐变边，无几何硬边）→ 任何 DPR 都不锯齿，主体仍纯色 */
-  background:radial-gradient(circle at 50% 50%, var(--acc) 0, var(--acc) calc(50% - 1.2px), transparent calc(50% - 0.2px));
+  position:fixed; left:18px; bottom:96px; z-index:9998; width:34px; height:34px;
+  border:none; background:none; padding:0; cursor:pointer; color:var(--ink);
   display:flex; align-items:center; justify-content:center;
-  box-shadow:0 5px 14px rgba(0,0,0,0.4), 0 0 13px rgba(var(--acc-rgb),0.5);
-  animation:evg-ball-pulse 2.4s ease-in-out infinite;
 }
+.evg-ball-ring{
+  position:absolute; inset:0; border-radius:50%; pointer-events:none;
+  background:rgba(var(--acc-rgb),0.22);
+  animation:evg-ball-ring 2s ease-in-out infinite;
+}
+.evg-ball-core{
+  position:absolute; left:50%; top:50%; width:19px; height:19px; border-radius:50%; pointer-events:none;
+  background:var(--acc); box-shadow:0 0 12px rgba(var(--acc-rgb),0.55);
+  transform:translate(-50%,-50%);
+  animation:evg-ball-core 1.5s ease-in-out infinite;
+}
+.evg-ball-icon{ position:relative; z-index:2; }
 
 @keyframes evg-fade{ from{opacity:0} to{opacity:1} }
 @keyframes evg-flash{ 0%{opacity:0} 35%{opacity:.18} 100%{opacity:0} }
@@ -414,11 +426,12 @@ const EVG_CSS = `
 @keyframes evg-tickR{ from{transform:translateX(-50%)} to{transform:translateX(0)} }
 @keyframes evg-sheen{ 0%{left:-40%} 58%{left:128%} 100%{left:128%} }
 @keyframes evg-blink{ 0%,60%{opacity:1} 61%,100%{opacity:.18} }
-@keyframes evg-ball-pulse{ 0%,100%{box-shadow:0 8px 22px rgba(0,0,0,0.4), 0 0 14px rgba(var(--acc-rgb),0.45)} 50%{box-shadow:0 8px 22px rgba(0,0,0,0.4), 0 0 28px rgba(var(--acc-rgb),0.78)} }
+@keyframes evg-ball-ring{ 0%,100%{ transform:scale(0.5); opacity:.2 } 50%{ transform:scale(1.2); opacity:.6 } }
+@keyframes evg-ball-core{ 0%,100%{ transform:translate(-50%,-50%) scale(0.82); opacity:.85 } 50%{ transform:translate(-50%,-50%) scale(1); opacity:1 } }
 @media (prefers-reduced-motion: reduce){
   .evg-orb{ display:none; }
   .evg-panel{ animation-duration:.01ms; animation-delay:0s; }
-  .evg-bg-band,.evg-glow,.evg-ball,.evg-flash,.evg-tick-row,.evg-dot{ animation:none; }
+  .evg-bg-band,.evg-glow,.evg-ball-ring,.evg-ball-core,.evg-flash,.evg-tick-row,.evg-dot{ animation:none; }
   .evg-btn::after{ animation:none; display:none; }
 }
 `
