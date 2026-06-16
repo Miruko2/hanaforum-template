@@ -10,61 +10,67 @@ import {
   ToastViewport,
 } from "@/components/ui/toast"
 
-// 背景镂空文字流（两派斜向交错、缓慢流动），呼应邮箱验证弹窗(evg)的卡内文字。
-// 两份相同内容拼接 + translateX -50% → 无缝循环；上行往左上、下行往右下。
-const ZT_TICK_A = "HANAKO · 萤火虫之国 · NOTICE · SYSTEM · ACCESS · 通知 · "
-const ZT_TICK_B = "SYSTEM · 通知 · HANAKO · NOTICE · 萤火虫之国 · ACCESS · "
-
-// 绝区零风通知条样式（全站只注入一次）：深色切角面板 + 左侧霓虹状态竖条 + 状态色辉光
-// + 背景镂空斜向文字流。default=绿(成功/信息) destructive=红(错误)。
+// 绝区零式通知条样式（全站只注入一次）。设计语言对齐个人页「我的帖子」标题条(.mp-*)：
+// 实心暗底 + 状态色辉光、左侧 hazard 斜纹、右侧描边镂空巨字水印(状态印章)、
+// 贴纸式硬投影斜体标题、一次性高光扫掠、顶边高光线。
+// default=lime(成功/信息) destructive=red(错误)。动效仅入场扫掠一次，无常驻位移动画。
 const TOAST_CSS = `
 .zt-toast{
   position:relative; overflow:hidden; box-sizing:border-box;
-  width:100%; padding:13px 34px 14px 20px; border-radius:2px;
-  background:linear-gradient(150deg, rgba(28,30,34,0.985), rgba(13,14,17,0.99));
+  width:100%; padding:14px 30px 15px 24px;
+  background:linear-gradient(150deg, rgba(30,32,37,0.99), rgba(14,15,18,0.995));
   color:#e8eaed;
-  box-shadow:inset 0 0 0 1px rgba(255,255,255,0.06);
-  clip-path:polygon(0 0, calc(100% - 13px) 0, 100% 13px, 100% 100%, 0 100%);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,0.08), inset 0 0 0 1px rgba(255,255,255,0.05);
+  clip-path:polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%);
   font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
 }
+/* 顶边高光线（玻璃上沿反光） */
 .zt-toast::before{
-  content:""; position:absolute; left:0; top:0; bottom:0; width:4px; z-index:2;
-  background:var(--zt-acc); box-shadow:0 0 11px 0 var(--zt-acc);
+  content:""; position:absolute; top:0; left:9%; right:9%; height:1px; z-index:4; pointer-events:none;
+  background:linear-gradient(90deg, transparent, rgba(255,255,255,0.32), transparent);
 }
-/* 背景镂空文字流：两行斜向、缓慢、互相反向 */
-.zt-ticker{ position:absolute; inset:0; overflow:hidden; pointer-events:none; z-index:0; }
-.zt-tick{ position:absolute; left:-50%; right:-50%; top:50%; transform:rotate(13deg); }
-.zt-tick-1{ margin-top:-40px; }
-.zt-tick-2{ margin-top:4px; }
-.zt-tick-row{
-  display:inline-block; white-space:nowrap; line-height:1;
-  font-size:38px; font-weight:900; font-style:italic; letter-spacing:.05em;
-  color:transparent; -webkit-text-stroke:1.5px rgba(255,255,255,0.1);
-  will-change:transform;
+/* 左侧 hazard 斜纹条（状态色） */
+.zt-hazard{
+  position:absolute; left:0; top:0; bottom:0; width:6px; z-index:2; pointer-events:none;
+  background:repeating-linear-gradient(45deg, var(--zt-acc) 0, var(--zt-acc) 5px, transparent 5px, transparent 10px);
+  box-shadow:0 0 10px 0 var(--zt-glow);
 }
-.zt-tick-1 .zt-tick-row{ animation:zt-tickL 42s linear infinite; }
-.zt-tick-2 .zt-tick-row{ animation:zt-tickR 48s linear infinite; }
-/* 内容压在文字流之上 */
-.zt-toast > .zt-body, .zt-toast > .zt-action, .zt-toast > .zt-close{ position:relative; z-index:1; }
-.zt-default{ --zt-acc:#2ee36b;
-  filter:drop-shadow(0 10px 24px rgba(0,0,0,0.5)) drop-shadow(0 0 12px rgba(46,227,107,0.20)); }
-.zt-destructive{ --zt-acc:#ff5252;
-  filter:drop-shadow(0 10px 24px rgba(0,0,0,0.5)) drop-shadow(0 0 13px rgba(255,82,82,0.26)); }
-.zt-title{ font-size:14px; font-weight:800; letter-spacing:.02em; color:#f3f5f7; line-height:1.35; }
-.zt-desc{ font-size:12.5px; line-height:1.55; color:#a8b0b8; }
+/* 右侧描边镂空巨字水印（状态印章） */
+.zt-wm{
+  position:absolute; right:-3px; top:50%; transform:translateY(-50%); z-index:0;
+  font-size:3.5rem; font-weight:900; font-style:italic; line-height:1; letter-spacing:-0.04em;
+  color:transparent; -webkit-text-stroke:1.5px var(--zt-wm-stroke);
+  user-select:none; pointer-events:none;
+}
+/* 一次性高光扫掠 */
+.zt-sheen{
+  position:absolute; inset:0; z-index:1; pointer-events:none;
+  background:linear-gradient(105deg, transparent 40%, rgba(255,255,255,0.12) 50%, transparent 60%);
+  transform:translateX(-130%);
+  animation:zt-sheen-sweep 1.05s cubic-bezier(0.4,0,0.2,1) 0.12s both;
+}
+@keyframes zt-sheen-sweep{ to{ transform:translateX(130%); } }
+/* 内容压在装饰之上 */
+.zt-toast > .zt-body, .zt-toast > .zt-action, .zt-toast > .zt-close{ position:relative; z-index:3; }
+.zt-default{ --zt-acc:#a3e635; --zt-glow:rgba(163,230,53,0.55); --zt-wm-stroke:rgba(163,230,53,0.17);
+  --zt-sh1:rgba(163,230,53,0.85); --zt-sh2:rgba(163,230,53,0.3);
+  filter:drop-shadow(0 10px 24px rgba(0,0,0,0.5)) drop-shadow(0 0 13px rgba(163,230,53,0.15)); }
+.zt-destructive{ --zt-acc:#ff5252; --zt-glow:rgba(255,82,82,0.6); --zt-wm-stroke:rgba(255,82,82,0.2);
+  --zt-sh1:rgba(255,82,82,0.85); --zt-sh2:rgba(255,82,82,0.3);
+  filter:drop-shadow(0 10px 24px rgba(0,0,0,0.5)) drop-shadow(0 0 13px rgba(255,82,82,0.22)); }
+.zt-title{ font-size:14.5px; font-weight:900; font-style:italic; letter-spacing:.01em; color:#fff;
+  text-shadow:0.03em 0.03em 0 var(--zt-sh1), 0.06em 0.06em 0 var(--zt-sh2); line-height:1.3; }
+.zt-desc{ font-size:12.5px; line-height:1.55; color:#aab2ba; margin-top:3px; }
 .zt-close{ color:rgba(255,255,255,0.4); }
 .zt-close:hover{ color:#fff; }
 .zt-action{
   display:inline-flex; align-items:center; height:30px; padding:0 13px;
-  background:var(--zt-acc); color:#06140c; font-size:12.5px; font-weight:800;
-  border:none; cursor:pointer;
+  background:var(--zt-acc); color:#0a1207; font-size:12.5px; font-weight:800; border:none; cursor:pointer;
   clip-path:polygon(0 0,100% 0,100% calc(100% - 6px),calc(100% - 6px) 100%,0 100%);
 }
 .zt-action:hover{ filter:brightness(1.08); }
-@keyframes zt-tickL{ from{transform:translateX(0)} to{transform:translateX(-50%)} }
-@keyframes zt-tickR{ from{transform:translateX(-50%)} to{transform:translateX(0)} }
 @media (prefers-reduced-motion: reduce){
-  .zt-tick-row{ animation:none; }
+  .zt-sheen{ display:none; }
 }
 `
 
@@ -74,18 +80,14 @@ export function Toaster() {
   return (
     <ToastProvider>
       <style>{TOAST_CSS}</style>
-      {toasts.map(function ({ id, title, description, action, ...props }) {
+      {toasts.map(function ({ id, title, description, action, variant, ...props }) {
+        const wm = variant === "destructive" ? "ERR" : "OK"
         return (
-          <Toast key={id} {...props}>
-            <span className="zt-ticker" aria-hidden>
-              <span className="zt-tick zt-tick-1">
-                <span className="zt-tick-row">{ZT_TICK_A + ZT_TICK_A}</span>
-              </span>
-              <span className="zt-tick zt-tick-2">
-                <span className="zt-tick-row">{ZT_TICK_B + ZT_TICK_B}</span>
-              </span>
-            </span>
-            <div className="zt-body grid gap-1">
+          <Toast key={id} variant={variant} {...props}>
+            <span className="zt-hazard" aria-hidden />
+            <span className="zt-wm" aria-hidden>{wm}</span>
+            <span className="zt-sheen" aria-hidden />
+            <div className="zt-body">
               {title && <ToastTitle>{title}</ToastTitle>}
               {description && (
                 <ToastDescription>{description}</ToastDescription>
