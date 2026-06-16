@@ -208,6 +208,8 @@ export default function VirtualizedPostList({
       const post = columnPosts[index];
       if (!post) return null;
       
+      // image_ratio 存的是 height/width：>=1 = 竖图。此值当前是 dead path
+      // （GlassMorph 的 wideTemplate 需配 adaptiveHeight 才生效，而无调用方传 adaptiveHeight）。
       const useWideTemplate = post.image_ratio ? post.image_ratio >= 1.0 : false;
       
       return (

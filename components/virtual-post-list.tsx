@@ -87,6 +87,9 @@ const PostItem = memo(function PostItem({
       ref={ref}
       className={`post-card-container post-enter ${cheapEnter ? "cv-auto" : ""} ${visible ? "post-enter-visible" : ""} ${isReplay ? "post-enter-replay" : ""}`}
     >
+      {/* image_ratio 存的是 height/width：>=1 = 竖图。此值当前是 dead path
+          （GlassMorph 的 wideTemplate 需配 adaptiveHeight 才生效，而无任何调用方传
+          adaptiveHeight）。若日后接通，注意此处方向：竖图才该走 wide？按需重判。 */}
       <PostCard
         post={post}
         isActive={isActive}

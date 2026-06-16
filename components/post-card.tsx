@@ -405,13 +405,14 @@ const PostCard = memo(function PostCard({
               disablePreview={true} // 在列表视图中禁用预览
               onImageLoad={(dimensions) => {
                 // 比例与帖子记录不同的情况已忽略（不做无条件 log 输出）
+                // 注意口径：post.image_ratio 存的是 height/width，而 dimensions.ratio
+                // 是 width/height —— 直接比永远误报「差异大」，故把实测换算成 height/width 再比。
                 if (
                   process.env.NODE_ENV === 'development' &&
-                  post.image_ratio !== dimensions.ratio &&
                   dimensions.ratio > 0 &&
-                  Math.abs((post.image_ratio || 1) - dimensions.ratio) > 0.2
+                  Math.abs((post.image_ratio || 1) - 1 / dimensions.ratio) > 0.2
                 ) {
-                  console.debug(`图片比例差异较大: ${dimensions.ratio} vs ${post.image_ratio}`);
+                  console.debug(`图片比例差异较大: ${post.image_ratio}(存h/w) vs ${1 / dimensions.ratio}(实测h/w)`);
                 }
               }}
             />

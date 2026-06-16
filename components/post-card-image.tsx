@@ -111,12 +111,16 @@ export default function PostCardImage({
       return { heightClass: 'h-[300px]' }
     }
 
-    // 列表卡片用 aspect-ratio，按图片真实比例撑高，不再统一裁成几个固定档位
-    // （注：此分支历史语义与存储端相反，是既有状态，本次不动，避免改变全站列表卡视觉）
-    // 图片宽高比 = 宽 / 高，默认 1.5:1
-    const rawRatio = post.image_ratio || 1.5;
-    // 裁剪上下限：避免超高竖图(把卡片撑得过长)或超宽横图(变成细条)
-    // 0.75 ≈ 3:4 竖图，1.9 ≈ 接近 2:1 横图
+    // 列表卡片用 aspect-ratio，按图片真实比例撑高。
+    // image_ratio 存的是 height/width，CSS aspectRatio 要 width/height → 取倒数。
+    // （此前这里没取倒数、直接当 width/height 用，导致横竖对调——竖图显示成横、
+    //   横图显示成竖；只是 clamp 到 [0.75,1.9] 后被压成接近正方形，肉眼不易察觉。
+    //   现在校正语义，与存储端 / 详情分支统一。）
+    // 默认 1.5（≈3:2 横图）。
+    const storedRatio = post.image_ratio || 0.667; // height/width，0.667≈3:2 横
+    const rawRatio = 1 / storedRatio; // → width/height
+    // 裁剪上下限：避免超高竖图(把卡片撑得过长)或超宽横图(变成细条)。
+    // 0.75 ≈ 3:4 竖图，1.9 ≈ 接近 2:1 横图（列表卡保留较紧区间控制瀑布流高度差）
     const clampedRatio = Math.min(Math.max(rawRatio, 0.75), 1.9);
 
     return { aspectStyle: { aspectRatio: String(clampedRatio) } };
