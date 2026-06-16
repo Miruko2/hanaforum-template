@@ -22,6 +22,8 @@ import { postImageList, postsHaveImageUrls } from "@/lib/post-images"
 import { cdnUrl } from "@/lib/cdn-url"
 import { guardVerify } from "@/lib/verify-gate-bus"
 import ImageLightbox from "@/components/image-lightbox"
+import { StickerPicker } from "@/components/stickers/sticker-picker"
+import { makeStickerToken } from "@/lib/stickers"
 
 interface CreatePostModalProps {
   onClose: () => void
@@ -72,6 +74,7 @@ export function CreatePostForm({
   })
   const [isSubmitting, setIsSubmitting] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const descRef = useRef<HTMLTextAreaElement>(null)
   const { user } = useSimpleAuth()
   const { toast } = useToast()
   const [imageRatio, setImageRatio] = useState<number>(editPost?.image_ratio || 0.75)
@@ -384,6 +387,24 @@ export function CreatePostForm({
     fileInputRef.current?.click()
   }
 
+  // 在正文光标处插入表情标记 [s:name]，并把光标移到标记之后
+  const insertSticker = (name: string) => {
+    const token = makeStickerToken(name)
+    const el = descRef.current
+    if (!el) {
+      setDescription((prev) => prev + token)
+      return
+    }
+    const start = el.selectionStart ?? description.length
+    const end = el.selectionEnd ?? description.length
+    setDescription(description.slice(0, start) + token + description.slice(end))
+    requestAnimationFrame(() => {
+      el.focus()
+      const pos = start + token.length
+      el.setSelectionRange(pos, pos)
+    })
+  }
+
   return (
     <>
       {/* 关闭按钮 */}
@@ -449,6 +470,7 @@ export function CreatePostForm({
                 内容
               </Label>
               <Textarea
+                ref={descRef}
                 id="post-description"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
@@ -457,6 +479,10 @@ export function CreatePostForm({
                 disabled={isSubmitting}
                 required
               />
+              {/* 表情包：点选后在正文光标处插入标记，发布后正文里会渲染成表情图 */}
+              <div className="mt-2">
+                <StickerPicker onSelect={insertSticker} disabled={isSubmitting} />
+              </div>
             </div>
 
             {/* 图片预览：固定尺寸方形缩略图网格。首张为封面，支持多图，末尾带「添加」格子。 */}

@@ -9,6 +9,7 @@ import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { Reply, ThumbsUp, Trash2 } from "lucide-react"
 import type { Comment } from "@/lib/types"
 import CommentForm from "./comment-form"
+import { StickerText } from "@/components/stickers/sticker-text"
 import { checkCommentLiked, likeComment, unlikeComment, getCommentLikesCount, deleteComment } from "@/lib/supabase"
 import { supabase } from "@/lib/supabaseClient"
 import { useRouter } from "next/navigation"
@@ -218,7 +219,9 @@ export default function CommentItem({
             <span className="text-xs text-gray-500">{formatDate(comment.created_at)}</span>
           </div>
 
-          <p className="mt-2 text-gray-300 break-all whitespace-pre-wrap">{comment.content}</p>
+          <p className="mt-2 text-gray-300 break-all whitespace-pre-wrap">
+            <StickerText text={comment.content} />
+          </p>
 
           <div className="mt-2 flex items-center gap-4">
             <button 

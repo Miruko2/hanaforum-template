@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { addComment } from "@/lib/supabase"
@@ -9,6 +9,8 @@ import { Loader2, Send } from "lucide-react"
 import type { Comment } from "@/lib/types"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useToast } from "@/hooks/use-toast"
+import { StickerPicker } from "@/components/stickers/sticker-picker"
+import { makeStickerToken } from "@/lib/stickers"
 
 interface CommentFormProps {
   postId: string
@@ -33,6 +35,28 @@ export default function CommentForm({
   const [isSubmitting, setIsSubmitting] = useState(false)
   const { user } = useSimpleAuth()
   const { toast } = useToast()
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // 在光标处插入表情标记 [s:name]，并把光标移到标记之后
+  const insertSticker = useCallback(
+    (name: string) => {
+      const token = makeStickerToken(name)
+      const el = textareaRef.current
+      if (!el) {
+        setContent((prev) => prev + token)
+        return
+      }
+      const start = el.selectionStart ?? content.length
+      const end = el.selectionEnd ?? content.length
+      setContent(content.slice(0, start) + token + content.slice(end))
+      requestAnimationFrame(() => {
+        el.focus()
+        const pos = start + token.length
+        el.setSelectionRange(pos, pos)
+      })
+    },
+    [content],
+  )
 
   // 处理评论提交 - 静态导出环境优化版本
   const handleSubmit = useCallback(
@@ -156,6 +180,7 @@ export default function CommentForm({
       )}
 
       <Textarea
+        ref={textareaRef}
         value={content}
         onChange={(e) => setContent(e.target.value)}
         placeholder={isReply ? `回复 ${replyingTo || ""}...` : "写下你的评论..."}
@@ -163,38 +188,42 @@ export default function CommentForm({
         disabled={isSubmitting}
       />
 
-      <div className="flex justify-end gap-2">
-        {onCancel && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={onCancel}
-            className="border-gray-700 text-gray-300 hover:bg-gray-800 hover:text-white"
-            disabled={isSubmitting}
-          >
-            取消
-          </Button>
-        )}
+      <div className="flex items-center justify-between gap-2">
+        <StickerPicker onSelect={insertSticker} disabled={isSubmitting} />
 
-        <Button
-          type="submit"
-          size="sm"
-          className="bg-lime-500 hover:bg-lime-600 text-black"
-          disabled={isSubmitting || !content.trim()}
-        >
-          {isSubmitting ? (
-            <>
-              <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-              {optimized ? "发布中..." : "发送中..."}
-            </>
-          ) : (
-            <>
-              <Send className="h-3.5 w-3.5 mr-1" />
-              {isReply ? "回复" : "发表评论"}
-            </>
+        <div className="flex gap-2">
+          {onCancel && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onCancel}
+              className="border-gray-700 text-gray-300 hover:bg-gray-800 hover:text-white"
+              disabled={isSubmitting}
+            >
+              取消
+            </Button>
           )}
-        </Button>
+
+          <Button
+            type="submit"
+            size="sm"
+            className="bg-lime-500 hover:bg-lime-600 text-black"
+            disabled={isSubmitting || !content.trim()}
+          >
+            {isSubmitting ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                {optimized ? "发布中..." : "发送中..."}
+              </>
+            ) : (
+              <>
+                <Send className="h-3.5 w-3.5 mr-1" />
+                {isReply ? "回复" : "发表评论"}
+              </>
+            )}
+          </Button>
+        </div>
       </div>
     </form>
   )

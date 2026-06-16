@@ -14,6 +14,7 @@ import PostImageCarousel from "./post-image-carousel"
 import ImageLightbox from "./image-lightbox"
 import TextualHero from "./textual-hero"
 import CommentList, { prefetchComments } from "./comment/comment-list"
+import { StickerText } from "./stickers/sticker-text"
 import LikeButton from "./ui/like-button"
 import { CATEGORIES } from "@/lib/categories"
 import { postImageList } from "@/lib/post-images"
@@ -317,7 +318,7 @@ export default function PostDetailModal({
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.35, delay: 0.26 }}
       >
-        {post.description || post.content}
+        <StickerText text={post.description || post.content} />
       </motion.p>
 
       {/* Actions bar */}
