@@ -49,31 +49,42 @@ $function$;
 -- ── ② 回填存量：profiles.username 是邮箱的 → 改回真名 ──
 -- 真名来源优先级（只取「非空且不含 @」的）：
 --   auth.users metadata.username → user_profiles.username → 占位名「用户_xxxxxx」。
--- 跳过会撞 UNIQUE 的行（保持现状，可重复跑或个别手动处理）。
-UPDATE public.profiles p
-SET username = sub.new_name
-FROM (
-  SELECT
-    p2.id,
-    COALESCE(
-      CASE WHEN trim(u.raw_user_meta_data->>'username') <> ''
-            AND u.raw_user_meta_data->>'username' NOT LIKE '%@%'
-           THEN trim(u.raw_user_meta_data->>'username') END,
-      CASE WHEN trim(up.username) <> ''
-            AND up.username NOT LIKE '%@%'
-           THEN trim(up.username) END,
-      '用户_' || substr(p2.id::text, 1, 6)
-    ) AS new_name
-  FROM public.profiles p2
-  LEFT JOIN auth.users u             ON u.id = p2.id
-  LEFT JOIN public.user_profiles up  ON up.user_id = p2.id
-  WHERE p2.username LIKE '%@%'
-) sub
-WHERE p.id = sub.id
-  AND NOT EXISTS (
-    SELECT 1 FROM public.profiles px
-    WHERE px.username = sub.new_name AND px.id <> p.id
-  );
+-- 逐行处理 + 撞名加数字后缀：既避开已有用户名，也避开「本批多个邮箱算出同名」互撞
+-- （username 有 UNIQUE 约束，单条批量 UPDATE 防不住同批重名，故用 PL/pgSQL 循环）。
+DO $$
+DECLARE
+  rec RECORD;
+  base_name text;
+  final_name text;
+  n int;
+BEGIN
+  FOR rec IN
+    SELECT p.id,
+           u.raw_user_meta_data->>'username' AS meta_name,
+           up.username AS up_name
+    FROM public.profiles p
+    LEFT JOIN auth.users u            ON u.id = p.id
+    LEFT JOIN public.user_profiles up ON up.user_id = p.id
+    WHERE p.username LIKE '%@%'
+  LOOP
+    IF rec.meta_name IS NOT NULL AND trim(rec.meta_name) <> '' AND rec.meta_name NOT LIKE '%@%' THEN
+      base_name := trim(rec.meta_name);
+    ELSIF rec.up_name IS NOT NULL AND trim(rec.up_name) <> '' AND rec.up_name NOT LIKE '%@%' THEN
+      base_name := trim(rec.up_name);
+    ELSE
+      base_name := '用户_' || substr(rec.id::text, 1, 6);
+    END IF;
+
+    final_name := base_name;
+    n := 0;
+    WHILE EXISTS (SELECT 1 FROM public.profiles WHERE username = final_name AND id <> rec.id) LOOP
+      n := n + 1;
+      final_name := base_name || '_' || n;
+    END LOOP;
+
+    UPDATE public.profiles SET username = final_name WHERE id = rec.id;
+  END LOOP;
+END $$;
 
 -- ── ③ 自查：跑完后应为空（若仍有，多是撞名被跳过，单独处理） ──
 -- SELECT id, username FROM public.profiles WHERE username LIKE '%@%';
