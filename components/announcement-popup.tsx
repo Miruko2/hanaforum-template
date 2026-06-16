@@ -6,7 +6,9 @@ import { AnimatePresence, motion } from "framer-motion"
 import { X } from "lucide-react"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useNotifications } from "@/contexts/notification-context"
+import { useChatUI } from "@/contexts/chat-ui-context"
 import { cdnUrl } from "@/lib/cdn-url"
+import { supabase } from "@/lib/supabaseClient"
 import { getAnnouncement, getPost, likePost, unlikePost, checkUserLiked } from "@/lib/supabase"
 import { useToast } from "@/hooks/use-toast"
 import { useIsMobile } from "@/hooks/use-mobile"
@@ -19,17 +21,22 @@ import type { Notification, Post } from "@/lib/types"
  * 通用通知顶部弹窗（仿 macOS 通知，纵向堆叠）。
  *
  * 由 announcement-popup（仅公告单条）升级而来：
- *   - 数据源改用 useNotifications() 的完整通知列表，所有类型都弹；
+ *   - 公开通知：数据源 useNotifications()，所有类型都弹；
+ *   - 私信：独立订阅 dm_messages realtime（与公开通知是两套系统，私信不入 notifications 表），
+ *     收到私信也弹同一个窗；面板开着时一概不弹（用户正在看）；
  *   - 多条以纵向堆叠形式出现，新通知从顶部滑入、旧的往下推，最多同时显示 MAX_VISIBLE 条；
- *   - 点击主体按通知类型复刻铃铛行为（公告→全文 Modal、follow→主页、点赞/评论→帖子详情 Modal）。
+ *   - 点击主体：公开通知按类型复刻铃铛行为；私信 → startDmWith 打开聊天跳到该对话。
  *
  * 「已弹过」用 per-user localStorage 的 id 集合记录，与铃铛 is_read 解耦：
  * 铃铛一打开就会把所有通知 markAllAsRead，若用 is_read 判定是否弹窗会彻底失效。
- * 离线收到的通知：NotificationProvider 登入即拉取列表 → 本组件的候选 effect 自动覆盖。
+ * 离线收到的公开通知：NotificationProvider 登入即拉取列表 → 候选 effect 自动覆盖；
+ * 离线私信：realtime 只推「在线期间」的新消息，离线时收到的私信在下次打开聊天时
+ *   由 floating-chat 累积为未读红点，不在此弹窗补弹（私信的「离线补弹」语义不同于公告）。
  *
- * 数据上的取舍（见计划）：
- *   - 非公告类通知自带 message / actor，零额外请求；
- *   - 公告类通知 message 仅是预览，进队列时先用 message 占位，后台 getAnnouncement 回填标题/内容。
+ * 数据上的取舍：
+ *   - 非公告类公开通知自带 message / actor，零额外请求；
+ *   - 公告类通知 message 仅是预览，进队列时先用 message 占位，后台 getAnnouncement 回填标题/内容；
+ *   - 私信 realtime 只带 sender_id，先占位弹（名字「用户」），后台查 profiles 回填头像/名字。
  */
 
 // 自动消失时长（毫秒）。圆环视觉与此同步。
@@ -45,7 +52,7 @@ const RING_C = 2 * Math.PI * RING_R
 
 const poppedKey = (uid: string) => `firefly:notif-popped:${uid}`
 
-// 卡片展示用的解析结果：从一条 Notification 提取 logo / eyebrow / title / body / 是否需要公告全文回填。
+// 卡片展示用的解析结果：提取 logo / eyebrow / title / body，及回填标志。
 interface CardView {
   logoUrl: string
   eyebrow: string
@@ -53,7 +60,22 @@ interface CardView {
   body: string
   // 公告类需要二次请求回填完整标题/内容（占位用 message）
   needAnnouncementFill: boolean
+  // 私信类需要查 profiles 回填发送者头像/名字（占位用「用户」/logo）
+  needProfileFill: boolean
 }
+
+// 私信队列项：来自 dm_messages realtime 的轻量记录（私信不入 notifications 表）。
+interface DmItem {
+  kind: "dm"
+  // 用 dm 消息的 id 作为队列 key；与 Notification.id 命名空间不冲突（uuid）
+  id: string
+  senderId: string
+  content: string
+  created_at: string
+}
+
+// 统一队列项：公开通知或私信，用 kind 判别；堆叠渲染与计时逻辑不关心来源。
+type QueueItem = (Notification & { kind: "notif" }) | DmItem
 
 function viewOf(n: Notification): CardView {
   const actorName = n.actor?.username || "某人"
@@ -66,6 +88,7 @@ function viewOf(n: Notification): CardView {
         title: "公告",
         body: n.message || "",
         needAnnouncementFill: true,
+        needProfileFill: false,
       }
     case "like_post":
     case "like_comment":
@@ -75,6 +98,7 @@ function viewOf(n: Notification): CardView {
         title: `${actorName} 赞了你`,
         body: n.message || "",
         needAnnouncementFill: false,
+        needProfileFill: false,
       }
     case "comment_post":
       return {
@@ -83,6 +107,7 @@ function viewOf(n: Notification): CardView {
         title: `${actorName} 评论了你`,
         body: n.message || "",
         needAnnouncementFill: false,
+        needProfileFill: false,
       }
     case "follow":
       return {
@@ -91,6 +116,7 @@ function viewOf(n: Notification): CardView {
         title: `${actorName} 关注了你`,
         body: n.message || "",
         needAnnouncementFill: false,
+        needProfileFill: false,
       }
     case "post_removed":
       return {
@@ -99,6 +125,7 @@ function viewOf(n: Notification): CardView {
         title: "你的帖子被移除",
         body: n.message || "",
         needAnnouncementFill: false,
+        needProfileFill: false,
       }
     default:
       return {
@@ -107,8 +134,26 @@ function viewOf(n: Notification): CardView {
         title: actorName,
         body: n.message || "",
         needAnnouncementFill: false,
+        needProfileFill: false,
       }
   }
+}
+
+// 私信卡片的占位视图：realtime 只带 sender_id，先占位（名字「用户」/logo），
+// needProfileFill=true 触发后台查 profiles 回填头像/名字。
+function viewOfDm(dm: DmItem): CardView {
+  return {
+    logoUrl: "/logo.png",
+    eyebrow: "私信",
+    title: "用户",
+    body: dm.content,
+    needAnnouncementFill: false,
+    needProfileFill: true,
+  }
+}
+
+function isNotif(item: QueueItem): item is Notification & { kind: "notif" } {
+  return item.kind === "notif"
 }
 
 // 安卓等弱合成器：去 backdrop-filter，改近实底深色底。
@@ -119,14 +164,22 @@ function detectAndroid(): boolean {
 export default function AnnouncementPopup() {
   const { user, isAdmin } = useSimpleAuth()
   const { notifications, markAsRead } = useNotifications()
+  const { open: chatOpen, startDmWith } = useChatUI()
   const { toast } = useToast()
   const isMobile = useIsMobile()
   const router = useRouter()
 
-  // 当前在显的通知队列（最多 MAX_VISIBLE 条）
-  const [queue, setQueue] = useState<Notification[]>([])
-  // 每条卡片的展示视图（公告回填后更新对应条目）
+  // 当前在显的通知队列（公开通知 + 私信，最多 MAX_VISIBLE 条）
+  const [queue, setQueue] = useState<QueueItem[]>([])
+  // 每条卡片的展示视图（公告/私信回填后更新对应条目）
   const [views, setViews] = useState<Record<string, CardView>>({})
+  // 私信发送者的资料回填缓存：senderId → { username, avatar_url }，点击跳转时复用
+  const dmProfileRef = useRef<Map<string, { username: string; avatar_url?: string | null }>>(new Map())
+  // chatOpen 的 ref 镜像：realtime 回调里读取，避免 chatOpen 变化导致重订阅
+  const chatOpenRef = useRef(chatOpen)
+  useEffect(() => {
+    chatOpenRef.current = chatOpen
+  }, [chatOpen])
 
   const [isAndroid] = useState(detectAndroid)
   // 入场动画跑完再开毛玻璃，避免 spring 期间每帧重采样模糊（安卓掉帧主因）
@@ -185,7 +238,7 @@ export default function AnnouncementPopup() {
     setViews({})
   }, [user?.id])
 
-  // 候选选择：每当 notifications 变化，把「未弹过」的新通知补进队列，截断到 MAX_VISIBLE。
+  // 候选选择：每当 notifications 变化，把「未弹过」的新公开通知补进队列，截断到 MAX_VISIBLE。
   // 实时到达（realtime 推新）与离线补弹（登入首次拉取填充列表）都走这一条 effect。
   useEffect(() => {
     if (!user) return
@@ -193,6 +246,7 @@ export default function AnnouncementPopup() {
     const candidates = notifications
       .filter((n) => !popped.has(n.id))
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      .map((n): QueueItem => ({ ...n, kind: "notif" }))
 
     setQueue((prev) => {
       const inQueue = new Set(prev.map((n) => n.id))
@@ -208,14 +262,104 @@ export default function AnnouncementPopup() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notifications, user])
 
-  // 为队列中的公告通知异步回填完整标题/内容（非公告类零请求）
+  // 私信实时订阅：收到发给我的新私信 → 若聊天面板未开 → 推进同一队列。
+  // 面板开着时一概不弹（用户正在看聊天）。频道名加后缀避免与 floating-chat 的 dm_incoming 冲突。
+  useEffect(() => {
+    if (!user) return
+    const ch = supabase
+      .channel("dm_incoming_popup")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "dm_messages", filter: `recipient_id=eq.${user.id}` },
+        (payload) => {
+          // 面板开着：不弹（用户正在看聊天）
+          if (chatOpenRef.current) return
+          const m = payload.new as { id: string; sender_id: string; content: string; created_at: string }
+          if (poppedRef.current.has(m.id)) return // 已弹过
+          const dm: DmItem = {
+            kind: "dm",
+            id: m.id,
+            senderId: m.sender_id,
+            content: m.content,
+            created_at: m.created_at,
+          }
+          setQueue((prev) => {
+            if (prev.some((it) => it.id === dm.id)) return prev
+            // 同一发送者连发多条：只保留最新一条，旧的标记 popped 移出，避免刷屏
+            const withoutSameSender = prev.filter((it) => {
+              if (it.kind === "dm" && it.senderId === dm.senderId) {
+                markPopped(it.id)
+                return false
+              }
+              return true
+            })
+            const merged = [dm, ...withoutSameSender]
+            const visible = merged.slice(0, MAX_VISIBLE)
+            const evicted = merged.slice(MAX_VISIBLE)
+            evicted.forEach((it) => markPopped(it.id))
+            return visible
+          })
+        },
+      )
+      .subscribe()
+    return () => {
+      supabase.removeChannel(ch)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user])
+
+  // 异步回填：公告 → getAnnouncement 补全标题/内容；私信 → 批量查 profiles 补全头像/名字。
   useEffect(() => {
     let cancelled = false
     const fill = async () => {
-      for (const n of queue) {
+      // 私信：先收集所有需要回填的 senderId，一次 profiles 查询批量补全
+      const dmNeed = queue.filter(
+        (it): it is DmItem => it.kind === "dm" && (views[it.id] ?? viewOfDm(it)).needProfileFill,
+      )
+      if (dmNeed.length > 0) {
+        const senderIds = Array.from(new Set(dmNeed.map((d) => d.senderId))).filter(
+          (id) => !dmProfileRef.current.has(id),
+        )
+        if (senderIds.length > 0) {
+          try {
+            const { data: profs } = await supabase
+              .from("profiles")
+              .select("id,username,avatar_url")
+              .in("id", senderIds)
+            if (!cancelled && profs) {
+              for (const p of profs as { id: string; username: string; avatar_url: string | null }[]) {
+                dmProfileRef.current.set(p.id, { username: p.username, avatar_url: p.avatar_url })
+              }
+            }
+          } catch {
+            // 回填失败保留占位（「用户」/logo），不阻断展示
+          }
+        }
+        for (const d of dmNeed) {
+          if (cancelled) break
+          const prof = dmProfileRef.current.get(d.senderId)
+          if (!prof) continue
+          setViews((prev) => {
+            const base = prev[d.id] ?? viewOfDm(d)
+            return {
+              ...prev,
+              [d.id]: {
+                ...base,
+                logoUrl: (prof.avatar_url ? cdnUrl(prof.avatar_url) : null) || "/logo.png",
+                title: prof.username || base.title,
+                needProfileFill: false,
+              },
+            }
+          })
+        }
+      }
+
+      // 公告：逐条 getAnnouncement 回填
+      for (const it of queue) {
+        if (it.kind !== "notif") continue
+        const n = it
         const v = views[n.id] ?? viewOf(n)
         if (!v.needAnnouncementFill) continue
-        if (views[n.id] && !views[n.id].needAnnouncementFill) continue // 已回填
         if (!n.announcement_id) continue
         try {
           const ann = await getAnnouncement(n.announcement_id)
@@ -227,6 +371,7 @@ export default function AnnouncementPopup() {
               title: ann.title || v.title,
               body: ann.content || v.body,
               needAnnouncementFill: false,
+              needProfileFill: false,
             },
           }))
         } catch {
@@ -262,10 +407,24 @@ export default function AnnouncementPopup() {
     })
   }
 
-  // 点击主体：复刻 notification-bell.tsx 的 handleNotificationClick（1:1）
-  const handleClick = async (n: Notification) => {
+  // 点击主体：私信 → startDmWith 打开聊天跳到该对话；公开通知 → 复刻铃铛 handleNotificationClick。
+  const handleClick = async (item: QueueItem) => {
     try {
-      dismissOne(n.id)
+      dismissOne(item.id)
+
+      // 私信：打开聊天面板并跳到该发送者的对话（资料用回填缓存，缺则用占位）
+      if (item.kind === "dm") {
+        const prof = dmProfileRef.current.get(item.senderId)
+        startDmWith({
+          id: item.senderId,
+          username: prof?.username ?? "用户",
+          avatar_url: prof?.avatar_url ?? null,
+        })
+        return
+      }
+
+      // 公开通知：标记已读 + 按类型复刻铃铛
+      const n = item
       if (!n.is_read) markAsRead(n.id)
 
       if (n.type === "announcement") {
@@ -305,7 +464,7 @@ export default function AnnouncementPopup() {
       console.error("从通知弹窗打开详情失败:", err)
       if (err?.message?.includes("不存在") || err?.code === "PGRST116") {
         toast({ title: "帖子已被删除", description: "该通知对应的帖子不存在", variant: "destructive" })
-        if (!n.is_read) markAsRead(n.id)
+        if (isNotif(item) && !item.is_read) markAsRead(item.id)
       } else {
         toast({ title: "加载失败", description: "暂时无法加载帖子详情", variant: "destructive" })
       }
@@ -342,12 +501,12 @@ export default function AnnouncementPopup() {
     <div className="ann-pop-root">
       <style>{POPUP_CSS}</style>
       <AnimatePresence mode="popLayout">
-        {queue.map((n) => {
-          const view = views[n.id] ?? viewOf(n)
+        {queue.map((item) => {
+          const view = views[item.id] ?? (isNotif(item) ? viewOf(item) : viewOfDm(item))
           return (
             <PopupCard
-              key={n.id}
-              notification={n}
+              key={item.id}
+              item={item}
               view={view}
               useGlass={useGlass}
               onDismiss={dismissOne}
@@ -396,17 +555,17 @@ export default function AnnouncementPopup() {
 // ─────────────────────────────────────────────────────────────────────────────
 // 单条卡片：倒计时圆环 + 自动消失各自独立（按通知 id 计时）
 function PopupCard({
-  notification,
+  item,
   view,
   useGlass,
   onDismiss,
   onClick,
 }: {
-  notification: Notification
+  item: QueueItem
   view: CardView
   useGlass: boolean
   onDismiss: (id: string) => void
-  onClick: (n: Notification) => void
+  onClick: (item: QueueItem) => void
 }) {
   // 倒计时圆环偏移：0=满环，RING_C=空环
   const [ringOffset, setRingOffset] = useState(0)
@@ -425,7 +584,7 @@ function PopupCard({
     const timer = setTimeout(() => {
       if (!dismissedRef.current) {
         dismissedRef.current = true
-        onDismiss(notification.id)
+        onDismiss(item.id)
       }
     }, AUTO_DISMISS_MS)
     return () => {
@@ -434,7 +593,7 @@ function PopupCard({
       clearTimeout(timer)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [notification.id])
+  }, [item.id])
 
   // 测量内容是否溢出（标题/内容回填后会变化，故依赖 view.body/view.title）
   useLayoutEffect(() => {
@@ -444,12 +603,12 @@ function PopupCard({
       return
     }
     setTruncated(el.scrollHeight - el.clientHeight > 1)
-  }, [notification.id, view.body])
+  }, [item.id, view.body])
 
   const safeDismiss = () => {
     if (dismissedRef.current) return
     dismissedRef.current = true
-    onDismiss(notification.id)
+    onDismiss(item.id)
   }
 
   return (
@@ -469,8 +628,8 @@ function PopupCard({
     >
       <span className="ann-pop-sheen" aria-hidden />
 
-      {/* 主体：点击看详情（按类型跳转/开 Modal） */}
-      <button type="button" className="ann-pop-main" onClick={() => onClick(notification)}>
+      {/* 主体：点击看详情（私信→打开聊天；公开通知→按类型跳转/开 Modal） */}
+      <button type="button" className="ann-pop-main" onClick={() => onClick(item)}>
         <span className="ann-pop-logo">
           <img src={view.logoUrl} alt="通知" />
         </span>
