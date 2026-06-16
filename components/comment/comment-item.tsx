@@ -514,7 +514,7 @@ export default function CommentItem({
                     onCommentDeleted={onCommentDeleted}
                   />
                 ))}
-                {hiddenCount > 0 && (
+                {!showAllReplies && hiddenCount > 0 && (
                   <button
                     onClick={() => setShowAllReplies(true)}
                     className="mt-1 flex items-center gap-1 text-[11px] text-gray-400 hover:text-lime-400"
