@@ -294,10 +294,10 @@ export default function EmailVerifyGate() {
           </div>
         </div>
       ) : (
-        <button type="button" className="evg-ball" aria-label="验证邮箱" onClick={expand}>
-          <span className="evg-ball-ring" aria-hidden />
-          <span className="evg-ball-core" aria-hidden />
-          <MailCheck className="evg-ball-icon" style={{ width: 9, height: 9 }} />
+        <button type="button" className="evg-ball" aria-label="点击完成邮箱验证" onClick={expand}>
+          <span className="evg-ball-haz" aria-hidden />
+          <MailCheck className="evg-ball-icon" aria-hidden />
+          <span className="evg-ball-text">点击完成邮箱验证</span>
         </button>
       )}
     </>,
@@ -493,29 +493,32 @@ const EVG_CSS = `
 .evg-btn-ghost:disabled{ opacity:.5; cursor:default; }
 .evg-serial{ position:absolute; left:0; right:0; bottom:9px; z-index:3; text-align:center; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:9px; letter-spacing:.14em; color:rgba(var(--soft-rgb),0.34); pointer-events:none; }
 
-/* 小球：缩小的实心翠绿球 + 外圈半透明「呼吸灯」光球（来回胀缩）。 */
+/* 收起态：暗红 hazard 长椭圆「点击完成邮箱验证」提示条（替代原来的小绿点）。
+   入场=从小红球闪动→横向伸展成长胶囊（复用验证码报错条 evg-err 的暗红 hazard 观感）；
+   入场后挂一道柔和红光呼吸，保持存在感。点它重新展开验证弹窗。 */
 .evg-ball{
-  position:fixed; left:18px; bottom:96px; z-index:9998; width:42px; height:42px;
-  border:none; background:none; padding:0; cursor:pointer;
-  /* 小球 portal 到 body、在 .evg-root 外，拿不到 root 变量 → 必须自带 */
-  --acc:#2ee36b; --acc-rgb:46,227,107; --ink:#06140c;
-  color:var(--ink);
-  display:flex; align-items:center; justify-content:center;
+  position:fixed; left:18px; bottom:96px; z-index:9998;
+  width:196px; height:40px; padding:0 16px; box-sizing:border-box;
+  display:flex; align-items:center; justify-content:flex-start; gap:8px;
+  overflow:hidden; white-space:nowrap; cursor:pointer;
+  border:1px solid rgba(255,90,90,0.55); border-radius:999px;
+  background:#561414; color:#fff;
+  box-shadow:0 0 16px rgba(220,40,40,0.4), 0 6px 18px rgba(0,0,0,0.4);
+  font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  animation:evg-ball-pop .95s cubic-bezier(0.5,0,0.2,1) both, evg-ball-glow 2.4s ease-in-out 1.1s infinite;
 }
-/* 呼吸灯：半透明光球，中心浓→边缘透（无硬边无暗环），scale+opacity 来回呼吸收缩 */
-.evg-ball-ring{
-  position:absolute; left:50%; top:50%; width:42px; height:42px; border-radius:50%;
-  transform:translate(-50%,-50%); pointer-events:none;
-  background:radial-gradient(circle, rgba(var(--acc-rgb),0.5) 0%, rgba(var(--acc-rgb),0.16) 46%, transparent 72%);
-  animation:evg-ball-breathe 2.6s ease-in-out infinite;
+/* 斜向 hazard 条纹（伸展成胶囊后淡入，与 evg-err 一致） */
+.evg-ball-haz{
+  position:absolute; inset:0; border-radius:999px; pointer-events:none;
+  background:repeating-linear-gradient(-45deg, rgba(0,0,0,0.3) 0, rgba(0,0,0,0.3) 9px, transparent 9px, transparent 20px);
+  opacity:0; animation:evg-err-fade .3s ease-out .64s both;
 }
-/* 中心实心小球（缩小） */
-.evg-ball-core{
-  position:absolute; left:50%; top:50%; width:18px; height:18px; border-radius:50%;
-  transform:translate(-50%,-50%); pointer-events:none;
-  background:var(--acc); box-shadow:0 0 7px rgba(var(--acc-rgb),0.5);
+.evg-ball-icon{ position:relative; z-index:1; width:17px; height:17px; flex:0 0 auto; color:#fff; filter:drop-shadow(0 0 4px rgba(255,120,120,0.6)); }
+.evg-ball-text{
+  position:relative; z-index:1; font-size:13.5px; font-weight:800; letter-spacing:.06em;
+  text-shadow:0 1px 3px rgba(0,0,0,0.55);
+  opacity:0; animation:evg-err-fade .3s ease-out .72s both;
 }
-.evg-ball-icon{ position:relative; z-index:2; }
 
 @keyframes evg-fade{ from{opacity:0} to{opacity:1} }
 @keyframes evg-flash{ 0%{opacity:0} 35%{opacity:.18} 100%{opacity:0} }
@@ -557,12 +560,30 @@ const EVG_CSS = `
   100% { width:100%; height:38px; background:#561414; box-shadow:0 0 16px rgba(220,40,40,0.4); }
 }
 @keyframes evg-err-fade{ from{opacity:0} to{opacity:1} }
-@keyframes evg-ball-breathe{ 0%,100%{ transform:translate(-50%,-50%) scale(0.66); opacity:.4 } 50%{ transform:translate(-50%,-50%) scale(1.3); opacity:.85 } }
+/* 收起提示条入场：白色小球→闪动→变红→横向伸长成暗红长胶囊（宽度固定 196px，非 100%，因 fixed 定位）。
+   前 ~24% 闪动(opacity 跳变)，~34% 起由 40px 圆球横向拉伸到 196px，hazard/文字随后淡入。 */
+@keyframes evg-ball-pop{
+  0%   { width:40px; opacity:0; background:#ffffff; box-shadow:0 0 14px rgba(255,255,255,0.75); }
+  6%   { opacity:1; }
+  10%  { opacity:.4; }
+  14%  { opacity:1; }
+  18%  { opacity:.4; }
+  24%  { opacity:1; background:#ffffff; }
+  34%  { width:40px; background:#ffffff; }
+  44%  { width:46px; background:#ff4d4d; box-shadow:0 0 18px rgba(255,70,70,0.7); }
+  54%  { width:46px; background:#8a1f1f; }
+  100% { width:196px; background:#561414; box-shadow:0 0 16px rgba(220,40,40,0.4), 0 6px 18px rgba(0,0,0,0.4); }
+}
+/* 入场后柔和红光呼吸，保持提示条存在感 */
+@keyframes evg-ball-glow{
+  0%,100%{ box-shadow:0 0 13px rgba(220,40,40,0.32), 0 6px 18px rgba(0,0,0,0.4); }
+  50%    { box-shadow:0 0 24px rgba(255,70,70,0.62), 0 6px 18px rgba(0,0,0,0.4); }
+}
 @media (prefers-reduced-motion: reduce){
   .evg-orb{ display:none; }
   .evg-panel{ animation-duration:.01ms; animation-delay:0s; }
-  .evg-bg-band,.evg-glow,.evg-ball-ring,.evg-flash,.evg-tick-row,.evg-dot,.evg-btn[data-loading="true"],.evg-cell.is-active span,.evg-err{ animation:none; }
-  .evg-err-haz,.evg-err-text{ animation:none; opacity:1; }
+  .evg-bg-band,.evg-glow,.evg-ball,.evg-flash,.evg-tick-row,.evg-dot,.evg-btn[data-loading="true"],.evg-cell.is-active span,.evg-err{ animation:none; }
+  .evg-err-haz,.evg-err-text,.evg-ball-haz,.evg-ball-text{ animation:none; opacity:1; }
   .evg-btn::after{ animation:none; display:none; }
 }
 `
