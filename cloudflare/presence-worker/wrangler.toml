@@ -1,0 +1,28 @@
+name = "presence-worker"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+
+# Durable Object 绑定：全站唯一 PresenceRoom 实例承担在线状态协调
+[[durable_objects.bindings]]
+name = "PRESENCE"
+class_name = "PresenceRoom"
+
+# 首次部署：创建 PresenceRoom 类
+# 用 new_sqlite_classes 而非 new_classes，Free 层才支持（CF 2024 政策）
+# 注：我们代码里不调用 storage API，纯内存 + WS Hibernation，SQLite 后端不影响行为
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["PresenceRoom"]
+
+# 非敏感变量（可进 git）
+[vars]
+PRESENCE_ENABLED = "true"
+# CORS 白名单（前端来源），逗号分隔。注意不要含尾斜杠。
+ALLOWED_ORIGINS = "https://hanakos.cc,https://www.hanakos.cc,http://localhost:3000"
+
+# 路由（部署后子域名生效；首次部署可先注释，用 *.workers.dev 测好再上）
+# routes = [
+#   { pattern = "presence.hanakos.cc/*", zone_name = "hanakos.cc" }
+# ]
+
+# 敏感凭证用 `wrangler secret put SUPABASE_JWT_SECRET` 注入，不进此文件

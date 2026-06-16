@@ -16,6 +16,9 @@ import dynamic from "next/dynamic"
 // NotificationProvider 需要同步加载（Navigation 和页面都依赖其 Context）
 import { NotificationProvider } from "@/contexts/notification-context"
 import { ChatUIProvider } from "@/contexts/chat-ui-context"
+// 全站在线状态（CF Durable Object + WebSocket）：登录即维持连接，
+// 供私聊 header 在线/离线圆点、大厅在线人数复用；未配置 WS URL 时静默降级
+import { PresenceProvider } from "@/contexts/presence-context"
 // 音乐播放上下文提升到全站：跨页面后台续播（音频元素 + 播放状态随 app 生命周期常驻）
 import { PlaybackProvider } from "@/app/music/_context/PlaybackContext"
 
@@ -84,6 +87,9 @@ export function Providers({ children }: { children: ReactNode }) {
             `}
           </Script>
 
+          {/* PresenceProvider：全站在线状态（CF Durable Object + WebSocket）；
+              登录即建连、断开即离线；未配置 NEXT_PUBLIC_PRESENCE_WS_URL 时静默降级 */}
+          <PresenceProvider>
           {/* NotificationProvider 必须包裹所有使用 useNotifications 的组件（Navigation、页面等） */}
           <NotificationProvider>
             {/* CinemaModeProvider 让首页和导航栏共享同一份影院模式状态 */}
@@ -128,6 +134,7 @@ export function Providers({ children }: { children: ReactNode }) {
             </ChatUIProvider>
             </CinemaModeProvider>
           </NotificationProvider>
+          </PresenceProvider>
         </PostsProvider>
         </BannedGate>
       </SimpleAuthProvider>
