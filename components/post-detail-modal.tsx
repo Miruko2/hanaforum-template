@@ -150,8 +150,17 @@ export default function PostDetailModal({
     }
     // 桌面：飞入克隆已飞到位（flyDone）才回飞；手机：飞入是普通淡入（无 flyDone），
     // 只要量到了起止矩形与图源就回飞（飞回动效手机也保留）。
+    // 手机整页滚动后，图片可能已滚出顶部视野 —— 此时回飞起点会是屏幕外的负 top，
+    // 图片会「从屏幕上方瞬移飞回卡片」很突兀。故手机上若图已大幅滚出视野（顶部可见
+    // 部分不足一半），放弃回飞、走普通淡出关闭，更自然。
+    const mobileImageScrolledAway = (() => {
+      if (!isMobile || !el) return false
+      const r = el.getBoundingClientRect()
+      // r.bottom < 0 = 图完全滚出顶部；r.top + r.height/2 < 0 = 超过一半已滚出
+      return r.height > 0 && r.top + r.height / 2 < 0
+    })()
     const canFlyBack = isMobile
-      ? !!(heroActive && target && flyBackTarget && sourceSrc)
+      ? !!(heroActive && target && flyBackTarget && sourceSrc) && !mobileImageScrolledAway
       : !!(heroActive && flyDone && target && sourceRect && sourceSrc)
     if (canFlyBack) {
       closedRef.current = false
@@ -532,8 +541,25 @@ export default function PostDetailModal({
                   </div>
                 </div>
               ) : (
-                /* 竖版：图/文字Hero 在上，文字评论在下（手机端） */
-                <div className="relative flex flex-col">
+                /* 竖版：图 + 内容在同一个滚动容器里（手机端），整体上下滚动。
+                   —— 图片不再钉死顶部：滚下去时图片随之滚出视野，给内容让出全部空间，
+                   解决「图片一直显示影响可读性」。
+                   1) 单一滚动容器（overflow-y-auto + max-h-[82vh]）：图、模糊带、内容
+                      全在里面一起滚。GlassMorph 子容器不继承外层 maxHeight，故限高挂这里。
+                   2) 图片高度由 PostCardImage 的 inDetailView 分支用「单一 aspect-ratio」撑出，
+                      absolute img 准确填满、不露白。
+                   3) 渐进模糊带做成内容顶部的「贴纸块」(absolute 在内容 wrapper 顶)，
+                      随滚动上移、最后压在图底↔内容顶的接缝处淡出。
+                   4) heroRef 仍挂在图容器上：handleClose 关闭时会重新 getBoundingClientRect，
+                      容器随滚动位移，量到的就是当前真实屏幕矩形，回飞起点仍准确。 */
+                <div
+                  className="relative max-h-[82vh] overflow-y-auto"
+                  style={{
+                    WebkitOverflowScrolling: "touch",
+                    overscrollBehavior: "contain",
+                  }}
+                >
+                  {/* 图片区：随滚动上移，滚出顶部即消失 */}
                   <div ref={heroRef} className="relative w-full overflow-hidden">
                     {post.image_url ? (
                       hasMultipleImages ? (
@@ -584,54 +610,13 @@ export default function PostDetailModal({
                     )}
                   </div>
 
-                  {/* 手机端内容区：padding 加大 (p-6 → p-7) 让正文有更多呼吸空间；
-                      maxHeight 同步调整为 calc(82vh - 280px) 跟新的外层匹配 */}
-                  <div className="p-7 overflow-y-auto" style={{ maxHeight: "calc(82vh - 280px)" }}>
+                  {/* 内容区：整块随外层滚动容器上下滚动 → 图片随之滚出视野。
+                      图片↔内容之间不再加模糊/暗影过渡带（整页滚动后它的定位会跟着内容
+                      上移，悬在半空很难看），改为图片直接接内容、由内容自身的不透明
+                      背景自然遮挡图底。 */}
+                  <div className="relative z-20 p-7">
                     {contentBody}
                   </div>
-
-                  {/* 图片下缘「分层渐进模糊」带（仅手机竖版）：整条落在图片侧，底边压在
-                      「图片 ↔ 卡片」接缝上。放在 flex-col 上、绝对定位，不受图片容器
-                      overflow-hidden 裁切。
-                      用 4 层叠加（blur 2→5→10→18px），每层用 mask 只显示一段、自上而下错位，
-                      叠出真正「上清晰 → 下模糊」的渐进效果（单层 backdrop-filter + mask 在
-                      WebView 里只是均匀模糊按透明度淡入，发浑不顺，故拆成多层）。
-                      最后叠一层向下压暗的暗影，把图片底缘压到接近暗卡片，淡化接缝硬边。
-                      top 依赖详情页竖版图片固定高度 300px（见 PostCardImage 的 h-[300px]）。 */}
-                  {post.image_url && (
-                    <div
-                      className="pointer-events-none absolute inset-x-0 z-30"
-                      style={{ top: "calc(300px - 88px)", height: "88px" }}
-                    >
-                      {/* 移动端降级：原 4 层 backdrop-filter 渐进模糊并为 1 层，省 3 层全宽
-                          实时高斯模糊。单层用 mask 让模糊自上而下淡入，配合下方暗影过渡
-                          「图片 ↔ 卡片」接缝。代价：渐进感略弱，但打开时 GPU 开销大降。
-                          安卓再降一档：连这 1 层也去掉（面板入场 transform 期间它每帧
-                          重采样图片区），只留下方暗影渐变压接缝。 */}
-                      {!IS_ANDROID && (
-                        <div
-                          className="absolute inset-0"
-                          style={{
-                            backdropFilter: "blur(8px)",
-                            WebkitBackdropFilter: "blur(8px)",
-                            maskImage:
-                              "linear-gradient(to bottom, transparent 0%, #000 55%, #000 100%)",
-                            WebkitMaskImage:
-                              "linear-gradient(to bottom, transparent 0%, #000 55%, #000 100%)",
-                          }}
-                        />
-                      )}
-                      {/* 向下压暗的暗影：顶部 30% 不压暗（保持清亮、不在顶端造第二条边），
-                          往下逐渐加深，把图片最底缘压到接近暗卡片，淡化接缝 */}
-                      <div
-                        className="absolute inset-0"
-                        style={{
-                          background:
-                            "linear-gradient(to bottom, rgba(0,0,0,0) 0%, rgba(0,0,0,0) 30%, rgba(0,0,0,0.6) 100%)",
-                        }}
-                      />
-                    </div>
-                  )}
                 </div>
               )}
             </GlassMorph>

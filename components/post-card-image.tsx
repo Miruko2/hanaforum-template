@@ -91,8 +91,28 @@ export default function PostCardImage({
   const getImageSizing = (): { heightClass?: string; aspectStyle?: React.CSSProperties } => {
     // 横版详情：由父容器控制高度，自身铺满
     if (fillParent) return { heightClass: 'h-full' };
-    if (inDetailView) return { heightClass: 'h-[300px]' }; // 详情页固定高度
+    // 手机竖版详情：按图片真实比例自适应高度。image_ratio 存的是 height/width，
+    // CSS aspectRatio 要 width/height，故取倒数。然后 clamp 到手机可读区间：
+    //   · 横图(比例高→容器矮)：自然偏扁；
+    //   · 竖图(比例低→容器高)：下限 0.56（≈9:16），防超长竖图把面板几乎全占成图。
+    // 关键：这里「不」再设 maxHeight。之前 aspect-ratio + maxHeight 双约束打架 ——
+    // 当算出的高度超过 maxHeight 时容器被钳到 maxHeight，但 aspect-ratio 仍要求更高，
+    // 子层(absolute img)按容器填、aspect 算出的多余高度却露成空白带（= 你看到的 div 露白）。
+    // 单一约束（只 aspect-ratio）后高度唯一、无歧义。
+    if (inDetailView) {
+      const stored = post.image_ratio // height/width
+      if (stored && stored > 0) {
+        const wOverH = 1 / stored // width/height
+        // clamp 到 [0.56, 2.4]：0.56≈9:16 竖、2.4≈12:5 超宽横
+        const clamped = Math.min(Math.max(wOverH, 0.56), 2.4)
+        return { aspectStyle: { aspectRatio: String(clamped) } }
+      }
+      // 无 ratio 元数据（老帖/无图占位回退）：保留固定高度兜底
+      return { heightClass: 'h-[300px]' }
+    }
 
+    // 列表卡片用 aspect-ratio，按图片真实比例撑高，不再统一裁成几个固定档位
+    // （注：此分支历史语义与存储端相反，是既有状态，本次不动，避免改变全站列表卡视觉）
     // 图片宽高比 = 宽 / 高，默认 1.5:1
     const rawRatio = post.image_ratio || 1.5;
     // 裁剪上下限：避免超高竖图(把卡片撑得过长)或超宽横图(变成细条)

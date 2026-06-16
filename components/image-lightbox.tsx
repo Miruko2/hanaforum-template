@@ -157,11 +157,16 @@ export default function ImageLightbox({
     const el = trackRef.current
     if (!el || el.clientWidth === 0) return
     const i = Math.round(el.scrollLeft / el.clientWidth)
-    setCurrent((prev) => {
-      if (i !== prev) onIndexChange?.(i)
-      return i
-    })
-  }, [onIndexChange])
+    // 只更新自身 state；向父级 onIndexChange 的通知改由下面的 effect 在提交后发出，
+    // 避免在 setState 的 updater 里同步调用父级 setter（=「渲染另一组件时更新本组件」警告）。
+    setCurrent(i)
+  }, [])
+
+  // current 变化后，再通知父级（受控 index 同步）。放在 effect 里 = 提交阶段调用，
+  // 不再卡在 setState updater 中途，杜绝跨组件同步 setState 警告。
+  useEffect(() => {
+    onIndexChange?.(current)
+  }, [current, onIndexChange])
 
   // 键盘：Esc 关闭，左右切换
   useEffect(() => {
