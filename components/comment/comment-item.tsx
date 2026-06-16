@@ -6,7 +6,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { formatDate, cn } from "@/lib/utils"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
-import { Reply, ThumbsUp, Trash2 } from "lucide-react"
+import { Reply, ThumbsUp, Trash2, ChevronDown, ChevronUp } from "lucide-react"
 import type { Comment } from "@/lib/types"
 import CommentForm from "./comment-form"
 import { StickerText } from "@/components/stickers/sticker-text"
@@ -25,12 +25,239 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 
+// 取评论作者展示名（用于 @提及与回复行署名）
+function authorNameOf(comment: Comment): string {
+  return comment.user?.username || comment.username || "匿名用户"
+}
+
+// 拍平回复树（含历史多层嵌套数据）为一条线性列表，供扁平化渲染。
+// - 一级回复（直接挂在主评论下）：mentionName 留空。
+// - 二级及更深（历史 3 层数据）：mentionName = 其直接父回复的作者名，
+//   渲染时前置 @xxx，让用户仍能看到「这条回复是给谁的」。
+function flattenReplies(
+  replies: Comment[] | undefined,
+  parentAuthorName?: string,
+): Array<{ reply: Comment; mentionName?: string }> {
+  if (!replies || replies.length === 0) return []
+  const result: Array<{ reply: Comment; mentionName?: string }> = []
+  for (const reply of replies) {
+    result.push({ reply, mentionName: parentAuthorName })
+    if (reply.replies && reply.replies.length > 0) {
+      result.push(...flattenReplies(reply.replies, authorNameOf(reply)))
+    }
+  }
+  return result
+}
+
+// 轻量回复行：嵌在主评论卡片内部，无独立卡片边框。
+function ReplyRow({
+  reply,
+  mentionName,
+  postId,
+  rootId,
+  isAdmin,
+  onCommentAdded,
+  onCommentDeleted,
+}: {
+  reply: Comment
+  mentionName?: string
+  postId: string
+  rootId: string
+  isAdmin?: boolean
+  onCommentAdded?: (comment: Comment | null) => void
+  onCommentDeleted?: (commentId: string) => void
+}) {
+  const { user } = useSimpleAuth()
+  const { toast } = useToast()
+  const router = useRouter()
+  const [showReplyForm, setShowReplyForm] = useState(false)
+  const [isLiked, setIsLiked] = useState(false)
+  const [likesCount, setLikesCount] = useState(reply.likes_count || reply.likes || 0)
+  const [isLiking, setIsLiking] = useState(false)
+  const [showDeleteAlert, setShowDeleteAlert] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
+
+  const displayName = authorNameOf(reply)
+  const avatarUrl = reply.user?.avatar_url || "/logo.png"
+  const getInitial = (username?: string) => (username ? username.charAt(0).toUpperCase() : "U")
+  const goToProfile = () => router.push(`/user?id=${reply.user_id}`)
+  const isAuthor = !!user && user.id === reply.user_id
+  const canDelete = isAuthor || isAdmin
+
+  // 点赞状态与计数（与主评论一致逻辑）
+  useEffect(() => {
+    if (!user) return
+    let active = true
+    ;(async () => {
+      try {
+        const liked = await checkCommentLiked(reply.id, user.id)
+        if (active) setIsLiked(!!liked)
+      } catch {
+        /* ignore */
+      }
+    })()
+    return () => {
+      active = false
+    }
+  }, [reply.id, user])
+
+  useEffect(() => {
+    const fetchLikesCount = async () => {
+      try {
+        setLikesCount(await getCommentLikesCount(reply.id))
+      } catch {
+        /* ignore */
+      }
+    }
+    fetchLikesCount()
+    const channel = supabase
+      .channel(`comment-likes-${reply.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "comment_likes", filter: `comment_id=eq.${reply.id}` },
+        fetchLikesCount,
+      )
+      .subscribe()
+    return () => {
+      channel.unsubscribe()
+    }
+  }, [reply.id])
+
+  const handleLikeToggle = async () => {
+    if (!user) {
+      toast({ title: "请先登录后再点赞" })
+      return
+    }
+    if (isLiking) return
+    try {
+      setIsLiking(true)
+      const next = !isLiked
+      setIsLiked(next)
+      setLikesCount((p) => (next ? p + 1 : Math.max(0, p - 1)))
+      if (next) await likeComment(reply.id, user.id)
+      else await unlikeComment(reply.id, user.id)
+      setLikesCount(await getCommentLikesCount(reply.id))
+    } catch {
+      setIsLiked((v) => !v)
+      setLikesCount((p) => (isLiked ? p + 1 : Math.max(0, p - 1)))
+    } finally {
+      setIsLiking(false)
+    }
+  }
+
+  const handleDelete = async () => {
+    if (isDeleting) return
+    try {
+      setIsDeleting(true)
+      await deleteComment(reply.id)
+      setShowDeleteAlert(false)
+      onCommentDeleted?.(reply.id)
+      toast({ title: "已删除", description: "回复已删除" })
+    } catch (err: any) {
+      const msg = err?.message?.includes("权限") ? "你没有权限删除此回复" : "删除失败，请稍后重试"
+      toast({ title: "删除失败", description: msg, variant: "destructive" })
+      setIsDeleting(false)
+    }
+  }
+
+  return (
+    <div className="py-1.5">
+      <div className="flex gap-2 items-start">
+        <button type="button" onClick={goToProfile} className="shrink-0" aria-label={`查看 ${displayName} 的主页`}>
+          <Avatar className="h-6 w-6 cursor-pointer">
+            <AvatarImage src={cdnUrl(avatarUrl) || "/logo.png"} />
+            <AvatarFallback>{getInitial(displayName)}</AvatarFallback>
+          </Avatar>
+        </button>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span
+              className="text-xs font-medium text-gray-200 cursor-pointer hover:text-lime-400"
+              onClick={goToProfile}
+            >
+              {displayName}
+            </span>
+            {mentionName && <span className="text-xs text-gray-500">回复 @{mentionName}</span>}
+            <span className="text-[10px] text-gray-600">{formatDate(reply.created_at)}</span>
+          </div>
+          <p className="mt-0.5 text-xs text-gray-300 break-all whitespace-pre-wrap">
+            <StickerText text={reply.content} />
+          </p>
+          <div className="mt-1 flex items-center gap-3">
+            <button
+              className={`flex items-center gap-1 text-[11px] ${isLiked ? "text-lime-500" : "text-gray-500 hover:text-lime-500"}`}
+              onClick={handleLikeToggle}
+              disabled={isLiking || !user}
+            >
+              <ThumbsUp className="h-3 w-3" />
+              <span>{likesCount}</span>
+            </button>
+            <button
+              onClick={() => setShowReplyForm((v) => !v)}
+              className="flex items-center gap-1 text-[11px] text-gray-500 hover:text-lime-500"
+            >
+              <Reply className="h-3 w-3" />
+            </button>
+            {canDelete && (
+              <button
+                onClick={() => setShowDeleteAlert(true)}
+                disabled={isDeleting}
+                className="flex items-center text-[11px] text-gray-500 hover:text-red-400 disabled:opacity-50"
+                aria-label="删除回复"
+              >
+                <Trash2 className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+          {showReplyForm && (
+            <div className="mt-2">
+              <CommentForm
+                postId={postId}
+                parentId={rootId /* 关键：回复某条回复时 parent_id 仍指向顶层主评论 */}
+                isReply
+                replyingTo={displayName}
+                mentionTarget={displayName /* 内容前置 @displayName */}
+                onCommentAdded={(newReply) => {
+                  setShowReplyForm(false)
+                  onCommentAdded?.(newReply)
+                }}
+                onCancel={() => setShowReplyForm(false)}
+              />
+            </div>
+          )}
+        </div>
+      </div>
+
+      <AlertDialog open={showDeleteAlert} onOpenChange={setShowDeleteAlert}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认删除</AlertDialogTitle>
+            <AlertDialogDescription>确定要删除这条回复吗？此操作不可撤销。</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault()
+                handleDelete()
+              }}
+              disabled={isDeleting}
+              className="bg-red-500 hover:bg-red-600 text-white"
+            >
+              {isDeleting ? "删除中..." : "确认删除"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  )
+}
+
 export interface CommentItemProps {
   comment: Comment
   postId: string
   onCommentAdded?: (comment: Comment | null) => void
   onCommentDeleted?: (commentId: string) => void
-  level?: number
   isOptimistic?: boolean
   isAdmin?: boolean   // 当前用户是否是管理员
 }
@@ -40,7 +267,6 @@ export default function CommentItem({
   postId,
   onCommentAdded,
   onCommentDeleted,
-  level = 0,
   isOptimistic = false,
   isAdmin = false
 }: CommentItemProps) {
@@ -50,6 +276,7 @@ export default function CommentItem({
   const [isLiking, setIsLiking] = useState(false)
   const [showDeleteAlert, setShowDeleteAlert] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [showAllReplies, setShowAllReplies] = useState(false)
   const { user } = useSimpleAuth()
   const { toast } = useToast()
   const router = useRouter()
@@ -59,19 +286,13 @@ export default function CommentItem({
   const isAuthor = !!user && user.id === comment.user_id
   const canDelete = !isOptimistic && (isAuthor || isAdmin)
 
-  // 最大嵌套层级
-  const MAX_NESTING_LEVEL = 3
-
-  // 限制嵌套回复层级
-  const canReply = level < MAX_NESTING_LEVEL
-
   // 获取用户名首字母作为头像备用显示
   const getInitial = (username?: string) => {
     return username ? username.charAt(0).toUpperCase() : "U"
   }
 
   // 用户名显示逻辑
-  const displayName = comment.user?.username || comment.username || "匿名用户"
+  const displayName = authorNameOf(comment)
 
   // 头像URL：无头像用户统一使用站点 logo 作为默认头像
   const avatarUrl = comment.user?.avatar_url || "/logo.png"
@@ -194,7 +415,7 @@ export default function CommentItem({
   }
 
   return (
-    <div className={`p-4 rounded-lg bg-black/20 border border-gray-800/50 ${level > 0 ? "ml-6" : ""}`}>
+    <div className="p-4 rounded-lg bg-black/20 border border-gray-800/50">
       <div className="flex gap-3 items-start">
         <button
           type="button"
@@ -233,15 +454,13 @@ export default function CommentItem({
               <span>{likesCount}</span>
             </button>
 
-            {canReply && (
-              <button
-                onClick={() => setShowReplyForm(!showReplyForm)}
-                className="flex items-center gap-1 text-xs text-gray-500 hover:text-lime-500"
-              >
-                <Reply className="h-3.5 w-3.5" />
-                <span>回复</span>
-              </button>
-            )}
+            <button
+              onClick={() => setShowReplyForm(!showReplyForm)}
+              className="flex items-center gap-1 text-xs text-gray-500 hover:text-lime-500"
+            >
+              <Reply className="h-3.5 w-3.5" />
+              <span>回复</span>
+            </button>
 
             {canDelete && (
               <button
@@ -274,22 +493,48 @@ export default function CommentItem({
             </div>
           )}
 
-          {/* 渲染子评论/回复 */}
-          {comment.replies && comment.replies.length > 0 && (
-            <div className="mt-3 space-y-2">
-              {comment.replies.map((reply) => (
-                <CommentItem
-                  key={reply.id}
-                  comment={reply}
-                  postId={postId}
-                  onCommentAdded={onCommentAdded}
-                  onCommentDeleted={onCommentDeleted}
-                  level={level + 1}
-                  isAdmin={isAdmin}
-                />
-              ))}
-            </div>
-          )}
+          {/* 扁平化渲染所有回复（含历史多层嵌套数据，统一拍平挂在本卡片下）。
+              默认只展示 2 条，其余收进「展开 N 条回复」，避免回复过多时滚不到下一条主评论。 */}
+          {(() => {
+            const flatReplies = flattenReplies(comment.replies)
+            if (flatReplies.length === 0) return null
+            const visibleReplies = showAllReplies ? flatReplies : flatReplies.slice(0, 2)
+            const hiddenCount = flatReplies.length - 2
+            return (
+              <div className="mt-3 border-l border-gray-700/50 pl-3">
+                {visibleReplies.map(({ reply, mentionName }) => (
+                  <ReplyRow
+                    key={reply.id}
+                    reply={reply}
+                    mentionName={mentionName}
+                    postId={postId}
+                    rootId={comment.id /* 回复行的回复一律挂到顶层主评论 */}
+                    isAdmin={isAdmin}
+                    onCommentAdded={onCommentAdded}
+                    onCommentDeleted={onCommentDeleted}
+                  />
+                ))}
+                {hiddenCount > 0 && (
+                  <button
+                    onClick={() => setShowAllReplies(true)}
+                    className="mt-1 flex items-center gap-1 text-[11px] text-gray-400 hover:text-lime-400"
+                  >
+                    <ChevronDown className="h-3 w-3" />
+                    <span>展开 {hiddenCount} 条回复</span>
+                  </button>
+                )}
+                {showAllReplies && flatReplies.length > 2 && (
+                  <button
+                    onClick={() => setShowAllReplies(false)}
+                    className="mt-1 flex items-center gap-1 text-[11px] text-gray-400 hover:text-lime-400"
+                  >
+                    <ChevronUp className="h-3 w-3" />
+                    <span>收起</span>
+                  </button>
+                )}
+              </div>
+            )
+          })()}
         </div>
       </div>
 

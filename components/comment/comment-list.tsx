@@ -388,16 +388,14 @@ export default function CommentList({
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
   }, [comments, optimisticComments])
 
-  // 计算总评论数（包括回复）
+  // 计算总评论数（递归统计所有后代回复，兼容历史多层嵌套数据）
   const countTotalComments = (comments: Comment[]): number => {
     let count = comments.length
-
     for (const comment of comments) {
       if (comment.replies && comment.replies.length > 0) {
-        count += comment.replies.length
+        count += countTotalComments(comment.replies)
       }
     }
-
     return count
   }
 

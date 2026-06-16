@@ -20,6 +20,9 @@ interface CommentFormProps {
   isReply?: boolean
   replyingTo?: string
   optimized?: boolean // 是否使用优化模式
+  // 回复某条「回复」时传入其作者名：提交内容会前置 @提及，使 parent_id 指向顶层主评论后
+  // 仍能表达「这条回复是给谁的」。注意与 replyingTo 不同——后者只控制横幅文案，不写进内容。
+  mentionTarget?: string
 }
 
 export default function CommentForm({
@@ -30,6 +33,7 @@ export default function CommentForm({
   isReply = false,
   replyingTo,
   optimized = false,
+  mentionTarget,
 }: CommentFormProps) {
   const [content, setContent] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -84,7 +88,10 @@ export default function CommentForm({
         setIsSubmitting(true)
 
         // 保存评论内容的副本
-        const commentContent = content.trim()
+        // 若指定了 mentionTarget（回复某条回复时），在内容前前置 @提及，
+        // 这样即便 parent_id 指向顶层主评论，接收方也能看到「这条是给我的」。
+        const rawContent = content.trim()
+        const commentContent = mentionTarget ? `@${mentionTarget} ${rawContent}` : rawContent
         
         // 在静态导出环境下，使用简化的提交流程
         if (optimized) {
@@ -168,7 +175,7 @@ export default function CommentForm({
         setIsSubmitting(false)
       }
     },
-    [user, content, postId, parentId, isReply, onCommentAdded, onCancel, toast, optimized],
+    [user, content, postId, parentId, isReply, onCommentAdded, onCancel, toast, optimized, mentionTarget],
   )
 
   return (
