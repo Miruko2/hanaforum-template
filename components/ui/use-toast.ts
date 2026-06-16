@@ -9,10 +9,13 @@ import type {
 } from "@/components/ui/toast"
 
 const TOAST_LIMIT = 1
-// dismiss 后到真正从 state 移除的延迟。视觉淡出由 <ToastProvider duration={4000}>
-// 驱动；这里只管淡出后多快从内部 state 清掉，让 TOAST_LIMIT=1 不卡住下一条。
-// 设 1s：足够 Radix 退场动画跑完，又不至于让旧通知长期占位。
+// dismiss 后到真正从 state 移除的延迟：只够 Radix 退场动画跑完，让 TOAST_LIMIT=1
+// 不被旧通知卡住。
 const TOAST_REMOVE_DELAY = 1000
+// 自动消失时长。关键：不依赖 <ToastProvider duration>（Radix 自带计时器），因为 Radix
+// 会在「窗口失焦 / 指针悬停」时暂停计时，而安卓 WebView(Capacitor 壳) 的焦点语义常使其
+// 永久暂停 → 通知永不消失。这里改用显式 setTimeout 强制收起，桌面/WebView 行为一致、可预期。
+const TOAST_AUTO_DISMISS = 4000
 
 type ToasterToast = ToastProps & {
   id: string
@@ -166,6 +169,16 @@ function toast({ ...props }: Toast) {
       },
     },
   })
+
+  // 显式兜底计时：TOAST_AUTO_DISMISS 后强制收起（走 dismiss → open:false → 退场动画
+  // → TOAST_REMOVE_DELAY 后移除）。不靠 Radix duration，避免 WebView 失焦导致永不消失。
+  // 仅当仍在显示时才收：用户可能已手动点 ✕ 关闭，或被新通知替换（TOAST_LIMIT=1）。
+  if (typeof window !== "undefined") {
+    window.setTimeout(() => {
+      const current = memoryState.toasts.find((t) => t.id === id)
+      if (current?.open) dismiss()
+    }, TOAST_AUTO_DISMISS)
+  }
 
   return {
     id: id,

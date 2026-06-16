@@ -146,8 +146,10 @@ export function Toaster() {
   const isAndroidLike = useIsAndroidLike()
 
   return (
-    // duration：每条通知 4s 后自动淡出（Radix 触发 onOpenChange(false) → 进出场动画）。
-    // 仍可手动点 ✕ 关闭；hover/focus 时 Radix 会暂停计时，给用户读长文本的时间。
+    // 自动消失由 use-toast.ts 的显式计时器驱动（4s）——不靠 Radix 的 duration 计时器，
+    // 因为它在窗口失焦/悬停时会暂停，安卓 WebView 里会被永久卡住、永不消失。
+    // 这里仍保留 duration={4000} 作冗余兜底（桌面有焦点时也会触发，时长一致）。
+    // 仍可手动点 ✕ 关闭。
     <ToastProvider duration={4000}>
       <style>{TOAST_CSS}</style>
       {toasts.map(function ({ id, title, description, action, variant, ...props }) {
