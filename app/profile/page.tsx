@@ -17,6 +17,7 @@ import {
   UsernameTakenError,
 } from "@/lib/profiles"
 import ProfileHeader from "./_components/profile-header"
+import { toDisplayName } from "@/lib/display-name"
 import FollowStats from "./_components/follow-stats"
 import MyPosts from "./_components/my-posts"
 import { getUserPosts } from "@/lib/supabase-optimized"
@@ -60,12 +61,12 @@ export default function ProfilePage() {
       const fetchProfile = async () => {
         // 先从 metadata 取 username（兜底）
         if (user.user_metadata?.username) {
-          setUsername(user.user_metadata.username)
+          setUsername(toDisplayName(user.user_metadata.username))
         }
         // 再用 profiles 表覆盖（权威）
         const profile = await getOwnProfile(user.id)
         if (profile) {
-          if (profile.username) setUsername(profile.username)
+          if (profile.username) setUsername(toDisplayName(profile.username))
           setAvatarUrl(profile.avatar_url || null)
           setBackgroundUrl(profile.background_url || null)
           setBio(profile.bio || "")

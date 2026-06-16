@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useLayoutEffect, useCallback, useRef, memo } from "react"
 import { cdnUrl } from "@/lib/cdn-url"
+import { toDisplayName } from "@/lib/display-name"
 import { MoreVertical, MessageSquare, ThumbsUp, Trash2, X, AlertCircle, Pin } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { createPortal } from "react-dom"
@@ -100,8 +101,8 @@ const PostCard = memo(function PostCard({
   const isMobile = useIsMobile()
 
   // 计算派生状态 - 确保在所有可能的位置都查找用户名
-  const username = post.username || 
-                   post.users?.username || 
+  // toDisplayName: 兜底历史「邮箱被存成用户名」的残留数据，显示时截断 @ 前缀，绝不露完整邮箱
+  const username = toDisplayName(post.username || post.users?.username) ||
                    `用户_${post.user_id.substring(0, 6)}`;
   const avatarUrl = post.users?.avatar_url || null;
 
