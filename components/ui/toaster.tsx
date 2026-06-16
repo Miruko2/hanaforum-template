@@ -34,12 +34,12 @@ const TOAST_CSS = `
 /* 背景镂空文字流：两行斜向、缓慢、互相反向 */
 .zt-ticker{ position:absolute; inset:0; overflow:hidden; pointer-events:none; z-index:0; }
 .zt-tick{ position:absolute; left:-50%; right:-50%; top:50%; transform:rotate(13deg); }
-.zt-tick-1{ margin-top:-30px; }
-.zt-tick-2{ margin-top:2px; }
+.zt-tick-1{ margin-top:-40px; }
+.zt-tick-2{ margin-top:4px; }
 .zt-tick-row{
   display:inline-block; white-space:nowrap; line-height:1;
-  font-size:28px; font-weight:900; font-style:italic; letter-spacing:.05em;
-  color:transparent; -webkit-text-stroke:1px rgba(255,255,255,0.06);
+  font-size:38px; font-weight:900; font-style:italic; letter-spacing:.05em;
+  color:transparent; -webkit-text-stroke:1.5px rgba(255,255,255,0.1);
   will-change:transform;
 }
 .zt-tick-1 .zt-tick-row{ animation:zt-tickL 42s linear infinite; }
