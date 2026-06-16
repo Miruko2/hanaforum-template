@@ -13,7 +13,6 @@ import { useIsAndroid } from "../_lib/useIsAndroid"
 import { useIsMobile } from "../_lib/useIsMobile"
 import { TrackCover } from "./TrackCover"
 import { LyricsEcho } from "./LyricsEcho"
-import { SoundField } from "./SoundField"
 import { LiquidRefraction } from "./LiquidRefraction"
 import { SnowOverlay } from "./SnowOverlay"
 
@@ -255,11 +254,9 @@ function ExpandedInner({
       <div className="absolute inset-0 bg-black/55" />
 
       {/* 详情页背景律动（铺在暗化遮罩之上、卡片之下）：
-          桌面/iPad：液面模式（rain/center）才挂 WebGL 液面；off=默认时不挂、回到原本
-          的详情页样式（暗化遮罩 + 卡片）。安卓/手机走廉价 CSS 水纹（SoundField）。 */}
-      {isMobile ? (
-        <SoundField hue={hue} active={playing} reducedMotion={reducedMotion} vw={vw} />
-      ) : liquidFx === "off" ? null : (
+          仅桌面/iPad 挂载：液面模式（rain/center）才挂 WebGL 液面；off=默认时不挂。
+          安卓/手机不挂任何背景律动（左右声波水纹已移除）。 */}
+      {isMobile || liquidFx === "off" ? null : (
         <>
           <LiquidRefraction
             hue={hue}

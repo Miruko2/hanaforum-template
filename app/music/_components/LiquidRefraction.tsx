@@ -12,7 +12,7 @@ import type { LiquidFx } from "../_context/PlaybackContext"
  * 不碰外网（已核实该文件无任何外部资源拉取）。
  *
  * 仅桌面端挂载（调用方按 useIsMobile 门控）：这是全屏 WebGL 折射着色器，对低配安卓
- * WebView 太重、且无低配机可测，故安卓/手机沿用廉价的 CSS 水纹（见 SoundField）。
+ * WebView 太重、且无低配机可测，故安卓/手机不挂背景律动（详情页仅暗化遮罩 + 卡片）。
  *
  * 折射的底图不是封面本身（跨域贴图会污染 WebGL 纹理、抛安全错），而是按当前曲目
  * hue 现画的一张「深色 + 同色相柔光」渐变（README 推荐的高对比深色底），同源 dataURL，
