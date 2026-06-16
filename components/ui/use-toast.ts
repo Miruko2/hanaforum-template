@@ -9,7 +9,10 @@ import type {
 } from "@/components/ui/toast"
 
 const TOAST_LIMIT = 1
-const TOAST_REMOVE_DELAY = 1000000
+// dismiss 后到真正从 state 移除的延迟。视觉淡出由 <ToastProvider duration={4000}>
+// 驱动；这里只管淡出后多快从内部 state 清掉，让 TOAST_LIMIT=1 不卡住下一条。
+// 设 1s：足够 Radix 退场动画跑完，又不至于让旧通知长期占位。
+const TOAST_REMOVE_DELAY = 1000
 
 type ToasterToast = ToastProps & {
   id: string
