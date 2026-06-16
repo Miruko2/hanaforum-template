@@ -43,6 +43,8 @@ import type { Notification, Post } from "@/lib/types"
 const AUTO_DISMISS_MS = 20000
 // 同时最多可见条数；超出时最老的淡出。
 const MAX_VISIBLE = 5
+// 同一发送者的私信在队列里最多并存条数；超出时该 sender 最老的一条让位（不标记 popped）。
+const MAX_PER_SENDER = 3
 // poppedSet 容量上限，防 localStorage 无限增长（保留最近 POPPED_CAP 个 id）。
 const POPPED_CAP = 200
 
@@ -285,17 +287,23 @@ export default function AnnouncementPopup() {
           }
           setQueue((prev) => {
             if (prev.some((it) => it.id === dm.id)) return prev
-            // 同一发送者连发多条：只保留最新一条，旧的标记 popped 移出，避免刷屏
-            const withoutSameSender = prev.filter((it) => {
-              if (it.kind === "dm" && it.senderId === dm.senderId) {
-                markPopped(it.id)
-                return false
-              }
-              return true
-            })
-            const merged = [dm, ...withoutSameSender]
+            // 同一发送者在队列里最多 MAX_PER_SENDER 条：超出时把该 sender 最老的一条移出
+            // 让位给新的。被移出的「不」标记 popped——realtime 事件是一次性的，移除后不会再
+            // 被推回，因此既不占队列、也不会重复弹；保留它在新消息里被看到的可能。
+            const sameSender = prev.filter((it) => it.kind === "dm" && it.senderId === dm.senderId)
+            let next = prev
+            if (sameSender.length >= MAX_PER_SENDER) {
+              // 找该 sender 在队列里最老的一条（created_at 最小）移除
+              const oldest = sameSender.sort(
+                (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+              )[0]
+              next = prev.filter((it) => it.id !== oldest.id)
+            }
+            const merged = [dm, ...next]
             const visible = merged.slice(0, MAX_VISIBLE)
             const evicted = merged.slice(MAX_VISIBLE)
+            // 仅因总条数超上限被挤出队列的才标记 popped（防公开通知候选 effect 再扫回来）；
+            // 因 per-sender 上限被移除的上面已处理，不在此标记。
             evicted.forEach((it) => markPopped(it.id))
             return visible
           })
