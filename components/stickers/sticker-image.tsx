@@ -68,7 +68,15 @@ export function StickerImage({ name, alt = "", className, variant = "inline", on
       draggable={false}
       className={cn(baseClass, onClick && "cursor-pointer", className)}
       style={style}
-      onClick={onClick ? () => onClick(src) : undefined}
+      onClick={
+        onClick
+          ? (e) => {
+              // 阻止冒泡：避免触发父级（评论行/帖子容器）的点击
+              e.stopPropagation()
+              onClick(src)
+            }
+          : undefined
+      }
     />
   )
 }
