@@ -16,6 +16,8 @@ import dynamic from "next/dynamic"
 // NotificationProvider 需要同步加载（Navigation 和页面都依赖其 Context）
 import { NotificationProvider } from "@/contexts/notification-context"
 import { ChatUIProvider } from "@/contexts/chat-ui-context"
+// 全局在线状态：登录后浏览全站期间维持心跳，供私聊窗口/大厅在线判定复用
+import { PresenceProvider } from "@/contexts/presence-context"
 // 音乐播放上下文提升到全站：跨页面后台续播（音频元素 + 播放状态随 app 生命周期常驻）
 import { PlaybackProvider } from "@/app/music/_context/PlaybackContext"
 
@@ -84,6 +86,8 @@ export function Providers({ children }: { children: ReactNode }) {
             `}
           </Script>
 
+          {/* PresenceProvider：全站在线状态（登录即心跳），供私聊窗口在线/离线、大厅在线人数复用 */}
+          <PresenceProvider>
           {/* NotificationProvider 必须包裹所有使用 useNotifications 的组件（Navigation、页面等） */}
           <NotificationProvider>
             {/* CinemaModeProvider 让首页和导航栏共享同一份影院模式状态 */}
@@ -128,6 +132,7 @@ export function Providers({ children }: { children: ReactNode }) {
             </ChatUIProvider>
             </CinemaModeProvider>
           </NotificationProvider>
+          </PresenceProvider>
         </PostsProvider>
         </BannedGate>
       </SimpleAuthProvider>
