@@ -33,6 +33,8 @@ const GlobalMiniPlayer = dynamic(
 )
 // 邮箱验证门禁（懒触发 OTP，仅“需验证的新用户”显示提示条/弹窗；gate 关闭时恒不显示）
 const EmailVerifyGate = dynamic(() => import("@/components/email-verify-gate"), { ssr: false })
+// 全员公告顶部弹窗（仿 macOS 通知；复用通知 realtime，离线下次登入补弹）
+const AnnouncementPopup = dynamic(() => import("@/components/announcement-popup"), { ssr: false })
 
 // 延迟加载包装器：等浏览器空闲后再挂载，让首屏内容优先抢占主线程。
 // requestIdleCallback 在不支持的浏览器（Safari < 18.4）上回退到 setTimeout。
@@ -114,6 +116,9 @@ export function Providers({ children }: { children: ReactNode }) {
 
             {/* 邮箱验证门禁：未验证新用户显示验证提示/弹窗（gate 关闭时不显示） */}
             <EmailVerifyGate />
+
+            {/* 全员公告顶部弹窗：发公告即时弹/离线下次登入补弹（在 NotificationProvider 内） */}
+            <AnnouncementPopup />
 
             {/* 触屏左右轻扫切页 + 丝带标题卡转场覆盖层 + 空闲时预热邻页 chunk */}
             <PageSwipe />
