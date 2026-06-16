@@ -45,6 +45,9 @@ const AUTO_DISMISS_MS = 20000
 const MAX_VISIBLE = 5
 // 同一发送者的私信在队列里最多并存条数；超出时该 sender 最老的一条让位（不标记 popped）。
 const MAX_PER_SENDER = 3
+// 后台补漏窗口：页面从隐藏→可见时，回查这段时间内收到的私信。
+// 取 25 分钟：覆盖「切到别的标签/窗口一会再回来」的常见时长。
+const BACKFILL_WINDOW_MS = 25 * 60 * 1000
 // poppedSet 容量上限，防 localStorage 无限增长（保留最近 POPPED_CAP 个 id）。
 const POPPED_CAP = 200
 
@@ -313,6 +316,70 @@ export default function AnnouncementPopup() {
     return () => {
       supabase.removeChannel(ch)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user])
+
+  // 后台补漏：页面从隐藏→可见时，查询近期收到的私信，把后台节流期间漏掉的 realtime
+  // 事件补弹。背景：浏览器在后台会节流 WebSocket 心跳，dm_incoming_popup 订阅可能因此
+  // 漏掉事件（floating-chat 的 dm_incoming 挂载更早、订阅更稳，所以红点仍能亮）。
+  // 补漏只覆盖 BACKFILL_WINDOW_MS 内的消息，用 poppedSet 过滤已弹过的。
+  useEffect(() => {
+    if (!user) return
+    let lastVisible = document.visibilityState === "visible"
+    const onVisibility = () => {
+      const nowVisible = document.visibilityState === "visible"
+      if (!nowVisible || lastVisible) {
+        lastVisible = nowVisible
+        return
+      }
+      lastVisible = true
+      // 面板开着：不补（用户正在看聊天）
+      if (chatOpenRef.current) return
+      // 查近期收到的私信
+      const since = new Date(Date.now() - BACKFILL_WINDOW_MS).toISOString()
+      supabase
+        .from("dm_messages")
+        .select("id,sender_id,content,created_at")
+        .eq("recipient_id", user.id)
+        .gte("created_at", since)
+        .order("created_at", { ascending: false })
+        .limit(20)
+        .then(({ data }) => {
+          if (!data) return
+          const popped = poppedRef.current
+          const fresh = (data as { id: string; sender_id: string; content: string; created_at: string }[])
+            .filter((m) => !popped.has(m.id))
+            .map((m): DmItem => ({
+              kind: "dm",
+              id: m.id,
+              senderId: m.sender_id,
+              content: m.content,
+              created_at: m.created_at,
+            }))
+          if (fresh.length === 0) return
+          setQueue((prev) => {
+            const inQueue = new Set(prev.map((it) => it.id))
+            const toAdd = fresh.filter((d) => !inQueue.has(d.id))
+            if (toAdd.length === 0) return prev
+            // 倒序追加（最新的在前），按 MAX_PER_SENDER 给每个 sender 限流：
+            // 队列里同一 sender 超过上限则移除其中最老的，被移除的不标记 popped。
+            let merged = [...toAdd, ...prev]
+            const perSender = new Map<string, number>()
+            merged = merged.filter((it) => {
+              if (it.kind !== "dm") return true
+              const n = (perSender.get(it.senderId) ?? 0) + 1
+              perSender.set(it.senderId, n)
+              return n <= MAX_PER_SENDER
+            })
+            const visible = merged.slice(0, MAX_VISIBLE)
+            const evicted = merged.slice(MAX_VISIBLE)
+            evicted.forEach((it) => markPopped(it.id))
+            return visible
+          })
+        })
+    }
+    document.addEventListener("visibilitychange", onVisibility)
+    return () => document.removeEventListener("visibilitychange", onVisibility)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user])
 
