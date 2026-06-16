@@ -8,7 +8,6 @@ import { X, Send, Smile, Users, Hash } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useChatUI } from "@/contexts/chat-ui-context"
-import { usePresence } from "@/contexts/presence-context"
 import { useRouter } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
 import ChatUserCard from "./chat-user-card"
@@ -25,6 +24,12 @@ interface DisplayMsg {
   content: string
   // 仅「会话中实时新到」的消息为 true → 播放入场动效；历史与切换不动
   isNew?: boolean
+}
+
+interface OnlineUser {
+  id: string
+  username: string
+  avatar_url?: string | null
 }
 
 interface Partner {
@@ -180,8 +185,7 @@ export default function FloatingChat() {
   const [active, setActive] = useState<Active>({ kind: "hall" })
   const [convs, setConvs] = useState<DmConv[]>([])
   const [messages, setMessages] = useState<DisplayMsg[]>([])
-  // 在线列表由全局 PresenceProvider 维护（登录即心跳），不再本地维护
-  const { onlineUsers: online, isOnline } = usePresence()
+  const [online, setOnline] = useState<OnlineUser[]>([])
   const [input, setInput] = useState("")
   const [sending, setSending] = useState(false)
   const [showStickers, setShowStickers] = useState(false)
@@ -403,8 +407,44 @@ export default function FloatingChat() {
     }
   }, [myId, loadConvs])
 
-  // 在线状态由全局 PresenceProvider 维护（登录即心跳，不再依赖面板开关），
-  // 本组件通过 usePresence() 读取 onlineUsers / isOnline。
+  // 在线状态：独立于 active，面板打开期间始终维持 presence 心跳
+  useEffect(() => {
+    if (!open || !myId) return
+
+    const seen = new Map<string, { username: string; avatar_url: string | null; ts: number }>()
+    const refresh = () => {
+      const now = Date.now()
+      for (const [id, v] of seen) if (now - v.ts > 30000) seen.delete(id)
+      setOnline(Array.from(seen, ([id, v]) => ({ id, username: v.username, avatar_url: v.avatar_url })))
+    }
+    seen.set(myId, { username: myName, avatar_url: avatarRef.current, ts: Date.now() })
+    setOnline([{ id: myId, username: myName, avatar_url: avatarRef.current }])
+    const presence = supabase.channel("chat_room_online", { config: { broadcast: { self: true } } })
+    const beat = () =>
+      presence.send({ type: "broadcast", event: "hb", payload: { id: myId, username: myName, avatar_url: avatarRef.current } })
+    presence
+      .on("broadcast", { event: "hb" }, ({ payload }) => {
+        if (payload?.id) {
+          seen.set(payload.id, { username: payload.username || "匿名", avatar_url: payload.avatar_url ?? null, ts: Date.now() })
+          refresh()
+        }
+      })
+      .on("broadcast", { event: "bye" }, ({ payload }) => {
+        if (payload?.id && seen.delete(payload.id)) refresh()
+      })
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") beat()
+      })
+    const beatTimer = setInterval(beat, 10000)
+    const pruneTimer = setInterval(refresh, 3000)
+
+    return () => {
+      presence.send({ type: "broadcast", event: "bye", payload: { id: myId } })
+      supabase.removeChannel(presence)
+      clearInterval(beatTimer)
+      clearInterval(pruneTimer)
+    }
+  }, [open, myId, myName])
 
   // 当前会话：加载历史 + 订阅实时（大厅 or 某个私聊）。
   // 缓存命中即秒开：切回看过的会话立即回显缓存，不再先空屏等查询；
@@ -812,10 +852,7 @@ export default function FloatingChat() {
                     {online.length} 在聊
                   </span>
                 ) : (
-                  <span className={styles.headerOnline}>
-                    <span className={isOnline(active.id) ? styles.onlineDot : styles.offlineDot} />
-                    {isOnline(active.id) ? "在线" : "离线"}
-                  </span>
+                  <span className={styles.headerOnline}>私聊</span>
                 )}
               </div>
               <button className={styles.headerClose} onClick={() => setOpen(false)} aria-label="关闭">

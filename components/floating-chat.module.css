@@ -137,22 +137,6 @@
   white-space: nowrap;
   flex-shrink: 0;
 }
-/* 在线/离线指示圆点（DM 头部，用户名旁） */
-.onlineDot {
-  width: 8px;
-  height: 8px;
-  border-radius: 9999px;
-  background: #a3e635;
-  box-shadow: 0 0 6px rgba(163, 230, 53, 0.7);
-  flex-shrink: 0;
-}
-.offlineDot {
-  width: 8px;
-  height: 8px;
-  border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.25);
-  flex-shrink: 0;
-}
 .headerClose {
   display: inline-flex;
   align-items: center;
