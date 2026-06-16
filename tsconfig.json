@@ -40,6 +40,7 @@
     "node_modules",
     "node_modules_old",
     "_api_backup",
-    "supabase"
+    "supabase",
+    "cloudflare"
   ]
 }
