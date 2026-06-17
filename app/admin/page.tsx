@@ -5,7 +5,7 @@ import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { apiUrl } from "@/lib/api-base"
-import { Shield, Users, FileText, Trash2, AlertCircle, Bot, Cpu, Save, RefreshCw, Megaphone, Ban, ShieldCheck } from "lucide-react"
+import { Shield, Users, FileText, Trash2, AlertCircle, Bot, Cpu, Save, RefreshCw, Megaphone, Ban, ShieldCheck, MessageSquare } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -53,6 +53,20 @@ type CachedAiConfig = {
 }
 let cachedAdminData: CachedAdminData | null = null
 let cachedAiConfig: CachedAiConfig | null = null
+// 私信 AI 配置（独立于弹幕墙 ai_config 的"另一套模型"）
+type CachedDmAiConfig = {
+  enabled: boolean
+  base_url: string
+  api_key_masked: string
+  api_key_set: boolean
+  model: string
+  persona: string
+  proactive_enabled: boolean
+  cooldown_hours: number
+  max_unanswered: number
+  updated_at: string | null
+}
+let cachedDmAiConfig: CachedDmAiConfig | null = null
 
 export default function AdminPage() {
   const { user, isAdmin, loading: authLoading } = useSimpleAuth()
@@ -97,6 +111,19 @@ export default function AdminPage() {
   const [aiBaseUrl, setAiBaseUrl] = useState(cachedAiConfig?.base_url || "")
   const [aiModel, setAiModel] = useState(cachedAiConfig?.model || "")
   const [aiApiKey, setAiApiKey] = useState("")
+
+  // 私信 AI 配置状态（独立于弹幕墙）
+  const [dmConfig, setDmConfig] = useState<CachedDmAiConfig | null>(cachedDmAiConfig)
+  const [dmConfigLoading, setDmConfigLoading] = useState(false)
+  const [dmConfigSaving, setDmConfigSaving] = useState(false)
+  const [dmEnabled, setDmEnabled] = useState(cachedDmAiConfig?.enabled ?? false)
+  const [dmBaseUrl, setDmBaseUrl] = useState(cachedDmAiConfig?.base_url || "")
+  const [dmModel, setDmModel] = useState(cachedDmAiConfig?.model || "")
+  const [dmApiKey, setDmApiKey] = useState("")
+  const [dmPersona, setDmPersona] = useState(cachedDmAiConfig?.persona || "")
+  const [dmProactive, setDmProactive] = useState(cachedDmAiConfig?.proactive_enabled ?? false)
+  const [dmCooldown, setDmCooldown] = useState<number>(cachedDmAiConfig?.cooldown_hours ?? 24)
+  const [dmMaxUnanswered, setDmMaxUnanswered] = useState<number>(cachedDmAiConfig?.max_unanswered ?? 2)
 
   // 公告广播状态
   const [annTitle, setAnnTitle] = useState("")
@@ -150,6 +177,7 @@ export default function AdminPage() {
     // （用户点页面顶部"刷新"按钮可强制重新加载）
     if (!cachedAdminData) loadData()
     if (!cachedAiConfig) loadAiConfig()
+    if (!cachedDmAiConfig) loadDmAiConfig()
   }, [user, isAdmin, authLoading, router])
 
   const loadData = async () => {
@@ -551,6 +579,92 @@ export default function AdminPage() {
     }
   }
 
+  // 拉私信 AI 配置（GET /api/admin/dm-ai-config）
+  const loadDmAiConfig = async () => {
+    setDmConfigLoading(true)
+    try {
+      const { data: sessionData } = await supabase.auth.getSession()
+      const token = sessionData?.session?.access_token
+      if (!token) {
+        toast({ title: "未登录", description: "请重新登录后再尝试", variant: "destructive" })
+        return
+      }
+      const res = await fetch(apiUrl("/api/admin/dm-ai-config"), {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        toast({ title: "加载失败", description: data?.error || `HTTP ${res.status}`, variant: "destructive" })
+        return
+      }
+      setDmConfig(data)
+      cachedDmAiConfig = data
+      setDmEnabled(!!data.enabled)
+      setDmBaseUrl(data.base_url || "")
+      setDmModel(data.model || "")
+      setDmApiKey("")
+      setDmPersona(data.persona || "")
+      setDmProactive(!!data.proactive_enabled)
+      setDmCooldown(typeof data.cooldown_hours === "number" ? data.cooldown_hours : 24)
+      setDmMaxUnanswered(typeof data.max_unanswered === "number" ? data.max_unanswered : 2)
+    } catch (err: any) {
+      toast({ title: "加载失败", description: err?.message || "网络错误", variant: "destructive" })
+    } finally {
+      setDmConfigLoading(false)
+    }
+  }
+
+  // 保存私信 AI 配置（PATCH /api/admin/dm-ai-config）
+  const handleSaveDmAiConfig = async () => {
+    setDmConfigSaving(true)
+    try {
+      const { data: sessionData } = await supabase.auth.getSession()
+      const token = sessionData?.session?.access_token
+      if (!token) {
+        toast({ title: "未登录", description: "请重新登录后再尝试", variant: "destructive" })
+        return
+      }
+      // 开关/数值总是带上；api_key 留空 = 不修改
+      const patch: Record<string, any> = {
+        enabled: dmEnabled,
+        proactive_enabled: dmProactive,
+        persona: dmPersona,
+        cooldown_hours: Number(dmCooldown) || 0,
+        max_unanswered: Number(dmMaxUnanswered) || 0,
+      }
+      if (dmBaseUrl.trim()) patch.base_url = dmBaseUrl.trim()
+      if (dmModel.trim()) patch.model = dmModel.trim()
+      if (dmApiKey.trim()) patch.api_key = dmApiKey.trim()
+
+      const res = await fetch(apiUrl("/api/admin/dm-ai-config"), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(patch),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        toast({ title: "保存失败", description: data?.error || `HTTP ${res.status}`, variant: "destructive" })
+        return
+      }
+      setDmConfig(data)
+      cachedDmAiConfig = data
+      setDmEnabled(!!data.enabled)
+      setDmBaseUrl(data.base_url || "")
+      setDmModel(data.model || "")
+      setDmApiKey("")
+      setDmPersona(data.persona || "")
+      setDmProactive(!!data.proactive_enabled)
+      setDmCooldown(typeof data.cooldown_hours === "number" ? data.cooldown_hours : 24)
+      setDmMaxUnanswered(typeof data.max_unanswered === "number" ? data.max_unanswered : 2)
+      toast({ title: "保存成功", description: "私信 AI 配置已更新，最多 10 秒后生效" })
+    } catch (err: any) {
+      toast({ title: "保存失败", description: err?.message || "网络错误", variant: "destructive" })
+    } finally {
+      setDmConfigSaving(false)
+    }
+  }
+
   // 切换 hanako 白名单开关
   // 走的是同一个 /api/admin/ai-config PATCH 接口（最多 10 秒后全网生效）
   const handleToggleWhitelist = async (next: boolean) => {
@@ -844,8 +958,9 @@ export default function AdminPage() {
           onClick={() => {
             loadData()
             loadAiConfig()
+            loadDmAiConfig()
           }}
-          disabled={loading || aiConfigLoading}
+          disabled={loading || aiConfigLoading || dmConfigLoading}
           className="text-gray-400 hover:text-lime-400"
           title="重新拉取所有数据"
         >
@@ -875,6 +990,10 @@ export default function AdminPage() {
           <TabsTrigger value="ai-config" className="data-[state=active]:bg-lime-900/30 data-[state=active]:text-lime-400">
             <Cpu className="mr-2 h-4 w-4" />
             AI 模型
+          </TabsTrigger>
+          <TabsTrigger value="dm-ai-config" className="data-[state=active]:bg-lime-900/30 data-[state=active]:text-lime-400">
+            <MessageSquare className="mr-2 h-4 w-4" />
+            私信 AI
           </TabsTrigger>
           <TabsTrigger value="announcements" className="data-[state=active]:bg-lime-900/30 data-[state=active]:text-lime-400">
             <Megaphone className="mr-2 h-4 w-4" />
@@ -1336,6 +1455,198 @@ export default function AdminPage() {
                 >
                   <Save className="h-4 w-4 mr-1.5" />
                   {aiConfigSaving ? "保存中..." : "保存配置"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="dm-ai-config">
+          <Card className="bg-gray-900 border-gray-800">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>私信 AI 模型配置</CardTitle>
+                  <CardDescription>
+                    hanako 私信用的「另一套模型」，与弹幕墙完全独立。保存后最多 10 秒生效。
+                  </CardDescription>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={loadDmAiConfig}
+                  disabled={dmConfigLoading}
+                  className="text-gray-400 hover:text-lime-400"
+                >
+                  <RefreshCw className={`h-4 w-4 mr-1 ${dmConfigLoading ? "animate-spin" : ""}`} />
+                  刷新
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              {/* 当前 DB 配置回显 */}
+              <div className="rounded-md border border-gray-800 bg-gray-950 p-4 text-sm">
+                <div className="text-gray-400 mb-2 text-xs uppercase tracking-wider">当前 DB 中的配置</div>
+                {dmConfig ? (
+                  <div className="space-y-1.5 font-mono text-xs">
+                    <div className="flex">
+                      <span className="text-gray-500 w-28 shrink-0">enabled:</span>
+                      <span className={dmConfig.enabled ? "text-lime-300" : "text-amber-300"}>
+                        {dmConfig.enabled ? "on（会回私信）" : "off（不回，用户发了也静默）"}
+                      </span>
+                    </div>
+                    <div className="flex">
+                      <span className="text-gray-500 w-28 shrink-0">base_url:</span>
+                      <span className="text-white break-all">
+                        {dmConfig.base_url || <span className="text-gray-600 italic">(未设置 → 环境变量)</span>}
+                      </span>
+                    </div>
+                    <div className="flex">
+                      <span className="text-gray-500 w-28 shrink-0">api_key:</span>
+                      <span className={dmConfig.api_key_set ? "text-white" : "text-gray-600 italic"}>
+                        {dmConfig.api_key_set ? dmConfig.api_key_masked : "(未设置 → 环境变量)"}
+                      </span>
+                    </div>
+                    <div className="flex">
+                      <span className="text-gray-500 w-28 shrink-0">model:</span>
+                      <span className="text-white">
+                        {dmConfig.model || <span className="text-gray-600 italic">(未设置 → 环境变量)</span>}
+                      </span>
+                    </div>
+                    <div className="flex">
+                      <span className="text-gray-500 w-28 shrink-0">proactive:</span>
+                      <span className={dmConfig.proactive_enabled ? "text-lime-300" : "text-gray-500"}>
+                        {dmConfig.proactive_enabled ? "on（主动搭话，需第2批+worker）" : "off"}
+                      </span>
+                    </div>
+                    <div className="flex">
+                      <span className="text-gray-500 w-28 shrink-0">cooldown:</span>
+                      <span className="text-white">{dmConfig.cooldown_hours} 小时/人</span>
+                    </div>
+                    <div className="flex">
+                      <span className="text-gray-500 w-28 shrink-0">max_unanswered:</span>
+                      <span className="text-white">{dmConfig.max_unanswered}</span>
+                    </div>
+                    {dmConfig.updated_at && (
+                      <div className="flex pt-1.5 mt-1.5 border-t border-gray-800">
+                        <span className="text-gray-500 w-28 shrink-0">更新于:</span>
+                        <span className="text-gray-400">
+                          {new Date(dmConfig.updated_at).toLocaleString("zh-CN")}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-gray-500 text-xs">
+                    {dmConfigLoading ? "加载中..." : "未加载（点右上角刷新）"}
+                  </div>
+                )}
+              </div>
+
+              {/* 开关 */}
+              <div className="flex items-center justify-between rounded-md border border-gray-800 bg-gray-950 p-3">
+                <div>
+                  <div className="text-sm text-gray-200">回复私信</div>
+                  <div className="text-xs text-gray-500">关闭时她不回任何私信（用户发了也静默）</div>
+                </div>
+                <Switch checked={dmEnabled} onCheckedChange={setDmEnabled} />
+              </div>
+              <div className="flex items-center justify-between rounded-md border border-gray-800 bg-gray-950 p-3">
+                <div>
+                  <div className="text-sm text-gray-200">主动私信在线用户</div>
+                  <div className="text-xs text-gray-500">需第 2 批 + CF worker 部署才真正生效；这里先存开关</div>
+                </div>
+                <Switch checked={dmProactive} onCheckedChange={setDmProactive} />
+              </div>
+
+              {/* 编辑表单 */}
+              <div className="space-y-4">
+                <div>
+                  <label className="text-sm text-gray-300 mb-1.5 block">Base URL</label>
+                  <Input
+                    placeholder="https://api.deepseek.com/v1"
+                    value={dmBaseUrl}
+                    onChange={(e) => setDmBaseUrl(e.target.value)}
+                    className="bg-gray-800 border-gray-700 font-mono text-sm"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    OpenAI 兼容接口 base URL（不含末尾 <code className="text-gray-400">/chat/completions</code>）
+                  </p>
+                </div>
+                <div>
+                  <label className="text-sm text-gray-300 mb-1.5 block">Model ID</label>
+                  <Input
+                    placeholder="deepseek-chat"
+                    value={dmModel}
+                    onChange={(e) => setDmModel(e.target.value)}
+                    className="bg-gray-800 border-gray-700 font-mono text-sm"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    私聊不需要工具调用，任何聊天模型都行，可挑更便宜的
+                  </p>
+                </div>
+                <div>
+                  <label className="text-sm text-gray-300 mb-1.5 block">
+                    API Key
+                    <span className="ml-2 text-xs text-amber-400/80 font-normal">留空表示"不修改"</span>
+                  </label>
+                  <Input
+                    type="password"
+                    placeholder={dmConfig?.api_key_set ? "已设置（留空保持不变）" : "首次设置请填入"}
+                    value={dmApiKey}
+                    onChange={(e) => setDmApiKey(e.target.value)}
+                    className="bg-gray-800 border-gray-700 font-mono text-sm"
+                    autoComplete="off"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm text-gray-300 mb-1.5 block">
+                    私信人设 Persona
+                    <span className="ml-2 text-xs text-gray-500 font-normal">留空用代码默认</span>
+                  </label>
+                  <Textarea
+                    placeholder="留空则用代码内置的私信人设"
+                    value={dmPersona}
+                    onChange={(e) => setDmPersona(e.target.value)}
+                    className="bg-gray-800 border-gray-700 text-sm min-h-[88px]"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-sm text-gray-300 mb-1.5 block">冷却（小时/人）</label>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={720}
+                      value={dmCooldown}
+                      onChange={(e) => setDmCooldown(Number(e.target.value))}
+                      className="bg-gray-800 border-gray-700 font-mono text-sm"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">同一人多久最多被主动私信 1 次</p>
+                  </div>
+                  <div>
+                    <label className="text-sm text-gray-300 mb-1.5 block">连发上限</label>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={50}
+                      value={dmMaxUnanswered}
+                      onChange={(e) => setDmMaxUnanswered(Number(e.target.value))}
+                      className="bg-gray-800 border-gray-700 font-mono text-sm"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">连发几条没回就停</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end pt-2 border-t border-gray-800">
+                <Button
+                  onClick={handleSaveDmAiConfig}
+                  disabled={dmConfigSaving || dmConfigLoading}
+                  className="bg-lime-700 hover:bg-lime-600"
+                >
+                  <Save className="h-4 w-4 mr-1.5" />
+                  {dmConfigSaving ? "保存中..." : "保存配置"}
                 </Button>
               </div>
             </CardContent>

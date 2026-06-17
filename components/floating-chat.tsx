@@ -6,6 +6,8 @@ import { createPortal } from "react-dom"
 import { motion, AnimatePresence } from "framer-motion"
 import { X, Send, Smile, Users, Hash } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
+import { apiUrl } from "@/lib/api-base"
+import { HANAKO_USER_ID } from "@/lib/hanako/constants"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useChatUI } from "@/contexts/chat-ui-context"
 import { usePresence } from "@/contexts/presence-context"
@@ -640,6 +642,23 @@ export default function FloatingChat() {
             description: rl ? "慢一点～3 秒最多 3 条" : error.message || "请稍后重试",
             variant: "destructive",
           })
+        } else if (a.kind === "dm" && a.id === HANAKO_USER_ID && kind === "text") {
+          // 私聊对象是 hanako：触发独立模型异步回复（fire-and-forget，失败静默）。
+          // 她的回复经 dm 实时订阅自动出现在会话里，这里无需处理返回值。
+          ;(async () => {
+            try {
+              const { data: s } = await supabase.auth.getSession()
+              const tok = s?.session?.access_token
+              if (!tok) return
+              await fetch(apiUrl("/api/hanako-dm"), {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${tok}` },
+                body: JSON.stringify({ content: text }),
+              })
+            } catch {
+              // 静默：她没回不影响用户已发出的消息
+            }
+          })()
         }
       } catch (e) {
         toast({ title: "发送失败", description: (e as Error)?.message || "请稍后重试", variant: "destructive" })
