@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import rateLimiter from "@/lib/hanako/rate-limit"
 import { loadDmAiConfig, buildDmSystemPrompt, dmSupabaseAdmin, MAX_DM_REPLIES } from "@/lib/hanako/dm-ai"
-import { HANAKO_USER_ID, MAX_REPLY_TOKENS } from "@/lib/hanako/constants"
+import { MENGMEGZI_USER_ID, MAX_REPLY_TOKENS } from "@/lib/hanako/constants"
 
 // 强制动态渲染
 export const dynamic = "force-dynamic"
@@ -74,8 +74,8 @@ export async function POST(req: NextRequest) {
     const authUser = authData.user
     userId = authUser.id
 
-    // hanako 不给自己回
-    if (userId === HANAKO_USER_ID) {
+    // 萌萌子不给自己回
+    if (userId === MENGMEGZI_USER_ID) {
       return NextResponse.json({ skipped: true })
     }
 
@@ -106,7 +106,7 @@ export async function POST(req: NextRequest) {
     rateLimiter.startCall(userId)
 
     // 5. 拉这对会话最近历史，转成对话上下文（hanako=assistant，用户=user）
-    const pk = pairKey(userId, HANAKO_USER_ID)
+    const pk = pairKey(userId, MENGMEGZI_USER_ID)
     const { data: hist } = await dmSupabaseAdmin
       .from("dm_messages")
       .select("sender_id, content, kind, created_at")
@@ -123,8 +123,8 @@ export async function POST(req: NextRequest) {
       "主人"
 
     const history = ordered.map((m) => ({
-      role: m.sender_id === HANAKO_USER_ID ? ("assistant" as const) : ("user" as const),
-      content: m.sender_id === HANAKO_USER_ID ? m.content : `${username}：${m.content}`,
+      role: m.sender_id === MENGMEGZI_USER_ID ? ("assistant" as const) : ("user" as const),
+      content: m.sender_id === MENGMEGZI_USER_ID ? m.content : `${username}：${m.content}`,
     }))
 
     // 客户端"先插入再触发本路由"，正常情况下 latest 已在 history 末尾。
@@ -188,7 +188,7 @@ export async function POST(req: NextRequest) {
       const { error: insertError } = await dmSupabaseAdmin.from("dm_messages").insert([
         {
           pair_key: pk,
-          sender_id: HANAKO_USER_ID,
+          sender_id: MENGMEGZI_USER_ID,
           recipient_id: userId,
           kind: "text",
           content: replies[i].slice(0, 500),

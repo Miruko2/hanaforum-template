@@ -12,7 +12,7 @@ import { supabase } from "@/lib/supabaseClient"
 import { getAnnouncement, getPost, likePost, unlikePost, checkUserLiked } from "@/lib/supabase"
 import { useToast } from "@/hooks/use-toast"
 import { useIsMobile } from "@/hooks/use-mobile"
-import { HANAKO_USER_ID, HANAKO_DM_USERNAME, HANAKO_AVATAR } from "@/lib/hanako/constants"
+import { MENGMEGZI_USER_ID, HANAKO_DM_USERNAME, HANAKO_AVATAR } from "@/lib/hanako/constants"
 import AnnouncementModal from "@/components/announcement-modal"
 import PostDetailModal from "@/components/post-detail-modal"
 import { useRouter } from "next/navigation"
@@ -149,7 +149,7 @@ function viewOf(n: Notification): CardView {
 // needProfileFill=true 触发后台查 profiles 回填头像/名字。
 // 私信AI 例外：占位阶段就用固定名/头像，不闪「用户」+logo，也不必查 profiles。
 function viewOfDm(dm: DmItem): CardView {
-  const isHanako = dm.senderId === HANAKO_USER_ID
+  const isHanako = dm.senderId === MENGMEGZI_USER_ID
   return {
     logoUrl: isHanako ? HANAKO_AVATAR : "/logo.png",
     eyebrow: "私信",
@@ -417,7 +417,7 @@ export default function AnnouncementPopup() {
           if (cancelled) break
           // 私信AI 用固定展示名/头像（profiles 行可能脏：撞名后缀 + 无头像），
           // 不读查询结果，与私信面板保持一致。
-          if (d.senderId === HANAKO_USER_ID) {
+          if (d.senderId === MENGMEGZI_USER_ID) {
             setViews((prev) => {
               const base = prev[d.id] ?? viewOfDm(d)
               return {
