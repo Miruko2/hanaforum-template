@@ -3,6 +3,7 @@ import dmRateLimiter from "@/lib/hanako/dm-rate-limit"
 import { loadDmAiConfig, dmSupabaseAdmin, MAX_DM_REPLIES } from "@/lib/hanako/dm-ai"
 import { MENGMEGZI_USER_ID, MAX_REPLY_TOKENS, emotionLabel, normalizeEmotion, DM_COMPRESS_HARD_MSGS, DM_STICKER_INJECT_PROBABILITY } from "@/lib/hanako/constants"
 import { buildDmContext } from "@/lib/hanako/dm-context"
+import { isWebSearchEnabled, searchWeb, WEB_SEARCH_TOOL } from "@/lib/hanako/web-search"
 import { splitRepliesIntoRows } from "@/lib/stickers"
 
 // 强制动态渲染
@@ -130,38 +131,80 @@ export async function POST(req: NextRequest) {
     //    该提示只活在本次请求里、不写库、不进历史记忆——下轮重新掷骰。
     //    放在 messages 末尾（紧贴模型要回复的位置）效果最直接。
     const wantSticker = Math.random() < DM_STICKER_INJECT_PROBABILITY
-    const finalMessages = wantSticker
+    // any[]：工具循环里会追加 assistant(tool_calls) 和 tool 结果
+    const finalMessages: any[] = wantSticker
       ? [
           ...messages,
           {
-            role: "system" as const,
+            role: "system",
             content:
               "本轮回复请带上一个表情包（在 replies 里单独放一条 [s:表情名]），挑一个最贴合当下情绪的。注意表情名只能从清单里选。",
           },
         ]
       : messages
 
-    // 7. 调独立私信模型
-    const aiResponse = await fetch(`${cfg.baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${cfg.apiKey}`,
-      },
-      body: JSON.stringify({
+    // 7. 联网搜索：配了 TAVILY_API_KEY 才启用，由模型自行决定何时调用
+    //    （日常闲聊/情感陪伴不调，仅问最新/实时信息时调）。未配置则 tools 为空、
+    //    单次调用，行为与从前一致（优雅降级）。
+    const webSearch = isWebSearchEnabled()
+    const tools = webSearch ? [WEB_SEARCH_TOOL] : undefined
+    // 工具调用循环：最多 MAX_SEARCH_ROUNDS 轮搜索，末轮强制出文字答案
+    // （tool_choice:"none"），既控成本也保证一定有最终回复。
+    const MAX_SEARCH_ROUNDS = 2
+    let rawReply = ""
+
+    for (let round = 0; round <= MAX_SEARCH_ROUNDS; round++) {
+      const isLastRound = round === MAX_SEARCH_ROUNDS
+      const reqBody: Record<string, unknown> = {
         model: cfg.model,
         messages: finalMessages,
         max_tokens: MAX_REPLY_TOKENS,
         temperature: 0.85,
-      }),
-    })
-    if (!aiResponse.ok) {
-      const errText = await aiResponse.text()
-      console.error("[HanakoDM] 模型错误:", aiResponse.status, errText)
-      return NextResponse.json({ error: "AI 服务暂时不可用" }, { status: 502 })
+      }
+      if (tools) {
+        reqBody.tools = tools
+        reqBody.tool_choice = isLastRound ? "none" : "auto"
+      }
+
+      const aiResponse = await fetch(`${cfg.baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${cfg.apiKey}`,
+        },
+        body: JSON.stringify(reqBody),
+      })
+      if (!aiResponse.ok) {
+        const errText = await aiResponse.text()
+        console.error("[HanakoDM] 模型错误:", aiResponse.status, errText)
+        return NextResponse.json({ error: "AI 服务暂时不可用" }, { status: 502 })
+      }
+      const aiData = await aiResponse.json()
+      const choice = aiData.choices?.[0]
+      const aiMsg = choice?.message
+      const toolCalls = aiMsg?.tool_calls
+
+      // 模型要求联网搜索 → 执行后把结果回灌，进入下一轮
+      if (tools && !isLastRound && Array.isArray(toolCalls) && toolCalls.length > 0) {
+        finalMessages.push(aiMsg) // 带 tool_calls 的 assistant 轮，需原样回传
+        for (const tc of toolCalls) {
+          let query = ""
+          try {
+            query = JSON.parse(tc.function?.arguments || "{}").query || ""
+          } catch {
+            // 参数解析失败，给空结果让模型自己兜底
+          }
+          const result = query ? await searchWeb(query) : "（无效的搜索请求）"
+          finalMessages.push({ role: "tool", tool_call_id: tc.id, content: result })
+        }
+        continue
+      }
+
+      // 拿到最终文字回复
+      rawReply = (aiMsg?.content || "").trim()
+      break
     }
-    const aiData = await aiResponse.json()
-    const rawReply = aiData.choices?.[0]?.message?.content?.trim() || ""
+
     const { replies, optOut } = parseReplies(rawReply)
 
     if (replies.length === 0) {
