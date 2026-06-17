@@ -115,14 +115,42 @@ export const DM_GLOBAL_MAX_CONCURRENT = 4
  */
 export const MAX_REPLY_TOKENS = 1500
 
-/** 私信 AI（萌萌子）上下文滑动窗口的 token 上限。
- *  从最新消息往前累加 token，窗口内的消息原样进上下文；超出窗口的旧消息
- *  触发自动摘要（压缩成长期记忆），不再原样带入。充分利用长上下文模型。 */
-export const DM_CONTEXT_TOKENS = 32768
+/* ============================================================
+ * 私信 AI（萌萌子）上下文压缩参数 ——「记性优先」档
+ *
+ * 机制：最近 N 条消息原样进上下文（短期记忆）；更老的折叠进摘要（长期记忆）。
+ * 压缩一律「从最老的连续往后」折叠，summarized_up_to 连续推进，绝不跳过中间消息
+ * （根除按 limit 取最新 N 条导致的「健忘黑洞」）。
+ *   - 正常由客户端空闲触发（idle → /api/dm-compress，超 TRIGGER 才真压）；
+ *   - 回复热路径默认不压缩，只有堆到 HARD（空闲链路长期没跑）才兜底同步压一次，
+ *     正常回复不会因压缩卡顿。
+ * 以「消息条数」为主阈值（私聊短消息，比 token 直观且对消息长短鲁棒），
+ * 再叠一道 token 预算/上限防极端长消息撑爆每条回复的上下文成本。
+ * ============================================================ */
 
-/** 软上限：未摘要历史超过此 token 量即触发压缩（留 ~4K 缓冲到 DM_CONTEXT_TOKENS）。
- *  客户端空闲时按此阈值预压缩，使回复路由里极少需要同步压缩（避免回复卡顿）。 */
-export const DM_SUMMARY_SOFT_TOKENS = 28672
+/** 压缩后保留的「最近原文」条数（短期记忆窗口）。"记性优先"档：保留更近的对话原文。 */
+export const DM_KEEP_RECENT_MSGS = 80
+
+/** 空闲压缩触发阈值（按未摘要条数）：超过即在空闲时把最老的折叠到只剩 DM_KEEP_RECENT_MSGS 条。 */
+export const DM_COMPRESS_TRIGGER_MSGS = 140
+
+/** 回复热路径兜底阈值：仅当未摘要堆到此值（说明空闲链路一直没跑）才在回复前同步压一次，
+ *  避免上下文无限增长。正常回复走不到这里，不会卡顿。 */
+export const DM_COMPRESS_HARD_MSGS = 200
+
+/** token 预算：保留窗口同时受此 token 上限约束——折叠后剩余未摘要既 ≤ KEEP 条、也 ≤ 此 token。
+ *  超长消息时按 token 提前折叠，使每条回复的上下文成本有界。 */
+export const DM_COMPRESS_SOFT_TOKENS = 12000
+
+/** 组装后上下文的最终 token 硬上限（最后一道保险，正常走不到）：若未摘要仍超此 token，
+ *  仅从「带入上下文」里丢弃最老的（不推进 summarized_up_to，下轮压缩会把它补进摘要）。 */
+export const DM_CONTEXT_TOKENS = 16000
+
+/** 单次拉取未摘要历史的行数上限（> HARD 阈值，留足突发余量）。 */
+export const DM_FETCH_LIMIT = 400
+
+/** 单次压缩最多折叠多少条进摘要（防极端积压时摘要输入过大）；剩余留到下一轮继续折叠。 */
+export const DM_MAX_FOLD_BATCH = 200
 
 /** 生成会话摘要时的最大输出 token。摘要要求精炼（~800 字内），保留关键事实。 */
 export const DM_SUMMARY_MAX_TOKENS = 1200

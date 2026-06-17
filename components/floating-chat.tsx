@@ -7,8 +7,7 @@ import { motion, AnimatePresence } from "framer-motion"
 import { X, Send, Smile, Users, Hash } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
 import { apiUrl } from "@/lib/api-base"
-import { MENGMEGZI_USER_ID, HANAKO_DM_USERNAME, HANAKO_AVATAR, normalizeEmotion } from "@/lib/hanako/constants"
-import { estimateTokens } from "@/lib/hanako/token-estimate"
+import { MENGMEGZI_USER_ID, HANAKO_DM_USERNAME, HANAKO_AVATAR, normalizeEmotion, DM_KEEP_RECENT_MSGS } from "@/lib/hanako/constants"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useChatUI } from "@/contexts/chat-ui-context"
 import { usePresence } from "@/contexts/presence-context"
@@ -551,18 +550,16 @@ export default function FloatingChat() {
     }
   }, [open, myId, myName, convs])
 
-  // 空闲预压缩：面板开着、在和萌萌子私聊、且 5 分钟没有新消息时，静默调 /api/dm-compress
-  // 把超软上限(28K)的旧消息提前压缩成摘要。这样回复路由里极少需要同步压缩，避免回复卡顿。
-  // 依赖 messages：每来新消息就重置定时器；5 分钟不动才触发。失败/无需压缩都静默。
-  // 本地预判：先估当前消息总量，明显短（<20K，远低于28K软上限）就压根不发请求，
-  // 避免短对话也每 5 分钟打一次接口。宁可漏判（后端 shouldCompress 还会挡），不可误发。
+  // 空闲预压缩：面板开着、在和萌萌子私聊、且 90s 没有新消息时，静默调 /api/dm-compress，
+  // 让超阈值的旧消息在两次回复之间的空闲期折叠成摘要，回复路由里极少需要同步压缩、不卡顿。
+  // 依赖 messages：每来新消息就重置定时器；90s 不动才触发。失败/无需压缩都静默。
+  // 本地门槛：缓存消息不足一个保留窗口（< KEEP 条）的短对话压根不可能积压、不发请求；
+  // 够多才问后端（后端按 TRIGGER 阈值权威判定，未超则零成本返回）。客户端最多缓存约 100 条，
+  // KEEP=80 落在缓存内，这道门槛才真正有效（旧实现按 token 估算永远到不了、等于没触发）。
   useEffect(() => {
     if (!open || !myId) return
     if (active.kind !== "dm" || active.id !== MENGMEGZI_USER_ID) return
-    // 本地粗估：当前窗口内消息 token。客户端最多见 100 条，未摘要历史只会更多，
-    // 故用 20K（比 28K 软上限留 8K 余量）作门槛——低于此几乎不可能触发后端压缩。
-    const localTokens = messages.reduce((sum, m) => sum + estimateTokens(m.content) + 4, 0)
-    if (localTokens < 20_000) return
+    if (messages.length < DM_KEEP_RECENT_MSGS) return
     const timer = setTimeout(() => {
       void (async () => {
         try {
@@ -577,7 +574,7 @@ export default function FloatingChat() {
           // 静默：预压缩失败不影响聊天
         }
       })()
-    }, 5 * 60_000)
+    }, 90_000)
     return () => clearTimeout(timer)
   }, [open, myId, active, messages])
 

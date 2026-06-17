@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import dmRateLimiter from "@/lib/hanako/dm-rate-limit"
 import { loadDmAiConfig, dmSupabaseAdmin, MAX_DM_REPLIES } from "@/lib/hanako/dm-ai"
-import { MENGMEGZI_USER_ID, MAX_REPLY_TOKENS, emotionLabel } from "@/lib/hanako/constants"
+import { MENGMEGZI_USER_ID, MAX_REPLY_TOKENS, emotionLabel, DM_COMPRESS_HARD_MSGS } from "@/lib/hanako/constants"
 import { buildDmContext } from "@/lib/hanako/dm-context"
 
 // 强制动态渲染
@@ -107,17 +107,19 @@ export async function POST(req: NextRequest) {
     }
     dmRateLimiter.startCall(userId)
 
-    // 5. 上下文组装：摘要（长期记忆）+ token 滑动窗口（近期对话）。
-    //    逻辑抽到 lib/hanako/dm-context.ts 的 buildDmContext，与压缩路由共享。
-    //    compress=true：待摘要区非空则顺带压缩写回。因客户端空闲预压缩（软上限 28K），
-    //    待摘要区通常已被提前清空，这里极少实际触发，避免回复卡顿。
+    // 5. 上下文组装：摘要（长期记忆）+ 最近原文窗口（短期记忆）。
+    //    逻辑抽到 lib/hanako/dm-context.ts 的 buildDmContext，与空闲压缩路由共享。
+    //    compressIfOver=HARD：仅当未摘要积压到兜底阈值（说明客户端空闲压缩一直没跑）
+    //    才在回复前同步压一次；正常由空闲预压缩处理，这里不压、不卡顿。
     const username =
       (authUser.user_metadata?.username as string | undefined) ||
       (authUser.email ? authUser.email.split("@")[0] : null) ||
       "主人"
     const latestText =
       latestKind === "sticker" ? `[发了${latest}表情：${emotionLabel(latest)}]` : latest
-    const { messages } = await buildDmContext(userId, username, latestText, latest, { compress: true })
+    const { messages } = await buildDmContext(userId, username, latestText, latest, {
+      compressIfOver: DM_COMPRESS_HARD_MSGS,
+    })
     const pk = pairKey(userId, MENGMEGZI_USER_ID)
 
     // 6. 调独立私信模型
