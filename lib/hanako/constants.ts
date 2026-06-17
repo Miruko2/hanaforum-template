@@ -37,8 +37,16 @@ export const EMOTION_COLORS: Record<HanakoEmotion, string> = {
 /** Hanako 的固定用户 ID（对应 auth.users 和 public.users 中的记录） */
 export const HANAKO_USER_ID = "a3015a8e-9f17-4716-bac2-b8cfeb636a23"
 
-/** Hanako 的用户名 */
+/** Hanako 的用户名（弹幕墙场景用，保持 hanako 不变） */
 export const HANAKO_USERNAME = "hanako"
+
+/** 私信 AI 的展示名（与弹幕墙解耦：私信里叫「萌萌子」）。
+ *  同一个用户身份（HANAKO_USER_ID），仅在私信/弹窗/主页等「私聊面向」展示时用此名。 */
+export const HANAKO_DM_USERNAME = "萌萌子"
+
+/** 私信 AI 的展示头像。她是 AI、profiles 行可能无头像，故用站点内置资源覆盖。
+ *  私信面板 / 来信弹窗 / 主页头像统一用此路径，保证三处一致。 */
+export const HANAKO_AVATAR = "/hanako/avatar.png"
 
 /** 触发 AI 回复的正则（不区分大小写） */
 export const TRIGGER_REGEX = /@hanako|@花子/i

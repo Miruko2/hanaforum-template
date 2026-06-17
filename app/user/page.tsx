@@ -10,6 +10,7 @@ import PostTimeline from "./_components/post-timeline"
 import ProfileActions from "./_components/profile-actions"
 import { getPublicProfile, type Profile } from "@/lib/profiles"
 import { getUserPosts } from "@/lib/supabase-optimized"
+import { HANAKO_USER_ID, HANAKO_DM_USERNAME, HANAKO_AVATAR } from "@/lib/hanako/constants"
 import type { Post } from "@/lib/types"
 
 // 用查询参数路由（/user?id=xxx）而非动态段（/user/[id]）：后者在 Capacitor 静态导出
@@ -50,7 +51,13 @@ function UserProfileContent() {
     }
   }, [id])
 
-  const username = profile?.username || (id ? `用户_${id.slice(0, 6)}` : "用户")
+  // 私信AI（萌萌子）的 profiles 行可能是脏数据（撞名后缀 + 无头像），
+  // 主页展示时强制用固定名/头像，与私信面板、来信弹窗保持一致。
+  const isDmAi = id === HANAKO_USER_ID
+  const username = isDmAi
+    ? HANAKO_DM_USERNAME
+    : profile?.username || (id ? `用户_${id.slice(0, 6)}` : "用户")
+  const avatarUrl = isDmAi ? HANAKO_AVATAR : profile?.avatar_url ?? null
   const fallbackLetter = username?.[0]?.toUpperCase() || "U"
 
   return (
@@ -70,7 +77,7 @@ function UserProfileContent() {
           <div className="space-y-6">
             <ProfileHeader
               fallbackLetter={fallbackLetter}
-              avatarUrl={profile.avatar_url}
+              avatarUrl={avatarUrl}
               backgroundUrl={profile.background_url}
               username={username}
               bio={profile.bio || ""}
@@ -78,7 +85,7 @@ function UserProfileContent() {
                 <ProfileActions
                   targetId={profile.id}
                   targetName={username}
-                  targetAvatar={profile.avatar_url}
+                  targetAvatar={avatarUrl}
                 />
               }
             />

@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from "framer-motion"
 import { X, Send, Smile, Users, Hash } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
 import { apiUrl } from "@/lib/api-base"
-import { HANAKO_USER_ID, HANAKO_USERNAME } from "@/lib/hanako/constants"
+import { HANAKO_USER_ID, HANAKO_DM_USERNAME, HANAKO_AVATAR } from "@/lib/hanako/constants"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useChatUI } from "@/contexts/chat-ui-context"
 import { usePresence } from "@/contexts/presence-context"
@@ -43,9 +43,6 @@ interface DmConv extends Partner {
 type Active = { kind: "hall" } | ({ kind: "dm" } & Partner)
 
 const MAX_LEN = 300
-// hanako 私信常驻入口的展示头像。她是 AI、profiles 里可能没有头像行，
-// 这里直接用站点内置资源（cdnUrl 对非存储路径原样返回，能正常渲染）。
-const HANAKO_AVATAR = "/hanako/avatar.png"
 // 空闲预热：最多预拉最近这么多个私聊会话的历史进缓存（控量，纯文本流量很小）
 const PREWARM_MAX_CONVS = 5
 const STICKERS = ["happy", "shy", "worried", "yandere", "surprised", "sleepy"]
@@ -194,7 +191,7 @@ export default function FloatingChat() {
   // 的地方，如社交页在线标记，不应把 hanako 当真人在线）。
   const online = useMemo(() => {
     if (rawOnline.some((u) => u.id === HANAKO_USER_ID)) return rawOnline
-    return [{ id: HANAKO_USER_ID, username: HANAKO_USERNAME, avatar_url: HANAKO_AVATAR }, ...rawOnline]
+    return [{ id: HANAKO_USER_ID, username: HANAKO_DM_USERNAME, avatar_url: HANAKO_AVATAR }, ...rawOnline]
   }, [rawOnline])
   const isOnline = useCallback(
     (id: string) => id === HANAKO_USER_ID || rawIsOnline(id),
@@ -765,7 +762,7 @@ export default function FloatingChat() {
     active.kind === "hall"
       ? "聊天大厅"
       : active.id === HANAKO_USER_ID
-        ? HANAKO_USERNAME
+        ? HANAKO_DM_USERNAME
         : active.username
 
   return (
@@ -815,7 +812,7 @@ export default function FloatingChat() {
                 // hanako 的 profiles 行可能脏（撞名后缀 + 无头像），会话列表里
                 // 也用固定名字/头像，与大厅在线条、消息渲染保持一致。
                 const isHanako = c.id === HANAKO_USER_ID
-                const uname = isHanako ? HANAKO_USERNAME : c.username
+                const uname = isHanako ? HANAKO_DM_USERNAME : c.username
                 const av = isHanako ? HANAKO_AVATAR : c.avatar_url
                 return (
                 <button
@@ -878,7 +875,7 @@ export default function FloatingChat() {
                   // hanako 在 online 首位（见 usePresence 派生），恒在、不被挤掉；
                   // 她的 profiles 行可能脏（撞名后缀 + 无头像），这里强制用固定头像/名字。
                   const isHanako = u.id === HANAKO_USER_ID
-                  const uname = isHanako ? HANAKO_USERNAME : u.username
+                  const uname = isHanako ? HANAKO_DM_USERNAME : u.username
                   const av = isHanako ? HANAKO_AVATAR : u.avatar_url
                   return (
                   <button
@@ -1096,13 +1093,13 @@ function mapHall(m: ChatRow): DisplayMsg {
 }
 function mapDm(m: DmRow, myId: string, myName: string, partner: Partner): DisplayMsg {
   const mine = m.sender_id === myId
-  // hanako 的 profiles 行可能是撞名后缀("hanako_1")且无头像；她的消息一律用固定名字/头像，
-  // 不读那条脏数据（与弹幕墙用 HANAKO_USERNAME 常量保持一致）
+  // 私信AI 的 profiles 行可能是撞名后缀("hanako_1")且无头像；她的消息一律用固定名字/头像，
+  // 不读那条脏数据。私信面向展示名用「萌萌子」（HANAKO_DM_USERNAME，与弹幕墙的 hanako 解耦）。
   const fromHanako = m.sender_id === HANAKO_USER_ID
   return {
     id: m.id,
     fromId: m.sender_id,
-    username: mine ? myName : fromHanako ? HANAKO_USERNAME : partner.username,
+    username: mine ? myName : fromHanako ? HANAKO_DM_USERNAME : partner.username,
     avatar_url: mine ? null : fromHanako ? HANAKO_AVATAR : partner.avatar_url ?? null,
     kind: m.kind,
     content: m.content,
