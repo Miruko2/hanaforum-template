@@ -3005,6 +3005,11 @@ body.modal-open {
   padding-left: 8px !important;
   border-radius: 4px;
   box-shadow: -2px 0 8px rgba(245, 166, 209, 0.15);
+  /* hanako 现在可能回更长内容：AI 行在桌面端也要换行，否则会被
+     .live-wall-line 的 white-space:nowrap + ellipsis 截成一行省略号。 */
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 /* 「新消息」提示按钮：上滑看历史时新消息不打断，点它平滑回到最新。
@@ -3333,6 +3338,9 @@ body.modal-open {
   z-index: 3;
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+  /* 长回复时气泡内部滚动，不把舞台撑爆 */
+  max-height: 38vh;
+  overflow-y: auto;
 }
 
 .live-host-reply-text {

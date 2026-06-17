@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 import rateLimiter from "@/lib/hanako/rate-limit"
-import { HANAKO_SYSTEM_PROMPT, buildUserMessage } from "@/lib/hanako/prompt"
+import { buildSystemPrompt, buildUserMessage } from "@/lib/hanako/prompt"
+import { isWebSearchEnabled, searchWeb, WEB_SEARCH_TOOL } from "@/lib/hanako/web-search"
 import {
   HANAKO_USER_ID,
   HANAKO_USERNAME,
@@ -187,32 +188,76 @@ export async function POST(req: NextRequest) {
       body.recentMessages || [],
     )
 
-    const aiResponse = await fetch(`${baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
+    // 联网搜索：仅在配置了搜索 key 时启用。未配置 → tools 为空、单次调用，
+    // 行为与从前完全一致（优雅降级，绝不影响现有回复路径）。
+    const webSearch = isWebSearchEnabled()
+    // 消息数组在工具循环里会追加 assistant(tool_calls) 和 tool 结果，故用 any[]
+    const messages: any[] = [
+      { role: "system", content: buildSystemPrompt({ webSearchEnabled: webSearch }) },
+      { role: "user", content: userMessage },
+    ]
+    const tools = webSearch ? [WEB_SEARCH_TOOL] : undefined
+
+    // 工具调用循环：最多 MAX_SEARCH_ROUNDS 轮搜索，末轮强制出文字答案
+    // （tool_choice:"none"），既控成本也保证一定有最终回复。
+    const MAX_SEARCH_ROUNDS = 2
+    let rawReply = ""
+    let finishReason: string | undefined
+
+    for (let round = 0; round <= MAX_SEARCH_ROUNDS; round++) {
+      const isLastRound = round === MAX_SEARCH_ROUNDS
+      const reqBody: Record<string, unknown> = {
         model,
-        messages: [
-          { role: "system", content: HANAKO_SYSTEM_PROMPT },
-          { role: "user", content: userMessage },
-        ],
+        messages,
         max_tokens: MAX_REPLY_TOKENS,
         temperature: 0.85,
-      }),
-    })
+      }
+      if (tools) {
+        reqBody.tools = tools
+        reqBody.tool_choice = isLastRound ? "none" : "auto"
+      }
 
-    if (!aiResponse.ok) {
-      const errText = await aiResponse.text()
-      console.error("[Hanako] DeepSeek API 错误:", aiResponse.status, errText)
-      return NextResponse.json({ error: "AI 服务暂时不可用" }, { status: 502 })
+      const aiResponse = await fetch(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(reqBody),
+      })
+
+      if (!aiResponse.ok) {
+        const errText = await aiResponse.text()
+        console.error("[Hanako] DeepSeek API 错误:", aiResponse.status, errText)
+        return NextResponse.json({ error: "AI 服务暂时不可用" }, { status: 502 })
+      }
+
+      const aiData = await aiResponse.json()
+      const choice = aiData.choices?.[0]
+      const aiMsg = choice?.message
+      finishReason = choice?.finish_reason
+      const toolCalls = aiMsg?.tool_calls
+
+      // 模型要求联网搜索 → 执行后把结果回灌，进入下一轮
+      if (tools && !isLastRound && Array.isArray(toolCalls) && toolCalls.length > 0) {
+        messages.push(aiMsg) // 带 tool_calls 的 assistant 轮，需原样回传
+        for (const tc of toolCalls) {
+          let query = ""
+          try {
+            query = JSON.parse(tc.function?.arguments || "{}").query || ""
+          } catch {
+            // 参数解析失败，给空结果让模型自己兜底
+          }
+          const result = query ? await searchWeb(query) : "（无效的搜索请求）"
+          messages.push({ role: "tool", tool_call_id: tc.id, content: result })
+        }
+        continue
+      }
+
+      // 拿到最终文字回复
+      rawReply = (aiMsg?.content || "").trim()
+      break
     }
-
-    const aiData = await aiResponse.json()
-    const rawReply = aiData.choices?.[0]?.message?.content?.trim() || ""
-    const finishReason = aiData.choices?.[0]?.finish_reason
 
     // 解析 JSON 回复
     let emotion: HanakoEmotion = "neutral"
@@ -240,8 +285,8 @@ export async function POST(req: NextRequest) {
           // 半截 JSON：解析失败但带有 "reply" 关键字，说明被截断了，丢弃
         }
       } else if (!cleaned.includes('"emotion"') && !cleaned.includes('"reply"')) {
-        // 完全不是 JSON 格式的纯文本回复，截断兜底
-        reply = cleaned.slice(0, 100)
+        // 完全不是 JSON 格式的纯文本回复，截断兜底（上限对齐放宽后的 DB 约束）
+        reply = cleaned.slice(0, 480)
       }
       // 其他情况（含 "reply" 但解不出来）= 半截 JSON，reply 保持为 ""
     }

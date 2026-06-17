@@ -60,6 +60,13 @@ export default function LiveHostStage({
     if (timerRef.current) clearInterval(timerRef.current)
 
     const pool = GLITCH_POOL
+    // hanako 现在可以回更长内容。长回复时：打字更快、每拍多吐几个字、
+    // 乱码持续更短——否则一条长回复的解码动画会拖到十几秒，且 Android
+    // WebView 上逐字重渲染过多 span 容易卡。短回复保持原本的逐字仪式感。
+    const long = reply.length > 90
+    const typeInterval = long ? 16 : GLITCH_INTERVAL
+    const glitchDuration = long ? 700 : GLITCH_DURATION
+    const charsPerTick = long ? 3 : 1
     let index = 0
     charsRef.current = []
     setChars([])
@@ -68,8 +75,12 @@ export default function LiveHostStage({
     timerRef.current = setInterval(() => {
       const now = Date.now()
 
-      // 打出下一个字符
-      if (index < reply.length && index === charsRef.current.length) {
+      // 打出接下来的若干字符（长回复一次多吐几个）
+      for (
+        let k = 0;
+        k < charsPerTick && index < reply.length && index === charsRef.current.length;
+        k++
+      ) {
         charsRef.current = [
           ...charsRef.current,
           {
@@ -85,7 +96,7 @@ export default function LiveHostStage({
       // 乱码闪烁 + 到时解码
       charsRef.current = charsRef.current.map((c) => {
         if (!c.isGlitch) return c
-        if (now - c.addedAt >= GLITCH_DURATION) {
+        if (now - c.addedAt >= glitchDuration) {
           return { ...c, display: c.target, isGlitch: false }
         }
         return {
@@ -100,7 +111,7 @@ export default function LiveHostStage({
       if (index >= reply.length && charsRef.current.every((c) => !c.isGlitch)) {
         clearInterval(timerRef.current!)
       }
-    }, GLITCH_INTERVAL)
+    }, typeInterval)
 
     return () => {
       if (timerRef.current) clearInterval(timerRef.current)

@@ -474,7 +474,10 @@ export default function LiveWallContent() {
       setComments((prev) =>
         prev.map((c) => {
           if (c.done) return c
-          const next = c.typedChars + 1
+          // hanako 现在可以回更长的内容：按长度成比例多吐几个字，
+          // 否则一条长消息用 85ms/字会打到十几二十秒。短弹幕仍逐字。
+          const step = Math.max(1, Math.ceil(c.content.length / 90))
+          const next = c.typedChars + step
           return next >= c.content.length
             ? { ...c, typedChars: c.content.length, done: true }
             : { ...c, typedChars: next }
