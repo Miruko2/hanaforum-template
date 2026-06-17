@@ -175,8 +175,9 @@ async function loadRecentMessagePairs(
   // 返回近 cutoff 内已有消息的 pair_key 集合
   if (userIds.length === 0) return new Set()
   const pairKeys = userIds.map((u) => pairKey(u, mengmegziId))
-  // PostgREST 的 in. 需要 url 编码逗号；这里用 encoded
-  const inList = pairKeys.map((k) => encodeURIComponent(k)).join(",")
+  // PostgREST in. 用逗号分隔字面值；pair_key 是 uuid:uuid，仅含 [0-9a-f-:]，
+  // 在 URL query 里安全，无需编码（与 loadStates/loadProfiles 的约定一致）
+  const inList = pairKeys.join(",")
   const data = await supaGet<Array<{ pair_key: string }>>(
     env,
     `/rest/v1/dm_messages?pair_key=in.(${inList})&created_at=gte.${cutoffIso}&select=pair_key`,
@@ -193,9 +194,13 @@ async function checkVerified(env: Env, userId: string): Promise<boolean> {
   )
   // RPC 返回的是 jsonb，service_role 调用 SECURITY DEFINER 函数不受 RLS 限制
   // PostgREST rpc 返回裸值或 {result:...}，按实际处理
-  if (data === null) return false
+  if (data === null) return false // 请求失败 → fail-close（不戳，安全）
   if (typeof data === "boolean") return !data
-  if (typeof (data as any).result === "boolean") return !(data as any).result
+  if (typeof (data as { result?: boolean }).result === "boolean") {
+    return !(data as { result: boolean }).result
+  }
+  // 意外形态：记 warning 让首次 cron 即可暴露（部署后 wrangler tail 观察）
+  console.warn(`[proactive] email_verification_required(${userId}) 返回意外形态:`, JSON.stringify(data))
   return false
 }
 
@@ -228,7 +233,10 @@ async function sendOpener(env: Env, mengmegziId: string, userId: string, usernam
       sender_id: mengmegziId,
       recipient_id: userId,
       kind: "sticker",
-      content: "[s:happy]",
+      // content 存裸表情 ID（如 "happy"），与 splitRepliesIntoRows 的约定一致：
+      // 客户端 floating-chat.tsx 直接用 content 拼贴纸 URL /hanako/stickers/<name>。
+      // 切勿存 "[s:happy]"——那是 AI 回复文本里的解析标记，存进 DB 会导致客户端 404 破图。
+      content: "happy",
       created_at: new Date(baseTs + 1).toISOString(),
     },
   ]

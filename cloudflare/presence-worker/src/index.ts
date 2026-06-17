@@ -100,6 +100,11 @@ export default {
 
   // cron 每 5 分钟触发：萌萌子主动私信在线已验证用户
   async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
-    ctx.waitUntil(runProactiveSweep(env))
+    // 顶层 try/catch：防止单次扫描的未捕获异常在日志里刷成 unhandled rejection
+    ctx.waitUntil(
+      runProactiveSweep(env).catch((err) => {
+        console.error("[proactive] 扫描异常:", err?.message || err)
+      }),
+    )
   },
 }
