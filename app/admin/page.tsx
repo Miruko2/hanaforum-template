@@ -124,6 +124,8 @@ export default function AdminPage() {
   const [dmProactive, setDmProactive] = useState(cachedDmAiConfig?.proactive_enabled ?? false)
   const [dmCooldown, setDmCooldown] = useState<number>(cachedDmAiConfig?.cooldown_hours ?? 24)
   const [dmMaxUnanswered, setDmMaxUnanswered] = useState<number>(cachedDmAiConfig?.max_unanswered ?? 2)
+  // 两个开关即时保存中的临时态（防重复点击）
+  const [dmToggling, setDmToggling] = useState(false)
 
   // 公告广播状态
   const [annTitle, setAnnTitle] = useState("")
@@ -662,6 +664,64 @@ export default function AdminPage() {
       toast({ title: "保存失败", description: err?.message || "网络错误", variant: "destructive" })
     } finally {
       setDmConfigSaving(false)
+    }
+  }
+
+  // 即时切换私信开关（回复 / 主动）：PATCH 单字段、乐观更新、失败回滚（仿白名单开关）。
+  // 这两个开关不依赖下方「保存配置」按钮，拨动即落库，避免"改了忘存"。
+  const handleToggleDmField = async (
+    field: "enabled" | "proactive_enabled",
+    next: boolean,
+  ) => {
+    if (dmToggling) return
+    setDmToggling(true)
+    const prevConfig = dmConfig
+    // 乐观更新
+    if (field === "enabled") setDmEnabled(next)
+    else setDmProactive(next)
+    if (dmConfig) {
+      const optimistic = { ...dmConfig, [field]: next }
+      setDmConfig(optimistic)
+      cachedDmAiConfig = optimistic
+    }
+    const rollback = () => {
+      if (field === "enabled") setDmEnabled(prevConfig?.enabled ?? false)
+      else setDmProactive(prevConfig?.proactive_enabled ?? false)
+      if (prevConfig) {
+        setDmConfig(prevConfig)
+        cachedDmAiConfig = prevConfig
+      }
+    }
+    try {
+      const { data: sessionData } = await supabase.auth.getSession()
+      const token = sessionData?.session?.access_token
+      if (!token) {
+        rollback()
+        toast({ title: "未登录", description: "请重新登录后再尝试", variant: "destructive" })
+        return
+      }
+      const res = await fetch(apiUrl("/api/admin/dm-ai-config"), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ [field]: next }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        rollback()
+        toast({ title: "切换失败", description: data?.error || `HTTP ${res.status}`, variant: "destructive" })
+        return
+      }
+      setDmConfig(data)
+      cachedDmAiConfig = data
+      setDmEnabled(!!data.enabled)
+      setDmProactive(!!data.proactive_enabled)
+      const label = field === "enabled" ? "回复私信" : "主动私信"
+      toast({ title: next ? `已开启${label}` : `已关闭${label}`, description: "最多 10 秒后生效" })
+    } catch (err: any) {
+      rollback()
+      toast({ title: "切换失败", description: err?.message || "网络错误", variant: "destructive" })
+    } finally {
+      setDmToggling(false)
     }
   }
 
@@ -1543,20 +1603,38 @@ export default function AdminPage() {
                 )}
               </div>
 
-              {/* 开关 */}
+              {/* 开关：拨动即时落库，不依赖下方"保存配置" */}
               <div className="flex items-center justify-between rounded-md border border-gray-800 bg-gray-950 p-3">
                 <div>
                   <div className="text-sm text-gray-200">回复私信</div>
-                  <div className="text-xs text-gray-500">关闭时她不回任何私信（用户发了也静默）</div>
+                  <div className="text-xs text-gray-500">关闭时她不回任何私信（用户发了也静默）。拨动即时保存。</div>
                 </div>
-                <Switch checked={dmEnabled} onCheckedChange={setDmEnabled} />
+                <div className="flex items-center gap-2.5 shrink-0">
+                  <span className={`text-xs font-mono w-4 text-center ${dmEnabled ? "text-lime-400" : "text-gray-500"}`}>
+                    {dmEnabled ? "开" : "关"}
+                  </span>
+                  <Switch
+                    checked={dmEnabled}
+                    disabled={dmToggling}
+                    onCheckedChange={(v) => handleToggleDmField("enabled", v)}
+                  />
+                </div>
               </div>
               <div className="flex items-center justify-between rounded-md border border-gray-800 bg-gray-950 p-3">
                 <div>
                   <div className="text-sm text-gray-200">主动私信在线用户</div>
-                  <div className="text-xs text-gray-500">需第 2 批 + CF worker 部署才真正生效；这里先存开关</div>
+                  <div className="text-xs text-gray-500">需第 2 批 + CF worker 部署才真正生效；这里先存开关。拨动即时保存。</div>
                 </div>
-                <Switch checked={dmProactive} onCheckedChange={setDmProactive} />
+                <div className="flex items-center gap-2.5 shrink-0">
+                  <span className={`text-xs font-mono w-4 text-center ${dmProactive ? "text-lime-400" : "text-gray-500"}`}>
+                    {dmProactive ? "开" : "关"}
+                  </span>
+                  <Switch
+                    checked={dmProactive}
+                    disabled={dmToggling}
+                    onCheckedChange={(v) => handleToggleDmField("proactive_enabled", v)}
+                  />
+                </div>
               </div>
 
               {/* 编辑表单 */}
