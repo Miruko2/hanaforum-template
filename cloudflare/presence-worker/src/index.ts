@@ -9,6 +9,7 @@
 // 凭证：SUPABASE_JWT_SECRET 由 `wrangler secret put` 注入，不进 git。
 
 import { jwtVerify } from "jose"
+import { runProactiveSweep } from "./proactive"
 
 export { PresenceRoom } from "./presence-room"
 
@@ -17,6 +18,10 @@ export interface Env {
   SUPABASE_JWT_SECRET: string
   PRESENCE_ENABLED: string
   ALLOWED_ORIGINS: string
+  // 主动私信触发器（cron scheduled 用）
+  SUPABASE_URL: string
+  SUPABASE_SERVICE_ROLE_KEY: string
+  MENGMEGZI_USER_ID: string
 }
 
 function corsHeaders(origin: string | null, env: Env): HeadersInit {
@@ -91,5 +96,10 @@ export default {
     const fwd = new Request(req.url, req)
     fwd.headers.set("X-User-Id", userId)
     return stub.fetch(fwd)
+  },
+
+  // cron 每 5 分钟触发：萌萌子主动私信在线已验证用户
+  async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(runProactiveSweep(env))
   },
 }

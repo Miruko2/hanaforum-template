@@ -6,6 +6,8 @@
 //   - 护栏：opted_out / cooldown / max_unanswered / 近冷却期已有消息
 //   - DB 逻辑在 worker 里用裸 fetch 打 Supabase REST（worker 无 supabase-js 依赖）
 
+import type { Env } from "./index"
+
 // ── 开场白模板（与 lib/hanako/dm-ai.ts:140 的 OPENER_TEMPLATES 保持一致；两处需同步） ──
 // worker 不能 import Next.js 代码，故复制一份。模板极少改动。
 export const OPENER_TEMPLATES: string[] = [
@@ -82,4 +84,255 @@ export function filterEligible(
     if (streak >= config.maxUnanswered) return false
     return true
   })
+}
+
+// ── Supabase REST 辅助（worker 无 supabase-js，用裸 fetch） ──
+
+function supaHeaders(env: Env): HeadersInit {
+  return {
+    apikey: env.SUPABASE_SERVICE_ROLE_KEY,
+    Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+    "Content-Type": "application/json",
+    Prefer: "return=representation",
+  }
+}
+
+function supaUrl(env: Env, path: string): string {
+  return `${env.SUPABASE_URL.replace(/\/$/, "")}${path}`
+}
+
+async function supaGet<T>(env: Env, path: string): Promise<T | null> {
+  const res = await fetch(supaUrl(env, path), { headers: supaHeaders(env) })
+  if (!res.ok) {
+    console.error(`[proactive] supaGet ${path} failed: ${res.status} ${await res.text()}`)
+    return null
+  }
+  return (await res.json()) as T
+}
+
+async function supaPost<T>(env: Env, path: string, body: unknown): Promise<T | null> {
+  const res = await fetch(supaUrl(env, path), {
+    method: "POST",
+    headers: supaHeaders(env),
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    console.error(`[proactive] supaPost ${path} failed: ${res.status} ${await res.text()}`)
+    return null
+  }
+  return (await res.json()) as T
+}
+
+// pair_key 与 Next.js 侧一致：排序后拼接
+function pairKey(a: string, b: string): string {
+  return [a, b].sort().join(":")
+}
+
+// ── 各阶段查询 ──
+
+async function loadConfig(env: Env): Promise<DmAiConfig | null> {
+  const data = await supaGet<Array<{
+    proactive_enabled: boolean
+    cooldown_hours: number
+    max_unanswered: number
+  }>>(env, "/rest/v1/dm_ai_config?id=eq.1&select=proactive_enabled,cooldown_hours,max_unanswered")
+  if (!data || data.length === 0) return null
+  const r = data[0]
+  return {
+    proactiveEnabled: r.proactive_enabled,
+    cooldownHours: r.cooldown_hours,
+    maxUnanswered: r.max_unanswered,
+  }
+}
+
+async function loadStates(env: Env, userIds: string[]): Promise<Map<string, UserState>> {
+  if (userIds.length === 0) return new Map()
+  const filter = `user_id=in.(${userIds.join(",")})`
+  const data = await supaGet<Array<{
+    user_id: string
+    opted_out: boolean
+    last_proactive_at: string | null
+    unanswered_streak: number
+  }>>(env, `/rest/v1/hanako_dm_state?${filter}&select=user_id,opted_out,last_proactive_at,unanswered_streak`)
+  const m = new Map<string, UserState>()
+  if (data) for (const r of data) {
+    m.set(r.user_id, {
+      userId: r.user_id,
+      optedOut: r.opted_out,
+      lastProactiveAt: r.last_proactive_at,
+      unansweredStreak: r.unanswered_streak,
+    })
+  }
+  return m
+}
+
+async function loadRecentMessagePairs(
+  env: Env,
+  mengmegziId: string,
+  userIds: string[],
+  cutoffIso: string,
+): Promise<Set<string>> {
+  // 返回近 cutoff 内已有消息的 pair_key 集合
+  if (userIds.length === 0) return new Set()
+  const pairKeys = userIds.map((u) => pairKey(u, mengmegziId))
+  // PostgREST 的 in. 需要 url 编码逗号；这里用 encoded
+  const inList = pairKeys.map((k) => encodeURIComponent(k)).join(",")
+  const data = await supaGet<Array<{ pair_key: string }>>(
+    env,
+    `/rest/v1/dm_messages?pair_key=in.(${inList})&created_at=gte.${cutoffIso}&select=pair_key`,
+  )
+  return new Set(data ? data.map((r) => r.pair_key) : [])
+}
+
+async function checkVerified(env: Env, userId: string): Promise<boolean> {
+  // email_verification_required(uid) === false 表示"不需验证"=已验证/豁免
+  const data = await supaPost<{ result: boolean } | null>(
+    env,
+    "/rest/v1/rpc/email_verification_required",
+    { uid: userId },
+  )
+  // RPC 返回的是 jsonb，service_role 调用 SECURITY DEFINER 函数不受 RLS 限制
+  // PostgREST rpc 返回裸值或 {result:...}，按实际处理
+  if (data === null) return false
+  if (typeof data === "boolean") return !data
+  if (typeof (data as any).result === "boolean") return !(data as any).result
+  return false
+}
+
+async function loadProfiles(env: Env, userIds: string[]): Promise<Map<string, UserProfile>> {
+  if (userIds.length === 0) return new Map()
+  const filter = `id=in.(${userIds.join(",")})`
+  const data = await supaGet<Array<{ id: string; username: string | null }>>(
+    env,
+    `/rest/v1/profiles?${filter}&select=id,username`,
+  )
+  const m = new Map<string, UserProfile>()
+  if (data) for (const r of data) m.set(r.id, { id: r.id, username: r.username })
+  return m
+}
+
+async function sendOpener(env: Env, mengmegziId: string, userId: string, username: string): Promise<boolean> {
+  const baseTs = Date.now()
+  const text = pickOpener(username)
+  const rows = [
+    {
+      pair_key: pairKey(userId, mengmegziId),
+      sender_id: mengmegziId,
+      recipient_id: userId,
+      kind: "text",
+      content: text.slice(0, 500),
+      created_at: new Date(baseTs).toISOString(),
+    },
+    {
+      pair_key: pairKey(userId, mengmegziId),
+      sender_id: mengmegziId,
+      recipient_id: userId,
+      kind: "sticker",
+      content: "[s:happy]",
+      created_at: new Date(baseTs + 1).toISOString(),
+    },
+  ]
+  const result = await supaPost<unknown>(env, "/rest/v1/dm_messages", rows)
+  if (result === null) return false
+  console.log(`[proactive] 已发开场白给 ${username} (${userId})`)
+  return true
+}
+
+async function bumpState(env: Env, userId: string, prevStreak: number): Promise<void> {
+  // upsert：last_proactive_at=now, unanswered_streak += 1, 不动 opted_out
+  const body = {
+    user_id: userId,
+    last_proactive_at: new Date().toISOString(),
+    unanswered_streak: prevStreak + 1,
+    updated_at: new Date().toISOString(),
+  }
+  // PostgREST upsert：Prefer: resolution=merge-duplicates
+  const res = await fetch(supaUrl(env, "/rest/v1/hanako_dm_state"), {
+    method: "POST",
+    headers: { ...supaHeaders(env), Prefer: "return=minimal, resolution=merge-duplicates" },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    console.error(`[proactive] bumpState ${userId} failed: ${res.status} ${await res.text()}`)
+  }
+}
+
+// ── 主流程 ──
+
+export async function runProactiveSweep(env: Env): Promise<void> {
+  // 全局 kill switch 与 presence 共用
+  if (env.PRESENCE_ENABLED !== "true") {
+    console.log("[proactive] PRESENCE_ENABLED!=true，跳过")
+    return
+  }
+
+  const config = await loadConfig(env)
+  if (!config) {
+    console.log("[proactive] 读不到 dm_ai_config，跳过")
+    return
+  }
+  if (!config.proactiveEnabled) {
+    console.log("[proactive] proactive_enabled=false，跳过")
+    return
+  }
+
+  // 拿在线 userId 列表（DO stub fetch /online）
+  const mengmegziId = env.MENGMEGZI_USER_ID
+  const doId = env.PRESENCE.idFromName("global")
+  const doStub = env.PRESENCE.get(doId)
+  const onlineRes = await doStub.fetch("https://internal/online")
+  if (!onlineRes.ok) {
+    console.error(`[proactive] DO /online 失败: ${onlineRes.status}`)
+    return
+  }
+  const online = (await onlineRes.json()) as { users: string[] }
+  const onlineIds = online.users.filter((id) => id !== mengmegziId) // 不给自己发
+  if (onlineIds.length === 0) {
+    console.log("[proactive] 无在线用户")
+    return
+  }
+
+  const cooldownMs = config.cooldownHours * 60 * 60 * 1000
+  const cutoffIso = new Date(Date.now() - cooldownMs).toISOString()
+
+  // 批量查状态 / 近期消息 / profiles
+  const [states, recentPairs, profiles] = await Promise.all([
+    loadStates(env, onlineIds),
+    loadRecentMessagePairs(env, mengmegziId, onlineIds, cutoffIso),
+    loadProfiles(env, onlineIds),
+  ])
+
+  // 逐个查验证状态（RPC 单 uid 签名；候选数通常小，可接受）
+  const verifiedMap = new Map<string, boolean>()
+  await Promise.all(
+    onlineIds.map(async (uid) => {
+      verifiedMap.set(uid, await checkVerified(env, uid))
+    }),
+  )
+
+  // 组装候选
+  const candidates: Candidate[] = onlineIds.map((uid) => {
+    const pk = pairKey(uid, mengmegziId)
+    return {
+      userId: uid,
+      state: states.get(uid) ?? null,
+      profile: profiles.get(uid) ?? null,
+      verified: verifiedMap.get(uid) ?? false,
+      hadRecentMessage: recentPairs.has(pk),
+    }
+  })
+
+  const eligible = filterEligible(candidates, config)
+  console.log(`[proactive] 在线 ${onlineIds.length}，可发 ${eligible.length}`)
+
+  // 逐个发送 + bumpState
+  let sent = 0
+  for (const c of eligible) {
+    const ok = await sendOpener(env, mengmegziId, c.userId, c.profile!.username!)
+    if (ok) {
+      await bumpState(env, c.userId, c.state?.unansweredStreak ?? 0)
+      sent++
+    }
+  }
+  console.log(`[proactive] 本轮已发 ${sent} 条开场白`)
 }
