@@ -57,6 +57,13 @@ export class PresenceRoom implements DurableObject {
   }
 
   async fetch(req: Request): Promise<Response> {
+    const url = new URL(req.url)
+
+    // 内部端点：返回当前在线 userId 列表（cron 主动私信用）。仅同 worker 内部 fetch 可达。
+    if (url.pathname === "/online") {
+      return Response.json({ users: Array.from(this.connections.keys()) })
+    }
+
     const userId = req.headers.get("X-User-Id")
     if (!userId) {
       return new Response("Missing X-User-Id (internal)", { status: 400 })
