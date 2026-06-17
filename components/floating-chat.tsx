@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from "framer-motion"
 import { X, Send, Smile, Users, Hash } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
 import { apiUrl } from "@/lib/api-base"
-import { HANAKO_USER_ID } from "@/lib/hanako/constants"
+import { HANAKO_USER_ID, HANAKO_USERNAME } from "@/lib/hanako/constants"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useChatUI } from "@/contexts/chat-ui-context"
 import { usePresence } from "@/contexts/presence-context"
@@ -43,6 +43,9 @@ interface DmConv extends Partner {
 type Active = { kind: "hall" } | ({ kind: "dm" } & Partner)
 
 const MAX_LEN = 300
+// hanako 私信常驻入口的展示头像。她是 AI、profiles 里可能没有头像行，
+// 这里直接用站点内置资源（cdnUrl 对非存储路径原样返回，能正常渲染）。
+const HANAKO_AVATAR = "/hanako/avatar.png"
 // 空闲预热：最多预拉最近这么多个私聊会话的历史进缓存（控量，纯文本流量很小）
 const PREWARM_MAX_CONVS = 5
 const STICKERS = ["happy", "shy", "worried", "yandere", "surprised", "sleepy"]
@@ -746,6 +749,9 @@ export default function FloatingChat() {
 
   if (!user) return null
 
+  // hanako 是常驻入口：从会话列表取她的未读数，显示在固定入口的红点上
+  const hanakoUnread = convs.find((c) => c.id === HANAKO_USER_ID)?.unread ?? 0
+
   const headerLabel = active.kind === "hall" ? "聊天大厅" : active.username
 
   return (
@@ -789,9 +795,19 @@ export default function FloatingChat() {
             >
               <Hash className="h-5 w-5" />
             </button>
-            {convs.length > 0 && <div className={styles.railDivider} />}
+            {/* hanako 常驻入口：她是 AI、不会出现在"在线"列表，必须有个固定入口才能发起私聊 */}
+            <button
+              className={`${styles.railItem} ${active.kind === "dm" && active.id === HANAKO_USER_ID ? styles.railActive : ""}`}
+              onClick={() => startDm({ id: HANAKO_USER_ID, username: HANAKO_USERNAME, avatar_url: HANAKO_AVATAR })}
+              title="私聊 hanako"
+              aria-label="私聊 hanako"
+            >
+              <UserAvatar username={HANAKO_USERNAME} avatarUrl={HANAKO_AVATAR} size={34} />
+              {hanakoUnread > 0 && <span className={styles.railBadge}>{hanakoUnread > 9 ? "9+" : hanakoUnread}</span>}
+            </button>
+            {convs.some((c) => c.id !== HANAKO_USER_ID) && <div className={styles.railDivider} />}
             <div className={styles.railList}>
-              {convs.map((c) => (
+              {convs.filter((c) => c.id !== HANAKO_USER_ID).map((c) => (
                 <button
                   key={c.id}
                   className={`${styles.railItem} ${active.kind === "dm" && active.id === c.id ? styles.railActive : ""}`}
