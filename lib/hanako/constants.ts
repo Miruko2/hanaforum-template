@@ -34,37 +34,42 @@ export const EMOTION_COLORS: Record<HanakoEmotion, string> = {
   sleepy: "#a78bfa",    // purple
 }
 
-/** 情绪 id → 心情描述（私信上下文用）。
- *  私信里发的表情包 content 即情绪 id（如 "happy"）。为了让 AI 读懂表情包背后的
- *  心绪而不依赖图像理解，把表情包转成「[发了XX表情：心情]」文本纳入上下文。
- *  覆盖全部 EMOTIONS 枚举，未知值兜底为「表情」。 */
-export const EMOTION_LABELS: Record<HanakoEmotion, string> = {
+/** 表情包 id → 心情描述（**仅表情包代码消费**，弹幕墙情绪系统不读它）。
+ *  发的表情包 content 即表情 id（如 "happy"）。为了让 AI 读懂表情包背后的心绪而不依赖
+ *  图像理解，把表情包转成「[发了XX表情：心情]」文本纳入上下文。未知值兜底为「表情」。
+ *  键是「归一后」的规范 id（见 EMOTION_ALIASES），故只列规范 id。 */
+export const EMOTION_LABELS: Record<string, string> = {
   neutral: "平静",
   happy: "开心",
   shy: "害羞",
   jealous: "吃醋",
-  worried: "担心",
   cuddle: "贴贴/抱抱",
-  surprised: "惊讶",
   sleepy: "困倦",
+  excited: "兴奋",  // 原 surprised.jpg 实为兴奋表情，已更名 excited
+  confused: "疑惑", // 原 worried.jpg 实为疑惑表情，已更名 confused
 }
 
-/** 旧情绪 id → 新 id 的别名映射，兼容历史数据（dm_messages / 帖子 token 里残留的旧值）。
- *  yandere 已更名为 cuddle（语义从「病娇」改为「贴贴/抱抱」，避免模型把 yandere
- *  当病娇理解）。历史消息里存的 yandere 在渲染/解析时归一到 cuddle。 */
-export const EMOTION_ALIASES: Record<string, HanakoEmotion> = {
+/** 旧表情包 id → 新 id 的别名映射，兼容历史数据（dm_messages 的 sticker content /
+ *  帖子·评论里的 [s:xxx] token 残留的旧值）。**仅表情包代码经 normalizeEmotion 使用**。
+ *  - yandere → cuddle（语义从「病娇」改为「贴贴/抱抱」）
+ *  - surprised → excited、worried → confused：表情图实际画的是兴奋/疑惑，已更名。
+ *  ⚠️ surprised / worried 仍是弹幕墙 hanako 的有效「情绪」（见 HanakoEmotion / EMOTIONS /
+ *  EMOTION_COLORS / prompt.ts）——弹幕墙从不调用 normalizeEmotion，故这些别名只影响
+ *  表情包、绝不影响她的情绪表达。 */
+export const EMOTION_ALIASES: Record<string, string> = {
   yandere: "cuddle",
+  surprised: "excited",
+  worried: "confused",
 }
 
-/** 把任意情绪 id（含旧别名）归一到当前枚举值；未知值原样返回。 */
+/** 把任意表情包 id（含旧别名）归一到当前规范 id；未知值原样返回。 */
 export function normalizeEmotion(id: string): string {
   return EMOTION_ALIASES[id] ?? id
 }
 
-/** 把情绪 id 转成上下文里可读的心情文本（未知情绪兜底，兼容旧别名）。 */
+/** 把表情包 id 转成上下文里可读的心情文本（未知兜底「表情」，兼容旧别名）。 */
 export function emotionLabel(id: string): string {
-  const normalized = normalizeEmotion(id) as HanakoEmotion
-  return EMOTION_LABELS[normalized] || "表情"
+  return EMOTION_LABELS[normalizeEmotion(id)] || "表情"
 }
 
 /** Hanako 的固定用户 ID（对应 auth.users 和 public.users 中的记录） */

@@ -45,7 +45,7 @@ type Active = { kind: "hall" } | ({ kind: "dm" } & Partner)
 const MAX_LEN = 300
 // 空闲预热：最多预拉最近这么多个私聊会话的历史进缓存（控量，纯文本流量很小）
 const PREWARM_MAX_CONVS = 5
-const STICKERS = ["happy", "shy", "worried", "cuddle", "surprised", "sleepy"]
+const STICKERS = ["happy", "shy", "confused", "cuddle", "excited", "sleepy"]
 const ASSET_EXTS = ["jpg", "png", "webp", "gif"]
 
 // Blur effect constants for scroll fade

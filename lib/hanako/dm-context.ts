@@ -21,6 +21,7 @@ import {
   DM_MAX_FOLD_BATCH,
   DM_SUMMARY_MAX_TOKENS,
   emotionLabel,
+  normalizeEmotion,
 } from "@/lib/hanako/constants"
 import { estimateTokens } from "@/lib/hanako/token-estimate"
 
@@ -28,9 +29,11 @@ const pairKey = (a: string, b: string) => [a, b].sort().join(":")
 
 type HistMsg = { sender_id: string; content: string; kind: string; created_at: string }
 
-/** 把单条消息转成上下文里的可读文本（区分文本/表情包） */
+/** 把单条消息转成上下文里的可读文本（区分文本/表情包）。
+ *  表情包显示「归一后」的规范 id（旧别名如 surprised→excited），与心情标签一致、不误导模型。 */
 function toContextText(m: HistMsg): string {
-  return m.kind === "sticker" ? `[发了${m.content}表情：${emotionLabel(m.content)}]` : m.content
+  if (m.kind !== "sticker") return m.content
+  return `[发了${normalizeEmotion(m.content)}表情：${emotionLabel(m.content)}]`
 }
 
 /** 估算单条消息在上下文里的 token 数（含每条 ~4 的 role/分隔开销） */

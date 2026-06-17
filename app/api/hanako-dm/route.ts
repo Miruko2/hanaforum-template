@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import dmRateLimiter from "@/lib/hanako/dm-rate-limit"
 import { loadDmAiConfig, dmSupabaseAdmin, MAX_DM_REPLIES } from "@/lib/hanako/dm-ai"
-import { MENGMEGZI_USER_ID, MAX_REPLY_TOKENS, emotionLabel, DM_COMPRESS_HARD_MSGS } from "@/lib/hanako/constants"
+import { MENGMEGZI_USER_ID, MAX_REPLY_TOKENS, emotionLabel, normalizeEmotion, DM_COMPRESS_HARD_MSGS } from "@/lib/hanako/constants"
 import { buildDmContext } from "@/lib/hanako/dm-context"
 
 // 强制动态渲染
@@ -116,7 +116,9 @@ export async function POST(req: NextRequest) {
       (authUser.email ? authUser.email.split("@")[0] : null) ||
       "主人"
     const latestText =
-      latestKind === "sticker" ? `[发了${latest}表情：${emotionLabel(latest)}]` : latest
+      latestKind === "sticker"
+        ? `[发了${normalizeEmotion(latest)}表情：${emotionLabel(latest)}]`
+        : latest
     const { messages } = await buildDmContext(userId, username, latestText, latest, {
       compressIfOver: DM_COMPRESS_HARD_MSGS,
     })

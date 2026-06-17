@@ -8,7 +8,9 @@ import { normalizeEmotion } from "@/lib/hanako/constants"
 
 // 与聊天窗展示的表情保持一致（floating-chat.tsx 的 STICKERS）。
 // 注：public/hanako/stickers 下另有 angry.jpg，但聊天窗未启用，这里同样不收录以保持一致。
-export const STICKERS = ["happy", "shy", "worried", "cuddle", "surprised", "sleepy"] as const
+// excited（原 surprised）、confused（原 worried）：表情图实际表达兴奋/疑惑，已更名；
+// 旧值经 normalizeEmotion 归一（见 constants 的 EMOTION_ALIASES），历史数据照常渲染。
+export const STICKERS = ["happy", "shy", "confused", "cuddle", "excited", "sleepy"] as const
 
 export type StickerName = (typeof STICKERS)[number]
 
