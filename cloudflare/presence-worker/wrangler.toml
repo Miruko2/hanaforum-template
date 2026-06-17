@@ -19,6 +19,13 @@ new_sqlite_classes = ["PresenceRoom"]
 PRESENCE_ENABLED = "true"
 # CORS 白名单（前端来源），逗号分隔。注意不要含尾斜杠。
 ALLOWED_ORIGINS = "https://hanakos.cc,https://www.hanakos.cc,http://localhost:3000"
+# 主动私信触发器用（非敏感；service_role key 走 wrangler secret）
+SUPABASE_URL = "https://YOUR-PROJECT-REF.supabase.co"
+MENGMEGZI_USER_ID = "78257113-e5da-4bcb-bb7a-9b1824439cd1"
+
+# 主动私信触发器：cron 每 5 分钟扫描在线用户
+[triggers]
+crons = ["*/5 * * * *"]
 
 # 路由（部署后子域名生效；首次部署可先注释，用 *.workers.dev 测好再上）
 # routes = [
