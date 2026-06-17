@@ -182,8 +182,9 @@ export const DM_STICKER_INJECT_PROBABILITY = 0.55
 export const HALL_CHIME_IN_PROBABILITY = 0.4
 
 /** 服务端冷却：萌萌子在大厅两次发言间的最小间隔（毫秒）。防多客户端并发命中刷屏。
- *  10s：活跃但不过密。多个在线用户同时命中 40% 时，只有距上次发言满 10s 的才放行。 */
-export const HALL_CHIME_IN_COOLDOWN_MS = 10_000
+ *  5s：活跃。多个在线用户同时命中 40% 时，只有距上次发言满 5s 的才放行。
+ *  注意：被 @ 点名（force=true）绕过此冷却，保证必回。 */
+export const HALL_CHIME_IN_COOLDOWN_MS = 5_000
 
 /** 拉大厅最近多少条消息作为上下文（含触发消息）。控制单次 token 成本。 */
 export const HALL_CHIME_IN_CONTEXT_MSGS = 20
