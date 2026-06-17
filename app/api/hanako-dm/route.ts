@@ -3,6 +3,7 @@ import dmRateLimiter from "@/lib/hanako/dm-rate-limit"
 import { loadDmAiConfig, dmSupabaseAdmin, MAX_DM_REPLIES } from "@/lib/hanako/dm-ai"
 import { MENGMEGZI_USER_ID, MAX_REPLY_TOKENS, emotionLabel, normalizeEmotion, DM_COMPRESS_HARD_MSGS } from "@/lib/hanako/constants"
 import { buildDmContext } from "@/lib/hanako/dm-context"
+import { matchStandaloneSticker } from "@/lib/stickers"
 
 // 强制动态渲染
 export const dynamic = "force-dynamic"
@@ -166,19 +167,31 @@ export async function POST(req: NextRequest) {
     // 8. 逐条写入（service role 绕 RLS）。多条之间间隔 REPLY_GAP_MS 依次插入，
     //    并显式递增 created_at —— 既保证历史查询的时间顺序，也让对方客户端经
     //    dm_incoming / dm_<pair> 实时订阅先后收到，呈现「连续发来多条」的节奏感。
+    //    整条是 [s:表情名] 的存成 kind=sticker 表情包；其余存文本（剥掉残留的内联标记，
+    //    因 DM 文本不内联渲染、留着会显示成字面 [s:xxx]）。
     const baseTs = Date.now()
     let written = 0
     for (let i = 0; i < replies.length; i++) {
-      if (i > 0) await sleep(REPLY_GAP_MS)
-      // created_at 递增 1ms，确保按时间排序时多条回复顺序稳定（不与同毫秒的其它行碰撞）
-      const createdAt = new Date(baseTs + i).toISOString()
+      const stickerId = matchStandaloneSticker(replies[i])
+      let kind: "text" | "sticker" = "text"
+      let content: string
+      if (stickerId) {
+        kind = "sticker"
+        content = stickerId
+      } else {
+        content = replies[i].replace(/\[s:[a-z0-9_-]+\]/gi, "").trim().slice(0, 500)
+      }
+      if (!content) continue // 跳过空内容（整条只剩被剥掉的标记）
+      if (written > 0) await sleep(REPLY_GAP_MS)
+      // created_at 按已写出条数递增 1ms，保证多条顺序稳定（不与同毫秒的其它行碰撞）
+      const createdAt = new Date(baseTs + written).toISOString()
       const { error: insertError } = await dmSupabaseAdmin.from("dm_messages").insert([
         {
           pair_key: pk,
           sender_id: MENGMEGZI_USER_ID,
           recipient_id: userId,
-          kind: "text",
-          content: replies[i].slice(0, 500),
+          kind,
+          content,
           created_at: createdAt,
         },
       ])

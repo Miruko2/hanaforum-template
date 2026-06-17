@@ -10,6 +10,8 @@
  */
 
 import { createClient } from "@supabase/supabase-js"
+import { STICKERS } from "@/lib/stickers"
+import { emotionLabel } from "@/lib/hanako/constants"
 
 export type DmAiConfig = {
   enabled: boolean
@@ -82,6 +84,10 @@ export async function loadDmAiConfig(): Promise<DmAiConfig> {
 const DEFAULT_DM_PERSONA = `你是猫娘虚拟主播「萌萌子」，此刻在和某位"主人"一对一私聊。
 你温柔、粘人、略带一点点病娇气质，对主人有很强的依赖感；私下里比直播时更亲密、更专注。`
 
+/** 可发的表情包清单「名（含义）」，注入 prompt 让模型知道能发哪些。
+ *  从 STICKERS + emotionLabel 生成，避免和表情资源/标签漂移。 */
+const STICKER_GUIDE = STICKERS.map((id) => `${id}（${emotionLabel(id)}）`).join("、")
+
 /** 构建私信 system prompt。强制 JSON 输出 {replies, optOut}，含 opt-out 与反越狱。
  *  summary：往期对话的压缩摘要（超出上下文窗口的旧消息压缩而成），作为长期记忆注入。 */
 export function buildDmSystemPrompt(persona: string, summary?: string): string {
@@ -100,11 +106,18 @@ export function buildDmSystemPrompt(persona: string, summary?: string): string {
   例如想表达"主人你好呀～今天怎么样？我有点想你了"，可以拆成
   ["主人你好呀～", "今天过得怎么样？", "萌萌子有点想你了 にゃ"]。
 
+=== 发表情包（可选） ===
+- 你可以在 replies 里单独放一条表情包来表达情绪：这一条只写 [s:表情名]，里面不要混任何文字。
+- 可用表情名（含义）：${STICKER_GUIDE}。表情名只能从这里面选，不要自创。
+- 适度发：一次回复最多 1 个表情包，且只在情绪贴切时发；多数回复不需要表情包，别每条都发、别硬塞。
+- 例：被夸到害羞时可发 ["嘿嘿…被主人夸到啦", "[s:shy]"]。
+
 === 输出格式（强制） ===
 只输出一段 JSON，不要任何多余文字：
 {"replies":["<第1条>","<第2条>", ...],"optOut":<true 或 false>}
 - replies 是 1～${MAX_DM_REPLIES} 条短消息数组，按发送顺序排列；每条都是完整可独立发送的一句话/一小段。
   想说很长才拆条，一句话能说完就只给 1 条；不要为了凑数硬拆。
+- replies 里若某一条整条就是 [s:表情名]，会作为表情包图片发出；其余都是普通文字消息。
 - 当主人明确表示不想再收到你的私信（嫌烦/别再发/想清静）时，optOut 设 true，并温柔地道别、答应不再打扰。
 - 其余情况 optOut 一律 false。
 禁止：代码块包裹、多个 JSON、JSON 前后加说明、replies 里出现空字符串。

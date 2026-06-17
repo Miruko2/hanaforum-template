@@ -68,6 +68,16 @@ export function hasStickerToken(text: string | null | undefined): boolean {
   return false
 }
 
+// 整条文本「只有一个表情包标记」（首尾可有空白）时，返回归一后的表情名；否则 null。
+// 用于萌萌子私信主动发表情：模型在 replies 里单独放一条 [s:name]，路由据此存成 kind=sticker 行。
+const STANDALONE_STICKER_RE = /^\s*\[s:([a-z0-9_-]+)\]\s*$/i
+export function matchStandaloneSticker(text: string): StickerName | null {
+  const m = text.match(STANDALONE_STICKER_RE)
+  if (!m) return null
+  const name = normalizeEmotion(m[1].toLowerCase())
+  return STICKER_SET.has(name) ? (name as StickerName) : null
+}
+
 // ── 扩展名解析（带整页缓存）──
 // 同一名字整页只探测一次：首个组件触发 HEAD 探测，结果缓存，其余组件直取，
 // 避免大量评论/正文里重复 HEAD 请求。
