@@ -201,6 +201,8 @@ export default function FloatingChat() {
   const [input, setInput] = useState("")
   const [sending, setSending] = useState(false)
   const [showStickers, setShowStickers] = useState(false)
+  // @ 补全菜单：输入框敲 @ 时弹出萌萌子选项，点击补全 @萌萌子+空格
+  const [mentionOpen, setMentionOpen] = useState(false)
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
 
   // 右键菜单（关闭私聊）
@@ -682,6 +684,23 @@ export default function FloatingChat() {
     })
   }, [messages, open, active, updateBlur])
 
+  // 打开面板 / 切换会话时无条件贴底。
+  // 原本只依赖 atBottomRef（贴底才自动滚），但「打开」那一刻 feedRef 还在
+  // AnimatePresence 入场动画中、尺寸未定；随后消息异步到达时 scrollTop=scrollHeight
+  // 可能落在面板尚未撑满高度之前 → 实际停在顶部。这里在 open/active 变化后延后到
+  // 布局稳定再强制滚底，覆盖该竞态。
+  useEffect(() => {
+    if (!open) return
+    const jump = () => {
+      const el = feedRef.current
+      if (el) el.scrollTop = el.scrollHeight
+    }
+    atBottomRef.current = true
+    jump()
+    requestAnimationFrame(jump)
+    requestAnimationFrame(() => requestAnimationFrame(jump))
+  }, [open, active])
+
   const send = useCallback(
     async (kind: "text" | "sticker", content: string) => {
       if (!user || sending) return
@@ -747,6 +766,39 @@ export default function FloatingChat() {
     },
     [user, sending, myName, toast],
   )
+
+  // @ 补全：把光标前最近的「词首 @」之后的内容替换成 萌萌子+空格，光标跟到补全末尾。
+  // 仅大厅用。补全后关闭菜单、聚焦输入框、重算高度。
+  const completeMention = () => {
+    const ta = textareaRef.current
+    if (!ta) return
+    const v = input
+    const pos = ta.selectionStart ?? v.length
+    const before = v.slice(0, pos)
+    // 复用 onChange 的同一套「词首 @」判定，找到要替换的 @ 位置
+    let atIdx = -1
+    for (let i = before.length - 1; i >= 0; i--) {
+      if (before[i] === " ") break
+      if (before[i] === "@") {
+        const prev = before[i - 1]
+        if (prev === undefined || prev === " " || prev === "\n") atIdx = i
+        break
+      }
+    }
+    if (atIdx < 0) return
+    const insert = "萌萌子 "
+    const next = v.slice(0, atIdx + 1) + insert + v.slice(pos)
+    setInput(next.slice(0, MAX_LEN))
+    setMentionOpen(false)
+    // 光标放到补全词之后（@萌萌子 的空格后）
+    const caret = atIdx + 1 + insert.length
+    requestAnimationFrame(() => {
+      if (!textareaRef.current) return
+      textareaRef.current.focus()
+      textareaRef.current.setSelectionRange(caret, caret)
+      autoResize(textareaRef.current)
+    })
+  }
 
   const submitText = () => {
     const t = input.trim()
@@ -1051,6 +1103,30 @@ export default function FloatingChat() {
             </AnimatePresence>
 
             <footer className={styles.footer}>
+              <AnimatePresence>
+                {mentionOpen && (
+                  <motion.div
+                    className={styles.mentionMenu}
+                    initial={{ opacity: 0, y: 6, scale: 0.96 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 6, scale: 0.96 }}
+                    transition={{ duration: 0.12 }}
+                  >
+                    <button
+                      className={styles.mentionItem}
+                      onMouseDown={(e) => {
+                        // 用 mousedown 而非 click：避免先触发 textarea blur 导致光标位置丢失
+                        e.preventDefault()
+                        completeMention()
+                      }}
+                    >
+                      <UserAvatar username={HANAKO_DM_USERNAME} avatarUrl={HANAKO_AVATAR} size={22} />
+                      <span>{HANAKO_DM_USERNAME}</span>
+                      <span className={styles.mentionHint}>回车选择</span>
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
               <button className={styles.iconBtn} onClick={() => setShowStickers((s) => !s)} aria-label="表情包">
                 <Smile className="h-5 w-5" />
               </button>
@@ -1060,17 +1136,49 @@ export default function FloatingChat() {
                 value={input}
                 rows={1}
                 onChange={(e) => {
-                  setInput(e.target.value.slice(0, MAX_LEN))
+                  const v = e.target.value.slice(0, MAX_LEN)
+                  setInput(v)
                   autoResize(e.currentTarget)
+                  // @ 补全：仅大厅场景。检测光标前文本里「词首 @」且 @ 后无空格 → 弹菜单。
+                  // 词首 = @ 前是空格/行首/串首。@ 后一旦敲了空格即关闭（视为放弃补全）。
+                  if (active.kind === "hall") {
+                    const pos = e.target.selectionStart ?? v.length
+                    const before = v.slice(0, pos)
+                    // 找最后一个未被空格打断的 @
+                    const atIdx = (() => {
+                      for (let i = before.length - 1; i >= 0; i--) {
+                        if (before[i] === " ") return -1 // 遇空格停止：当前词不含 @
+                        if (before[i] === "@") {
+                          // @ 必须在词首：前一个字符是空格/行首/串首
+                          const prev = before[i - 1]
+                          return prev === undefined || prev === " " || prev === "\n" ? i : -1
+                        }
+                      }
+                      return -1
+                    })()
+                    setMentionOpen(atIdx >= 0)
+                  } else {
+                    setMentionOpen(false)
+                  }
                 }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault()
-                    submitText()
+                    // 菜单开着时回车=选中补全，而非发送
+                    if (mentionOpen) {
+                      completeMention()
+                    } else {
+                      submitText()
+                      setMentionOpen(false)
+                    }
+                  } else if (e.key === "Escape" && mentionOpen) {
+                    e.preventDefault()
+                    setMentionOpen(false)
                   }
                 }}
                 placeholder={active.kind === "hall" ? "对大厅说点什么…" : `私聊 ${active.username}…`}
                 maxLength={MAX_LEN}
+                onBlur={() => setMentionOpen(false)}
               />
               <button className={styles.send} onClick={submitText} disabled={sending || !input.trim()} aria-label="发送">
                 <Send className="h-4 w-4" />

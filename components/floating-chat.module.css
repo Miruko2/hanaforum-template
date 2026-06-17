@@ -344,8 +344,49 @@
   border-radius: 12px;
 }
 
+/* @ 补全菜单：贴在输入栏上方 */
+.mentionMenu {
+  position: absolute;
+  left: 10px;
+  bottom: 100%;
+  margin-bottom: 4px;
+  z-index: 50;
+  min-width: 150px;
+  padding: 4px;
+  border-radius: 12px;
+  background: rgba(20, 20, 30, 0.6);
+  backdrop-filter: blur(20px) saturate(1.3);
+  -webkit-backdrop-filter: blur(20px) saturate(1.3);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  color: rgba(255, 255, 255, 0.92);
+  animation: ctxFadeIn 0.12s ease-out;
+}
+.mentionItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.88);
+  background: transparent;
+  transition: background 0.15s ease;
+}
+.mentionItem:hover {
+  background: rgba(247, 168, 208, 0.16);
+  color: #f7a8d0;
+}
+.mentionHint {
+  margin-left: auto;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
 /* ── 输入栏（按钮整体缩小） ── */
 .footer {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
