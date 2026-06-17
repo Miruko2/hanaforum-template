@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { cdnUrl } from "@/lib/cdn-url"
 import { createPortal } from "react-dom"
 import { motion, AnimatePresence } from "framer-motion"
@@ -187,7 +187,19 @@ export default function FloatingChat() {
   const [messages, setMessages] = useState<DisplayMsg[]>([])
   // 在线状态由全站 PresenceProvider 维护（CF Durable Object + WebSocket），
   // 登录即建连、断开即离线；本组件只读，不再本地维护心跳
-  const { onlineUsers: online, isOnline } = usePresence()
+  const { onlineUsers: rawOnline, isOnline: rawIsOnline } = usePresence()
+  // hanako 是 AI、无真实 presence 连接，前端虚拟她「永远在线」：
+  // 既出现在大厅在线头像条（置顶、恒在、不被挤掉），也让 DM 头部在线判断对她恒为真。
+  // 注入只在本组件消费侧做，不污染全局 PresenceProvider 语义（其他用 usePresence()
+  // 的地方，如社交页在线标记，不应把 hanako 当真人在线）。
+  const online = useMemo(() => {
+    if (rawOnline.some((u) => u.id === HANAKO_USER_ID)) return rawOnline
+    return [{ id: HANAKO_USER_ID, username: HANAKO_USERNAME, avatar_url: HANAKO_AVATAR }, ...rawOnline]
+  }, [rawOnline])
+  const isOnline = useCallback(
+    (id: string) => id === HANAKO_USER_ID || rawIsOnline(id),
+    [rawIsOnline],
+  )
   const [input, setInput] = useState("")
   const [sending, setSending] = useState(false)
   const [showStickers, setShowStickers] = useState(false)
@@ -749,9 +761,6 @@ export default function FloatingChat() {
 
   if (!user) return null
 
-  // hanako 是常驻入口：从会话列表取她的未读数，显示在固定入口的红点上
-  const hanakoUnread = convs.find((c) => c.id === HANAKO_USER_ID)?.unread ?? 0
-
   const headerLabel =
     active.kind === "hall"
       ? "聊天大厅"
@@ -800,31 +809,27 @@ export default function FloatingChat() {
             >
               <Hash className="h-5 w-5" />
             </button>
-            {/* hanako 常驻入口：她是 AI、不会出现在"在线"列表，必须有个固定入口才能发起私聊 */}
-            <button
-              className={`${styles.railItem} ${active.kind === "dm" && active.id === HANAKO_USER_ID ? styles.railActive : ""}`}
-              onClick={() => startDm({ id: HANAKO_USER_ID, username: HANAKO_USERNAME, avatar_url: HANAKO_AVATAR })}
-              title="私聊 hanako"
-              aria-label="私聊 hanako"
-            >
-              <UserAvatar username={HANAKO_USERNAME} avatarUrl={HANAKO_AVATAR} size={34} />
-              {hanakoUnread > 0 && <span className={styles.railBadge}>{hanakoUnread > 9 ? "9+" : hanakoUnread}</span>}
-            </button>
-            {convs.some((c) => c.id !== HANAKO_USER_ID) && <div className={styles.railDivider} />}
+            {convs.length > 0 && <div className={styles.railDivider} />}
             <div className={styles.railList}>
-              {convs.filter((c) => c.id !== HANAKO_USER_ID).map((c) => (
+              {convs.map((c) => {
+                // hanako 的 profiles 行可能脏（撞名后缀 + 无头像），会话列表里
+                // 也用固定名字/头像，与大厅在线条、消息渲染保持一致。
+                const isHanako = c.id === HANAKO_USER_ID
+                const uname = isHanako ? HANAKO_USERNAME : c.username
+                const av = isHanako ? HANAKO_AVATAR : c.avatar_url
+                return (
                 <button
                   key={c.id}
                   className={`${styles.railItem} ${active.kind === "dm" && active.id === c.id ? styles.railActive : ""}`}
-                  onClick={() => switchTo({ kind: "dm", id: c.id, username: c.username, avatar_url: c.avatar_url })}
+                  onClick={() => switchTo({ kind: "dm", id: c.id, username: uname, avatar_url: av })}
                   onContextMenu={(e) => {
                     e.preventDefault()
-                    setCtxMenu({ x: e.clientX, y: e.clientY, convId: c.id, username: c.username })
+                    setCtxMenu({ x: e.clientX, y: e.clientY, convId: c.id, username: uname })
                   }}
                   onTouchStart={(e) => {
                     const touch = e.touches[0]
                     longPressTimerRef.current = setTimeout(() => {
-                      setCtxMenu({ x: touch.clientX, y: touch.clientY, convId: c.id, username: c.username })
+                      setCtxMenu({ x: touch.clientX, y: touch.clientY, convId: c.id, username: uname })
                     }, 500)
                   }}
                   onTouchEnd={() => {
@@ -833,12 +838,13 @@ export default function FloatingChat() {
                   onTouchMove={() => {
                     if (longPressTimerRef.current) { clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null }
                   }}
-                  title={c.username}
+                  title={uname}
                 >
-                  <UserAvatar username={c.username} avatarUrl={c.avatar_url} size={34} />
+                  <UserAvatar username={uname} avatarUrl={av} size={34} />
                   {c.unread > 0 && <span className={styles.railBadge}>{c.unread > 9 ? "9+" : c.unread}</span>}
                 </button>
-              ))}
+                )
+              })}
             </div>
           </div>
 
@@ -852,10 +858,9 @@ export default function FloatingChat() {
                     <Users className="h-3.5 w-3.5" />
                     {online.length} 在聊
                   </span>
-                ) : active.id === HANAKO_USER_ID ? (
-                  // hanako 是 AI、永远不在 presence 在线列表里，显示"离线"会误导，改标 AI
-                  <span className={styles.headerOnline}>AI</span>
                 ) : (
+                  // hanako 前端虚拟永远在线（见 usePresence 派生），isOnline 对她恒为真，
+                  // 故这里与真人统一走在线/离线分支，显示绿点「在线」。
                   <span className={styles.headerOnline}>
                     <span className={isOnline(active.id) ? styles.onlineDot : styles.offlineDot} />
                     {isOnline(active.id) ? "在线" : "离线"}
@@ -869,7 +874,13 @@ export default function FloatingChat() {
 
             {active.kind === "hall" && online.length > 0 && (
               <div className={styles.onlineStrip}>
-                {online.slice(0, 12).map((u) => (
+                {online.slice(0, 12).map((u) => {
+                  // hanako 在 online 首位（见 usePresence 派生），恒在、不被挤掉；
+                  // 她的 profiles 行可能脏（撞名后缀 + 无头像），这里强制用固定头像/名字。
+                  const isHanako = u.id === HANAKO_USER_ID
+                  const uname = isHanako ? HANAKO_USERNAME : u.username
+                  const av = isHanako ? HANAKO_AVATAR : u.avatar_url
+                  return (
                   <button
                     key={u.id}
                     className={styles.onlineAvatarBtn}
@@ -878,14 +889,15 @@ export default function FloatingChat() {
                       setAvatarMenu({
                         x: e.clientX,
                         y: e.clientY,
-                        partner: { id: u.id, username: u.username, avatar_url: u.avatar_url },
+                        partner: { id: u.id, username: uname, avatar_url: av },
                       })
                     }
-                    title={u.username}
+                    title={uname}
                   >
-                    <UserAvatar username={u.username} avatarUrl={u.avatar_url} size={22} />
+                    <UserAvatar username={uname} avatarUrl={av} size={22} />
                   </button>
-                ))}
+                  )
+                })}
               </div>
             )}
 
