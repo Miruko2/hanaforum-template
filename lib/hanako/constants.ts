@@ -167,4 +167,25 @@ export const DM_SUMMARY_MAX_TOKENS = 1200
  *  0.55 ≈ 一半多回复带表情包：活泼有萌点但不刷屏。可随时调。 */
 export const DM_STICKER_INJECT_PROBABILITY = 0.55
 
+/* ============================================================
+ * 萌萌子在大厅（chat_messages）主动插话参数
+ *
+ * 机制：前端订阅大厅 realtime，每来一条「非萌萌子自己发的」新消息，按
+ * HALL_CHIME_IN_PROBABILITY 掷骰，命中即调 /api/hall-mengmegzi。
+ * 服务端再叠两道闸防刷屏：
+ *   1) 时间冷却：距萌萌子在大厅上一条发言不足 HALL_CHIME_IN_COOLDOWN_MS 不发；
+ *   2) 自我抑制：触发消息本身是萌萌子上一条发言的话不发（防递归）。
+ * 多个在线用户可能同时命中概率掷骰，服务端冷却是最终防线。
+ * ============================================================ */
+
+/** 客户端：大厅每来一条非己新消息时，触发萌萌子主动发言的概率。0.4 ≈ 活跃插话。 */
+export const HALL_CHIME_IN_PROBABILITY = 0.4
+
+/** 服务端冷却：萌萌子在大厅两次发言间的最小间隔（毫秒）。防多客户端并发命中刷屏。
+ *  90s：足够她「在群里活着」又不会连珠炮。 */
+export const HALL_CHIME_IN_COOLDOWN_MS = 90_000
+
+/** 拉大厅最近多少条消息作为上下文（含触发消息）。控制单次 token 成本。 */
+export const HALL_CHIME_IN_CONTEXT_MSGS = 20
+
 // 白名单从数据库表 hanako_allowed_users 读取（见 app/api/ai-reply/route.ts）

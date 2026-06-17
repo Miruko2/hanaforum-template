@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from "framer-motion"
 import { X, Send, Smile, Users, Hash } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
 import { apiUrl } from "@/lib/api-base"
-import { MENGMEGZI_USER_ID, HANAKO_DM_USERNAME, HANAKO_AVATAR, normalizeEmotion, DM_KEEP_RECENT_MSGS } from "@/lib/hanako/constants"
+import { MENGMEGZI_USER_ID, HANAKO_DM_USERNAME, HANAKO_AVATAR, normalizeEmotion, DM_KEEP_RECENT_MSGS, HALL_CHIME_IN_PROBABILITY } from "@/lib/hanako/constants"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useChatUI } from "@/contexts/chat-ui-context"
 import { usePresence } from "@/contexts/presence-context"
@@ -458,6 +458,24 @@ export default function FloatingChat() {
             msgCacheRef.current.set(key, next)
             return next
           })
+          // 萌萌子大厅主动插话：每来一条「非萌萌子自己发的」新消息，按概率掷骰，
+          // 命中即调 /api/hall-mengmegzi（服务端另有冷却防多客户端并发刷屏）。失败静默。
+          // 只在已登录时触发；萌萌子自己的发言不触发（防递归）。fire-and-forget。
+          if (m.user_id !== MENGMEGZI_USER_ID && user && Math.random() < HALL_CHIME_IN_PROBABILITY) {
+            void (async () => {
+              try {
+                const { data: sd } = await supabase.auth.getSession()
+                const tok = sd?.session?.access_token
+                if (!tok) return
+                await fetch(apiUrl("/api/hall-mengmegzi"), {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", Authorization: `Bearer ${tok}` },
+                })
+              } catch {
+                // 静默：触发失败不影响大厅消息显示
+              }
+            })()
+          }
         })
         .on("postgres_changes", { event: "DELETE", schema: "public", table: "chat_messages" }, (payload) => {
           const id = (payload.old as { id: string }).id
@@ -1132,7 +1150,17 @@ interface DmRow {
 }
 
 function mapHall(m: ChatRow): DisplayMsg {
-  return { id: m.id, fromId: m.user_id, username: m.username, avatar_url: m.avatar_url, kind: m.kind, content: m.content }
+  // 萌萌子的 profiles 行可能脏（撞名后缀/无头像），她在大厅发言一律用固定名字/头像，
+  // 与在线列表、私信、弹窗三处保持一致。
+  const isHanako = m.user_id === MENGMEGZI_USER_ID
+  return {
+    id: m.id,
+    fromId: m.user_id,
+    username: isHanako ? HANAKO_DM_USERNAME : m.username,
+    avatar_url: isHanako ? HANAKO_AVATAR : m.avatar_url,
+    kind: m.kind,
+    content: m.content,
+  }
 }
 function mapDm(m: DmRow, myId: string, myName: string, partner: Partner): DisplayMsg {
   const mine = m.sender_id === myId
