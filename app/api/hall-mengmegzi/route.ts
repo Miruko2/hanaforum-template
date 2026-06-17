@@ -66,6 +66,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "登录已过期", code: "invalid_auth" }, { status: 401 })
     }
 
+    // force=true：用户在大厅 @萌萌子，必回——绕过服务端冷却。客户端检测到 @ 触发正则
+    // 命中时传 true，绕过概率掷骰直接调用；这里再放它过冷却。
+    const body = (await req.json().catch(() => ({}))) as { force?: boolean }
+    const force = body.force === true
+
     // 2. 配置：未启用 / 没 key → 静默跳过
     const cfg = await loadDmAiConfig()
     if (!cfg.enabled || !cfg.apiKey) {
@@ -75,17 +80,20 @@ export async function POST(req: NextRequest) {
     // 3. 服务端冷却：查萌萌子在大厅的上一条发言时间，不足冷却则不发。
     //    多客户端并发掷骰的最终防线——N 个在线用户同时命中 40%，只有距上次发言满
     //    HALL_CHIME_IN_COOLDOWN_MS 的那个请求放行，其余静默跳过。
-    const { data: lastMine } = await dmSupabaseAdmin
-      .from("chat_messages")
-      .select("created_at")
-      .eq("user_id", MENGMEGZI_USER_ID)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle()
-    if (lastMine) {
-      const elapsed = Date.now() - new Date(lastMine.created_at).getTime()
-      if (elapsed < HALL_CHIME_IN_COOLDOWN_MS) {
-        return NextResponse.json({ skipped: true, reason: "cooldown" })
+    //    force（被 @ 点名）时绕过冷却，保证必回。
+    if (!force) {
+      const { data: lastMine } = await dmSupabaseAdmin
+        .from("chat_messages")
+        .select("created_at")
+        .eq("user_id", MENGMEGZI_USER_ID)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      if (lastMine) {
+        const elapsed = Date.now() - new Date(lastMine.created_at).getTime()
+        if (elapsed < HALL_CHIME_IN_COOLDOWN_MS) {
+          return NextResponse.json({ skipped: true, reason: "cooldown" })
+        }
       }
     }
 
@@ -122,9 +130,14 @@ export async function POST(req: NextRequest) {
       })
       .join("\n")
 
+    const cue = force
+      ? `这是公共聊天大厅的最近对话，有人在最新一条消息里 @ 你点名了，请务必回应他（可带表情包）。只输出规定 JSON。`
+      : `这是公共聊天大厅的最近对话：\n${transcript}\n\n请自然地插一句（可带表情包）。只输出规定 JSON。`
+    const userContent = force ? `${transcript}\n\n${cue}` : cue
+
     const messages = [
       { role: "system" as const, content: buildDmSystemPrompt(cfg.persona) },
-      { role: "user" as const, content: `这是公共聊天大厅的最近对话：\n${transcript}\n\n请自然地插一句（可带表情包）。只输出规定 JSON。` },
+      { role: "user" as const, content: userContent },
     ]
 
     // 6. 调模型

@@ -93,6 +93,9 @@ export const HANAKO_AVATAR = "/hanako/avatar.png"
 /** 触发 AI 回复的正则（不区分大小写） */
 export const TRIGGER_REGEX = /@hanako|@花子/i
 
+/** 大厅里 @萌萌子 的触发正则（不区分大小写）。命中即必回，绕过概率掷骰与服务端冷却。 */
+export const HALL_MENTION_REGEX = /@萌萌子|@mengmegzi/i
+
 /** 每用户同时在飞的最大 AI 请求数 */
 export const USER_MAX_CONCURRENT = 1
 

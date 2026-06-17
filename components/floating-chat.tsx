@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from "framer-motion"
 import { X, Send, Smile, Users, Hash } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
 import { apiUrl } from "@/lib/api-base"
-import { MENGMEGZI_USER_ID, HANAKO_DM_USERNAME, HANAKO_AVATAR, normalizeEmotion, DM_KEEP_RECENT_MSGS, HALL_CHIME_IN_PROBABILITY } from "@/lib/hanako/constants"
+import { MENGMEGZI_USER_ID, HANAKO_DM_USERNAME, HANAKO_AVATAR, normalizeEmotion, DM_KEEP_RECENT_MSGS, HALL_CHIME_IN_PROBABILITY, HALL_MENTION_REGEX } from "@/lib/hanako/constants"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useChatUI } from "@/contexts/chat-ui-context"
 import { usePresence } from "@/contexts/presence-context"
@@ -458,23 +458,29 @@ export default function FloatingChat() {
             msgCacheRef.current.set(key, next)
             return next
           })
-          // 萌萌子大厅主动插话：每来一条「非萌萌子自己发的」新消息，按概率掷骰，
-          // 命中即调 /api/hall-mengmegzi（服务端另有冷却防多客户端并发刷屏）。失败静默。
-          // 只在已登录时触发；萌萌子自己的发言不触发（防递归）。fire-and-forget。
-          if (m.user_id !== MENGMEGZI_USER_ID && user && Math.random() < HALL_CHIME_IN_PROBABILITY) {
-            void (async () => {
-              try {
-                const { data: sd } = await supabase.auth.getSession()
-                const tok = sd?.session?.access_token
-                if (!tok) return
-                await fetch(apiUrl("/api/hall-mengmegzi"), {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json", Authorization: `Bearer ${tok}` },
-                })
-              } catch {
-                // 静默：触发失败不影响大厅消息显示
-              }
-            })()
+          // 萌萌子大厅发言触发：每来一条「非萌萌子自己发的」新消息——
+          // 1) 文本里 @萌萌子（HALL_MENTION_REGEX）→ 必回：force=true 直接调，绕过概率与冷却；
+          // 2) 否则按 HALL_CHIME_IN_PROBABILITY 概率掷骰插话。
+          // 萌萌子自己的发言不触发（防递归）；表情包消息无文本不检测 @。fire-and-forget，失败静默。
+          if (m.user_id !== MENGMEGZI_USER_ID && user) {
+            const mentioned = m.kind === "text" && HALL_MENTION_REGEX.test(m.content)
+            const chimeIn = mentioned || Math.random() < HALL_CHIME_IN_PROBABILITY
+            if (chimeIn) {
+              void (async () => {
+                try {
+                  const { data: sd } = await supabase.auth.getSession()
+                  const tok = sd?.session?.access_token
+                  if (!tok) return
+                  await fetch(apiUrl("/api/hall-mengmegzi"), {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json", Authorization: `Bearer ${tok}` },
+                    body: JSON.stringify({ force: mentioned }),
+                  })
+                } catch {
+                  // 静默：触发失败不影响大厅消息显示
+                }
+              })()
+            }
           }
         })
         .on("postgres_changes", { event: "DELETE", schema: "public", table: "chat_messages" }, (payload) => {
