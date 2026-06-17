@@ -44,7 +44,7 @@ export const EMOTION_LABELS: Record<HanakoEmotion, string> = {
   shy: "害羞",
   jealous: "吃醋",
   worried: "担心",
-  yandere: "病娇",
+  yandere: "贴贴/抱抱",
   surprised: "惊讶",
   sleepy: "困倦",
 }
