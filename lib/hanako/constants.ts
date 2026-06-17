@@ -172,11 +172,15 @@ export const DM_STICKER_INJECT_PROBABILITY = 0.55
  *
  * 机制：前端订阅大厅 realtime，每来一条「非萌萌子自己发的」新消息，按
  * HALL_CHIME_IN_PROBABILITY 掷骰，命中即调 /api/hall-mengmegzi。
- * 萌萌子自己的发言不触发（防递归）。频率完全由该概率控制，无服务端冷却。
+ * 萌萌子自己的发言不触发（防递归）。服务端叠一道时间冷却防多客户端并发刷屏。
  * ============================================================ */
 
 /** 客户端：大厅每来一条非己新消息时，触发萌萌子主动发言的概率。0.4 ≈ 活跃插话。 */
 export const HALL_CHIME_IN_PROBABILITY = 0.4
+
+/** 服务端冷却：萌萌子在大厅两次发言间的最小间隔（毫秒）。防多客户端并发命中刷屏。
+ *  10s：活跃但不过密。多个在线用户同时命中 40% 时，只有距上次发言满 10s 的才放行。 */
+export const HALL_CHIME_IN_COOLDOWN_MS = 10_000
 
 /** 拉大厅最近多少条消息作为上下文（含触发消息）。控制单次 token 成本。 */
 export const HALL_CHIME_IN_CONTEXT_MSGS = 20

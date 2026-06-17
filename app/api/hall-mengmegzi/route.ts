@@ -5,6 +5,7 @@ import {
   HANAKO_DM_USERNAME,
   HANAKO_AVATAR,
   MAX_REPLY_TOKENS,
+  HALL_CHIME_IN_COOLDOWN_MS,
   HALL_CHIME_IN_CONTEXT_MSGS,
   emotionLabel,
   normalizeEmotion,
@@ -71,7 +72,24 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ skipped: true, reason: "disabled" })
     }
 
-    // 3. 拉大厅最近 N 条消息作上下文（时间正序）。
+    // 3. 服务端冷却：查萌萌子在大厅的上一条发言时间，不足冷却则不发。
+    //    多客户端并发掷骰的最终防线——N 个在线用户同时命中 40%，只有距上次发言满
+    //    HALL_CHIME_IN_COOLDOWN_MS 的那个请求放行，其余静默跳过。
+    const { data: lastMine } = await dmSupabaseAdmin
+      .from("chat_messages")
+      .select("created_at")
+      .eq("user_id", MENGMEGZI_USER_ID)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (lastMine) {
+      const elapsed = Date.now() - new Date(lastMine.created_at).getTime()
+      if (elapsed < HALL_CHIME_IN_COOLDOWN_MS) {
+        return NextResponse.json({ skipped: true, reason: "cooldown" })
+      }
+    }
+
+    // 4. 拉大厅最近 N 条消息作上下文（时间正序）。
     //    萌萌子自己的历史发言也混在里面，模型据此知道刚聊到哪、自己说过啥。
     const { data: recentRows, error: histError } = await dmSupabaseAdmin
       .from("chat_messages")
@@ -90,7 +108,7 @@ export async function POST(req: NextRequest) {
       created_at: string
     }[]).slice().reverse()
 
-    // 4. 组装上下文：把大厅记录转成可读文本喂模型。
+    // 5. 组装上下文：把大厅记录转成可读文本喂模型。
     //    表情包消息转成「[发了XX表情：心情]」，与私信一致。
     //    人格直接复用私信的 buildDmSystemPrompt（萌萌子人格统一，私聊/大厅无差别）。
     const transcript = recent
@@ -109,7 +127,7 @@ export async function POST(req: NextRequest) {
       { role: "user" as const, content: `这是公共聊天大厅的最近对话：\n${transcript}\n\n请自然地插一句（可带表情包）。只输出规定 JSON。` },
     ]
 
-    // 5. 调模型
+    // 6. 调模型
     const aiResponse = await fetch(`${cfg.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
@@ -136,7 +154,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "AI 未生成有效回复" }, { status: 500 })
     }
 
-    // 6. 逐条写入 chat_messages（service role 绕 RLS）。
+    // 7. 逐条写入 chat_messages（service role 绕 RLS）。
     //    复用私信的 splitRepliesIntoRows：混合表情+文字拆条、未知 [s:xxx] 当文本。
     //    username/avatar_url 写萌萌子的固定值，前端 mapHall 也会按 user_id 强制覆盖。
     const baseTs = Date.now()
