@@ -550,6 +550,30 @@ export default function FloatingChat() {
     }
   }, [open, myId, myName, convs])
 
+  // 空闲预压缩：面板开着、在和萌萌子私聊、且 20s 没有新消息时，静默调 /api/dm-compress
+  // 把超软上限(28K)的旧消息提前压缩成摘要。这样回复路由里极少需要同步压缩，避免回复卡顿。
+  // 依赖 messages：每来新消息就重置定时器；20s 不动才触发。失败/无需压缩都静默。
+  useEffect(() => {
+    if (!open || !myId) return
+    if (active.kind !== "dm" || active.id !== MENGMEGZI_USER_ID) return
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const { data: s } = await supabase.auth.getSession()
+          const tok = s?.session?.access_token
+          if (!tok) return
+          await fetch(apiUrl("/api/dm-compress"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${tok}` },
+          })
+        } catch {
+          // 静默：预压缩失败不影响聊天
+        }
+      })()
+    }, 20_000)
+    return () => clearTimeout(timer)
+  }, [open, myId, active, messages])
+
   // Update blur effect for messages near edges
   const updateBlur = useCallback(() => {
     const container = feedRef.current

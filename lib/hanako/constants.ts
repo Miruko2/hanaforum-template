@@ -120,6 +120,10 @@ export const MAX_REPLY_TOKENS = 1500
  *  触发自动摘要（压缩成长期记忆），不再原样带入。充分利用长上下文模型。 */
 export const DM_CONTEXT_TOKENS = 32768
 
+/** 软上限：未摘要历史超过此 token 量即触发压缩（留 ~4K 缓冲到 DM_CONTEXT_TOKENS）。
+ *  客户端空闲时按此阈值预压缩，使回复路由里极少需要同步压缩（避免回复卡顿）。 */
+export const DM_SUMMARY_SOFT_TOKENS = 28672
+
 /** 生成会话摘要时的最大输出 token。摘要要求精炼（~800 字内），保留关键事实。 */
 export const DM_SUMMARY_MAX_TOKENS = 1200
 
