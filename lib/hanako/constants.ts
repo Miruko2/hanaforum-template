@@ -34,6 +34,26 @@ export const EMOTION_COLORS: Record<HanakoEmotion, string> = {
   sleepy: "#a78bfa",    // purple
 }
 
+/** 情绪 id → 心情描述（私信上下文用）。
+ *  私信里发的表情包 content 即情绪 id（如 "happy"）。为了让 AI 读懂表情包背后的
+ *  心绪而不依赖图像理解，把表情包转成「[发了XX表情：心情]」文本纳入上下文。
+ *  覆盖全部 EMOTIONS 枚举，未知值兜底为「表情」。 */
+export const EMOTION_LABELS: Record<HanakoEmotion, string> = {
+  neutral: "平静",
+  happy: "开心",
+  shy: "害羞",
+  jealous: "吃醋",
+  worried: "担心",
+  yandere: "病娇",
+  surprised: "惊讶",
+  sleepy: "困倦",
+}
+
+/** 把情绪 id 转成上下文里可读的心情文本（未知情绪兜底）。 */
+export function emotionLabel(id: string): string {
+  return (EMOTION_LABELS as Record<string, string>)[id] || "表情"
+}
+
 /** Hanako 的固定用户 ID（对应 auth.users 和 public.users 中的记录） */
 export const HANAKO_USER_ID = "a3015a8e-9f17-4716-bac2-b8cfeb636a23"
 

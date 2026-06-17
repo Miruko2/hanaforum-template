@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import dmRateLimiter from "@/lib/hanako/dm-rate-limit"
 import { loadDmAiConfig, buildDmSystemPrompt, dmSupabaseAdmin, MAX_DM_REPLIES } from "@/lib/hanako/dm-ai"
-import { MENGMEGZI_USER_ID, MAX_REPLY_TOKENS, DM_CONTEXT_TOKENS, DM_SUMMARY_MAX_TOKENS } from "@/lib/hanako/constants"
+import { MENGMEGZI_USER_ID, MAX_REPLY_TOKENS, DM_CONTEXT_TOKENS, DM_SUMMARY_MAX_TOKENS, emotionLabel } from "@/lib/hanako/constants"
 import { estimateTokens } from "@/lib/hanako/token-estimate"
 
 // 强制动态渲染
@@ -20,17 +20,16 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 async function generateSummary(opts: {
   cfg: { baseUrl: string; apiKey: string; model: string }
   prevSummary: string
-  messages: { sender_id: string; content: string }[]
+  messages: { sender_id: string; content: string; kind: string }[]
   username: string
 }): Promise<string> {
   const { cfg, prevSummary, messages, username } = opts
-  // 把待摘要区消息拼成可读对话文本
+  // 把待摘要区消息拼成可读对话文本（表情包转心情描述）
   const transcript = messages
-    .map((m) =>
-      m.sender_id === MENGMEGZI_USER_ID
-        ? `萌萌子：${m.content}`
-        : `${username}：${m.content}`,
-    )
+    .map((m) => {
+      const text = m.kind === "sticker" ? `[发了${m.content}表情：${emotionLabel(m.content)}]` : m.content
+      return m.sender_id === MENGMEGZI_USER_ID ? `萌萌子：${text}` : `${username}：${text}`
+    })
     .join("\n")
 
   const sys = `你是摘要助手。请把以下私聊记录压缩成一份精炼的长期记忆摘要，供未来对话参考。
@@ -186,17 +185,21 @@ export async function POST(req: NextRequest) {
       histQuery = histQuery.gt("created_at", summarizedUpTo.toISOString())
     }
     const { data: hist } = await histQuery
-    // 倒序取回 → reverse 成正序（旧→新）；只取文本消息
-    const ordered = ((hist ?? []) as { sender_id: string; content: string; kind: string; created_at: string }[])
-      .reverse()
-      .filter((m) => m.kind === "text")
+    // 倒序取回 → reverse 成正序（旧→新）。保留全部消息：文本原样进上下文，
+    // 表情包(content=情绪id)转成「[发了XX表情：心情]」文本，让 AI 读懂情绪而非靠图像。
+    type HistMsg = { sender_id: string; content: string; kind: string; created_at: string }
+    const ordered = ((hist ?? []) as HistMsg[]).reverse()
+
+    // 把单条消息转成上下文里的可读文本（区分文本/表情包）
+    const toContextText = (m: HistMsg) =>
+      m.kind === "sticker" ? `[发了${m.content}表情：${emotionLabel(m.content)}]` : m.content
 
     // 5c. token 滑动窗口：从最新消息往前累加，窗口内的保留为 history，超出的成「待摘要区」
-    const windowMsgs: typeof ordered = []
+    const windowMsgs: HistMsg[] = []
     let usedTokens = 0
     for (let i = ordered.length - 1; i >= 0; i--) {
       const m = ordered[i]
-      const t = estimateTokens(m.content) + 4 // +4 为 role 包装开销
+      const t = estimateTokens(toContextText(m)) + 4 // +4 为 role 包装开销
       if (usedTokens + t > DM_CONTEXT_TOKENS && windowMsgs.length > 0) {
         break // 加这条会超窗口，停止；剩余（更早的）进待摘要区
       }
@@ -208,7 +211,10 @@ export async function POST(req: NextRequest) {
 
     const history = windowMsgs.map((m) => ({
       role: m.sender_id === MENGMEGZI_USER_ID ? ("assistant" as const) : ("user" as const),
-      content: m.sender_id === MENGMEGZI_USER_ID ? m.content : `${username}：${m.content}`,
+      content:
+        m.sender_id === MENGMEGZI_USER_ID
+          ? toContextText(m)
+          : `${username}：${toContextText(m)}`,
     }))
 
     // 客户端"先插入再触发本路由"，正常情况下 latest 已在 history 末尾。
