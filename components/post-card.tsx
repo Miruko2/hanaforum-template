@@ -22,16 +22,7 @@ import LikeButton from "./ui/like-button"
 import dynamic from "next/dynamic"
 const PostDetailModal = dynamic(() => import("./post-detail-modal"), { ssr: false })
 const CreatePostModal = dynamic(() => import("./create-post-modal"), { ssr: false })
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
+import DeleteConfirmDialog from "@/components/delete-confirm-dialog"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -521,26 +512,13 @@ const PostCard = memo(function PostCard({
       )}
       
       {/* 删除确认对话框 */}
-      <AlertDialog open={showDeleteAlert} onOpenChange={setShowDeleteAlert}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>确认删除</AlertDialogTitle>
-            <AlertDialogDescription>
-              你确定要删除这个帖子吗？这个操作不可撤销，所有评论也将被删除。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDeletePost}
-              disabled={isDeleting}
-              className="bg-red-500 hover:bg-red-600 text-white"
-            >
-              {isDeleting ? '删除中...' : '确认删除'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <DeleteConfirmDialog
+        open={showDeleteAlert}
+        onClose={() => setShowDeleteAlert(false)}
+        onConfirm={handleDeletePost}
+        loading={isDeleting}
+        title={post.title}
+      />
     </>
   )
 })

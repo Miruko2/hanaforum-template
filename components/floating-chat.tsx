@@ -51,9 +51,8 @@ const PREWARM_MAX_CONVS = 5
 const STICKERS = ["happy", "shy", "confused", "cuddle", "excited", "sleepy"]
 const ASSET_EXTS = ["jpg", "png", "webp", "gif"]
 
-// Blur effect constants for scroll fade
-const BLUR_FADE_ZONE = 50 // pixels from edge to start blur
-const BLUR_MAX = 12 // max blur in pixels
+// 滚动渐入高斯模糊动效已禁用（原常量 BLUR_FADE_ZONE=50 / BLUR_MAX=12 已移除）。
+// 详见下方 updateBlur 注释。
 
 // 触屏设备（安卓 WebView 等）：onScroll 中的 updateBlur 需要 rAF 节流，
 // 否则逐事件 querySelectorAll + getBoundingClientRect + 写 inline filter
@@ -643,54 +642,27 @@ export default function FloatingChat() {
     return () => clearTimeout(timer)
   }, [open, myId, active, messages])
 
-  // Update blur effect for messages near edges
+  // 滚动时上下边缘的高斯模糊渐入动效已禁用。
+  //
+  // 原动效：靠近 feed 顶/底各 50px 时给整行 row 加 blur(最多12px) + 降低 opacity，
+  // 营造文字从模糊渐入的出场感。但当某条消息文本很长（占据大半屏高度）时，
+  // 该行的可见部分会持续落在边缘模糊带内 → 整条长消息几乎全程高斯模糊，
+  // 无法正常阅读。滚动阅读体验优先于该装饰性动效，故直接关闭。
+  //
+  // 这里保留函数签名与调用点（onScroll / messages 变化时仍会调用），
+  // 但只做一次清理：清掉可能残留的 inline filter/opacity，避免旧 DOM 节点
+  // 卡在模糊态。
   const updateBlur = useCallback(() => {
     const container = feedRef.current
     if (!container) return
-
-    const containerRect = container.getBoundingClientRect()
-    const containerHeight = containerRect.height
-    const scrollTop = container.scrollTop
-    const isScrolled = scrollTop > 5
-    const isAtBottom = container.scrollHeight - scrollTop - containerHeight < 60
-
-    // Get all message rows
-    const rows = container.querySelectorAll(`.${styles.row}`)
-    const totalRows = rows.length
-
-    rows.forEach((row, index) => {
-      const rowRect = row.getBoundingClientRect()
-      const top = rowRect.top - containerRect.top
-      const bottom = rowRect.bottom - containerRect.top
-
-      let t = 1 // 0 = fully blurred, 1 = fully clear
-
-      // Don't blur the last 3 messages when at bottom (keep latest messages visible)
-      const isNearEnd = index >= totalRows - 3
-      const skipBottomBlur = isAtBottom && isNearEnd
-
-      if (bottom < 0 || top > containerHeight) {
-        // Completely outside
-        t = 0
-      } else if (!skipBottomBlur && top > containerHeight - BLUR_FADE_ZONE) {
-        // Near bottom edge (skip for recent messages when at bottom)
-        t = Math.max(0, (containerHeight - top) / BLUR_FADE_ZONE)
-      } else if (isScrolled && top < BLUR_FADE_ZONE) {
-        // Near top edge (only when scrolled)
-        t = Math.max(0, top / BLUR_FADE_ZONE)
+    const rows = container.querySelectorAll<HTMLElement>(`.${styles.row}`)
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i]
+      if (row.style.filter || row.style.opacity) {
+        row.style.filter = ""
+        row.style.opacity = ""
       }
-
-      const blurAmount = BLUR_MAX * (1 - t)
-      const opacityValue = 0.2 + 0.8 * t
-
-      if (t < 0.99) {
-        ;(row as HTMLElement).style.filter = `blur(${blurAmount.toFixed(2)}px)`
-        ;(row as HTMLElement).style.opacity = opacityValue.toFixed(3)
-      } else {
-        ;(row as HTMLElement).style.filter = ""
-        ;(row as HTMLElement).style.opacity = ""
-      }
-    })
+    }
   }, [])
 
   // 贴底才自动滚（看历史不被打断）
