@@ -2,7 +2,8 @@
 //
 // 设计要点（见 docs/superpowers/specs/2026-06-18-mengmegzi-proactive-dm-design.md）：
 //   - 开场白走模板不调 LLM，省 token；用户回复后才进真实 AI 对话
-//   - 硬过滤未验证用户（他们连回复萌萌子都会被 dm_messages 触发器拦）
+//   - 只发"真实活跃用户"（发过帖/评论/弹幕的人）：冷启动破冰只找会用论坛的人，
+//     不依赖邮箱验证开关（站方曾因 SMTP 配额爆掉而取消验证，大量老用户未验证）
 //   - 护栏：opted_out / cooldown / max_unanswered / 近冷却期已有消息
 //   - DB 逻辑在 worker 里用裸 fetch 打 Supabase REST（worker 无 supabase-js 依赖）
 
@@ -50,14 +51,14 @@ export interface Candidate {
   userId: string
   state: UserState | null // 无状态行 = 全新用户，按默认值处理
   profile: UserProfile | null
-  verified: boolean // email_verification_required(uid) === false（即"不需验证"=已验证/豁免）
+  active: boolean // 是否发过帖/评论/弹幕（真实活跃用户门槛，取代原"邮箱已验证"判定）
   hadRecentMessage: boolean // 近 cooldown 内该 DM 对已有任何消息
 }
 
 /**
  * 护栏过滤：返回可发送主动开场白的用户。
  * 任一条件命中即排除：
- *   - 未验证（verified=false）
+ *   - 非活跃（active=false：没发过帖/评论/弹幕）
  *   - opted_out=true
  *   - last_proactive_at 距今 < cooldownHours
  *   - unanswered_streak >= maxUnanswered
@@ -72,7 +73,7 @@ export function filterEligible(
   const cooldownMs = config.cooldownHours * 60 * 60 * 1000
   const cutoff = now.getTime() - cooldownMs
   return candidates.filter((c) => {
-    if (!c.verified) return false
+    if (!c.active) return false
     if (c.state?.optedOut) return false
     if (!c.profile?.username) return false
     if (c.hadRecentMessage) return false
@@ -185,23 +186,26 @@ async function loadRecentMessagePairs(
   return new Set(data ? data.map((r) => r.pair_key) : [])
 }
 
-async function checkVerified(env: Env, userId: string): Promise<boolean> {
-  // email_verification_required(uid) === false 表示"不需验证"=已验证/豁免
-  const data = await supaPost<{ result: boolean } | null>(
-    env,
-    "/rest/v1/rpc/email_verification_required",
-    { uid: userId },
+/** 批量查"真实活跃用户"：返回 userIds 中、在 posts/comments/live_comments 任一张表
+ *  发过内容的 user_id 集合（取代原邮箱验证判定）。三表作者列均为 user_id（已核对
+ *  openapi schema + moderate-text）；service_role 绕 RLS 可见全部行，三表并行查、内存求并集。
+ *  - 调用前 userIds 已被廉价护栏收窄（见 runProactiveSweep），避免给已排除用户白查内容表、控 egress。
+ *  - 失败降级：某张表查询失败（supaGet 返 null）则跳过该表，至多漏判该表独占的活跃者，
+ *    本轮不戳、下轮重试——fail-close，绝不误发。 */
+async function loadActiveUsers(env: Env, userIds: string[]): Promise<Set<string>> {
+  if (userIds.length === 0) return new Set()
+  const inList = userIds.join(",")
+  const active = new Set<string>()
+  await Promise.all(
+    ["posts", "comments", "live_comments"].map(async (table) => {
+      const data = await supaGet<Array<{ user_id: string }>>(
+        env,
+        `/rest/v1/${table}?user_id=in.(${inList})&select=user_id`,
+      )
+      if (data) for (const r of data) active.add(r.user_id)
+    }),
   )
-  // RPC 返回的是 jsonb，service_role 调用 SECURITY DEFINER 函数不受 RLS 限制
-  // PostgREST rpc 返回裸值或 {result:...}，按实际处理
-  if (data === null) return false // 请求失败 → fail-close（不戳，安全）
-  if (typeof data === "boolean") return !data
-  if (typeof (data as { result?: boolean }).result === "boolean") {
-    return !(data as { result: boolean }).result
-  }
-  // 意外形态：记 warning 让首次 cron 即可暴露（部署后 wrangler tail 观察）
-  console.warn(`[proactive] email_verification_required(${userId}) 返回意外形态:`, JSON.stringify(data))
-  return false
+  return active
 }
 
 async function loadProfiles(env: Env, userIds: string[]): Promise<Map<string, UserProfile>> {
@@ -310,28 +314,27 @@ export async function runProactiveSweep(env: Env): Promise<void> {
     loadProfiles(env, onlineIds),
   ])
 
-  // 逐个查验证状态（RPC 单 uid 签名；候选数通常小，可接受）
-  const verifiedMap = new Map<string, boolean>()
-  await Promise.all(
-    onlineIds.map(async (uid) => {
-      verifiedMap.set(uid, await checkVerified(env, uid))
-    }),
-  )
-
-  // 组装候选
+  // 组装候选。active 先乐观置 true：内容表（尤其弹幕）行数大，不能每轮给所有在线用户都查；
+  // 先跑一遍廉价护栏（active=true 时此条不拦）筛出"只差活跃度判定"的候选，再只给他们查内容表。
   const candidates: Candidate[] = onlineIds.map((uid) => {
     const pk = pairKey(uid, mengmegziId)
     return {
       userId: uid,
       state: states.get(uid) ?? null,
       profile: profiles.get(uid) ?? null,
-      verified: verifiedMap.get(uid) ?? false,
+      active: true, // 占位，下面用真实活跃度覆盖
       hadRecentMessage: recentPairs.has(pk),
     }
   })
 
-  const eligible = filterEligible(candidates, config)
-  console.log(`[proactive] 在线 ${onlineIds.length}，可发 ${eligible.length}`)
+  // 第一遍护栏：筛掉 opt-out / 冷却中 / 近期聊过 / 无用户名的，留下"只差活跃度"的候选
+  const maybe = filterEligible(candidates, config)
+  // 只为这些幸存者查"发过帖/评论/弹幕"，回填真实 active（control egress：稳态下基本只查新候选）
+  const activeSet = await loadActiveUsers(env, maybe.map((c) => c.userId))
+  for (const c of maybe) c.active = activeSet.has(c.userId)
+  // 第二遍护栏：带真实 active，得权威可发列表
+  const eligible = filterEligible(maybe, config)
+  console.log(`[proactive] 在线 ${onlineIds.length}，待定 ${maybe.length}，可发 ${eligible.length}`)
 
   // 逐个发送 + bumpState
   let sent = 0

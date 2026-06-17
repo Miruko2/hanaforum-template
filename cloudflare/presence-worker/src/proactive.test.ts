@@ -13,20 +13,20 @@ function base(over: Partial<Candidate> = {}): Candidate {
     userId: "u1",
     state: { userId: "u1", optedOut: false, lastProactiveAt: null, unansweredStreak: 0 },
     profile: { id: "u1", username: "小明" },
-    verified: true,
+    active: true,
     hadRecentMessage: false,
     ...over,
   }
 }
 
 describe("filterEligible", () => {
-  test("全新已验证用户通过", () => {
+  test("全新活跃用户通过", () => {
     const out = filterEligible([base()], CONFIG, NOW)
     assert.equal(out.length, 1)
   })
 
-  test("未验证用户被排除", () => {
-    const out = filterEligible([base({ verified: false })], CONFIG, NOW)
+  test("非活跃用户（没发过帖/评论/弹幕）被排除", () => {
+    const out = filterEligible([base({ active: false })], CONFIG, NOW)
     assert.equal(out.length, 0)
   })
 
@@ -85,7 +85,7 @@ describe("filterEligible", () => {
     const out = filterEligible(
       [
         base({ userId: "ok1" }),
-        base({ userId: "no1", verified: false }),
+        base({ userId: "no1", active: false }),
         base({ userId: "no2", state: { userId: "no2", optedOut: true, lastProactiveAt: null, unansweredStreak: 0 } }),
         base({ userId: "ok2", state: { userId: "ok2", optedOut: false, lastProactiveAt: OUTSIDE_COOLDOWN, unansweredStreak: 1 } }),
       ],

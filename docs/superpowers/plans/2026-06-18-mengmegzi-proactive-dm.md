@@ -2,13 +2,19 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 给 Cloudflare presence worker 加一个 cron 每 5 分钟的定时扫描触发器，让萌萌子按护栏规则主动给在线已验证用户发零 token 模板开场白（文字 + happy 表情包）。
+**Goal:** 给 Cloudflare presence worker 加一个 cron 每 5 分钟的定时扫描触发器，让萌萌子按护栏规则主动给**在线活跃用户（发过帖/评论/弹幕）**发零 token 模板开场白（文字 + happy 表情包）。〔门槛已由"已验证"改为"活跃用户"，见下方变更横幅〕
 
-**Architecture:** 在现有 `cloudflare/presence-worker` 里新增 `scheduled()` handler。cron 触发时：读 `dm_ai_config.proactive_enabled` 开关 → 通过 DO stub 拿在线 userId 列表 → 用裸 `fetch` 调 Supabase REST 批量查护栏状态 + RPC `email_verification_required` 硬过滤 → 给通过的用户插 2 行 `dm_messages`（文字 + `[s:happy]`）→ upsert `hanako_dm_state`。客户端、反应式路由、DB schema 全部零改动。
+**Architecture:** 在现有 `cloudflare/presence-worker` 里新增 `scheduled()` handler。cron 触发时：读 `dm_ai_config.proactive_enabled` 开关 → 通过 DO stub 拿在线 userId 列表 → 用裸 `fetch` 调 Supabase REST 批量查护栏状态 + 批量查 `posts/comments/live_comments` 硬过滤为"活跃用户" → 给通过的用户插 2 行 `dm_messages`（文字 + happy 表情）→ upsert `hanako_dm_state`。客户端、反应式路由、DB schema 全部零改动。
 
 **Tech Stack:** Cloudflare Workers + Durable Objects（WebSocket Hibernation）、Supabase REST API（service_role）、TypeScript。worker 现有依赖仅 `jose`，不引入 supabase-js。
 
 **Spec:** `docs/superpowers/specs/2026-06-18-mengmegzi-proactive-dm-design.md`
+
+> **⚠️ 2026-06-18 实现已偏离本计划（资格门槛）**：候选门槛从「邮箱已验证 / `email_verification_required` RPC」改为
+> **「发过帖/评论/弹幕的活跃用户」**——worker 用 `loadActiveUsers` 批量查 `posts/comments/live_comments`（作者列均 `user_id`）取并集，
+> 取代原 `checkVerified`；`Candidate.verified` 字段 → `active`；并改为"先廉价护栏筛幸存者、只给幸存者查内容表"以控 egress。
+> 原因：SMTP 配额曾爆、邮箱验证已停用、大量老用户未验证（见设计文档顶部横幅）。
+> **本计划下文凡涉及 `email_verification_required` / `checkVerified` / `verified` 的代码块与校验步骤，均以 `proactive.ts` 现状为准。**
 
 ---
 
@@ -769,16 +775,16 @@ Expected: tsc 无错误；单测 12 pass。
 4. 用户回复重置 streak → 反应式路由已有逻辑（`app/api/hanako-dm/route.ts:217`），worker 不碰 ✅
 5. opt-out 后不再戳 → `filterEligible` 排除 `optedOut` ✅
 6. 同用户 24h 内只 1 次 → `filterEligible` 的 cooldown 检查 ✅
-7. 未验证不戳 → `filterEligible` 排除 `verified=false` ✅
+7. 非活跃不戳 → `filterEligible` 排除 `active=false`（由 `loadActiveUsers` 回填）✅
 8. cron 日志含在线数/可发数/已发数 → `runProactiveSweep` 三处 `console.log` ✅
 
-- [ ] **Step 3: 检查 RPC 返回值假设**
+- [ ] ~~**Step 3: 检查 RPC 返回值假设**~~（2026-06-18 已废弃，见顶部横幅）
 
-`checkVerified` 对 `email_verification_required` 的 RPC 返回做了多形态容错（boolean / `{result:boolean}` / null）。这是必要的——PostgREST 对返回 boolean 的函数可能包成 `{result:...}` 或裸值。**部署后用 `wrangler tail` 观察第一次 cron 日志**，若验证过滤异常（所有人都不发或所有人都发），检查 RPC 返回形态并调整 `checkVerified`。这是 spec 第 11 节风险表已记的待观察项。
+`checkVerified` 与 `email_verification_required` RPC 均已移除，无 RPC 返回形态问题。改用 `loadActiveUsers` 批量查 `posts/comments/live_comments`。部署后 `wrangler tail` 看的是 `[proactive] 在线 N，待定 M，可发 K`；若"可发"长期为 0 但确有发过帖/评论/弹幕的活跃用户在线，再排查三表查询是否成功（`[proactive] supaGet ... failed` 日志）。
 
-- [ ] **Step 4: 确认 `email_verification_required` 函数对 service_role 可调**
+- [ ] ~~**Step 4: 确认 `email_verification_required` 函数对 service_role 可调**~~（2026-06-18 已废弃，见顶部横幅）
 
-该函数 `SECURITY DEFINER` + `GRANT EXECUTE TO authenticated, anon`（`scripts/2026-06-16-email-verification.sql:97`）。service_role 绕过 RLS，且函数内 `IF uid IS NULL THEN RETURN FALSE`——但 service_role 调用时 `auth.uid()` 为 NULL，函数内对 `uid` 参数（我们传的 userId）正常判断，不依赖 `auth.uid()`。**核对无误**：函数签名 `email_verification_required(uid UUID)`，我们传 `{ uid: userId }`，函数用 `uid` 参数查 `email_verifications`，与 `auth.uid()` 无关。
+不再调该 RPC。改为 service_role 直接 `GET posts/comments/live_comments`（service_role 绕 RLS、可见全部行），无需任何函数 GRANT。三表作者列均为 `user_id`（已核对 `supabase-backup/openapi-public-schema.json` + `supabase/functions/moderate-text`）。
 
 ---
 
@@ -819,11 +825,11 @@ cd cloudflare/presence-worker
 ```
 等待最多 5 分钟，观察输出应含：
 - `[proactive] proactive_enabled=false，跳过`（若开关没开）
-- 或 `[proactive] 在线 N，可发 M` + `[proactive] 本轮已发 K 条开场白`（开关已开）
+- 或 `[proactive] 在线 N，待定 M，可发 K` + `[proactive] 本轮已发 K 条开场白`（开关已开）
 
 - [ ] **Step 6: 验证收信**
 
-用一个已验证的测试账号登录、保持在线，等 cron 触发。应在私信列表收到萌萌子的开场白（1 文字 + 1 happy 表情包），公告弹窗弹出。
+用一个**发过帖/评论/弹幕的活跃**测试账号登录、保持在线，等 cron 触发。应在私信列表收到萌萌子的开场白（1 文字 + 1 happy 表情包），公告弹窗弹出。（注：纯潜水、从没发过任何内容的账号不会被戳——这是预期。）
 
 - [ ] **Step 7: 验证护栏**
 
@@ -837,7 +843,7 @@ cd cloudflare/presence-worker
 
 **1. Spec 覆盖：**
 - D1 定时扫描 cron → Task 5 (wrangler.toml crons) + Task 4 (scheduled handler) ✅
-- D2 硬过滤已验证 → Task 2 (filterEligible verified 检查) + Task 3 (checkVerified RPC) ✅
+- D2 硬过滤活跃用户 → Task 2 (filterEligible active 检查) + loadActiveUsers 批量查 posts/comments/live_comments ✅
 - D3 文字+表情包开场白 → Task 3 (sendOpener 2 行) ✅
 - D4 复用 opt-out → Task 2 (filterEligible optedOut 检查) + 无新 UI（spec 第 10 节）✅
 - 护栏 6 条件 → Task 2 (filterEligible) ✅
