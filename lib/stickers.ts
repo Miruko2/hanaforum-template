@@ -78,6 +78,38 @@ export function matchStandaloneSticker(text: string): StickerName | null {
   return STICKER_SET.has(name) ? (name as StickerName) : null
 }
 
+/** 萌萌子私信写入用的「文本/表情包」行。与 parseStickerText 的片段类型对齐，
+ *  但展开成可逐条写入 dm_messages 的有序列表：text 段保留原文字、sticker 段保留表情名。
+ *  DM 气泡不支持内联图文混排，故一条混合消息会被拆成多行分别发出。 */
+export type DmInsertRow =
+  | { kind: "text"; content: string }
+  | { kind: "sticker"; content: StickerName }
+
+/** 把单条回复文本拆成有序的 text/sticker 行（混合消息拆条，纯表情/纯文本各退化为 1 行）。
+ *  - 复用 parseStickerText 的切片逻辑（未知 [s:xxx] 当普通文本保留，不自创表情名）。
+ *  - 空 text 段（如"嘿嘿[s:shy]"中间无文字）不产出，避免空消息行。
+ *  用于路由写入循环：模型把文字和表情写同一条时，按原顺序拆成多条独立消息，
+ *  不再像旧逻辑那样把整条当文本、剥掉表情标记导致表情包丢失。 */
+export function splitRepliesIntoRows(text: string): DmInsertRow[] {
+  const segments = parseStickerText(text)
+  const rows: DmInsertRow[] = []
+  for (const seg of segments) {
+    if (seg.type === "sticker") {
+      rows.push({ kind: "sticker", content: seg.name })
+    } else {
+      const t = seg.value.trim()
+      if (t) rows.push({ kind: "text", content: t })
+    }
+  }
+  // 整条不含任何已知表情标记（如纯文字、或只有未知 [s:xxx]）：保留原文作一条文本，
+  // 否则 parseStickerText 对未知标记会原样保留，但若文本里只有空白则上面的 trim 会过滤掉、这里兜底为空行。
+  if (rows.length === 0) {
+    const t = text.trim()
+    if (t) rows.push({ kind: "text", content: t })
+  }
+  return rows
+}
+
 // ── 扩展名解析（带整页缓存）──
 // 同一名字整页只探测一次：首个组件触发 HEAD 探测，结果缓存，其余组件直取，
 // 避免大量评论/正文里重复 HEAD 请求。
