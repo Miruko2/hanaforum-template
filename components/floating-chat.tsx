@@ -15,6 +15,7 @@ import { useRouter } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
 import ChatUserCard from "./chat-user-card"
 import { fetchUserCardData } from "@/lib/user-card"
+import { guardVerify, openVerifyGate } from "@/lib/verify-gate-bus"
 import styles from "./floating-chat.module.css"
 
 // 统一的展示消息形状（大厅与私聊都映射到这个）
@@ -662,6 +663,9 @@ export default function FloatingChat() {
       if (!user || sending) return
       const text = content.trim()
       if (!text) return
+      // 懒触发邮箱验证：未验证 → 弹验证窗并中止本次发送（DB 触发器仍兜底），
+      // 与发帖/发弹幕入口一致；否则未验证用户在聊天里只会看到裸的发送失败。
+      if (guardVerify()) return
       const a = activeRef.current
       setSending(true)
       try {
@@ -676,10 +680,20 @@ export default function FloatingChat() {
             .insert([{ pair_key: pairKey(user.id, a.id), sender_id: user.id, recipient_id: a.id, kind, content: text }]))
         }
         if (error) {
-          const rl = (error as { code?: string }).code === "42501" || /row-level security/i.test(error.message || "")
+          // 未验证邮箱（DB 兜底）：弹验证窗而非裸的「发送失败」。
+          // 正常情况下提交前 guardVerify() 已拦，这里是防标志过期/竞态的兜底。
+          const msg = (error as { message?: string }).message || ""
+          const unverified =
+            /EMAIL_UNVERIFIED/i.test(msg) ||
+            (error as { code?: string }).code === "23514"
+          if (unverified) {
+            openVerifyGate()
+            return
+          }
+          const rl = (error as { code?: string }).code === "42501" || /row-level security/i.test(msg)
           toast({
             title: rl ? "发太快了" : "发送失败",
-            description: rl ? "慢一点～3 秒最多 3 条" : error.message || "请稍后重试",
+            description: rl ? "慢一点～3 秒最多 3 条" : msg || "请稍后再试",
             variant: "destructive",
           })
         } else if (a.kind === "dm" && a.id === MENGMEGZI_USER_ID) {
