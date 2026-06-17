@@ -130,7 +130,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ skipped: true })
     }
 
-    const body = (await req.json().catch(() => ({}))) as { content?: string }
+    const body = (await req.json().catch(() => ({}))) as { content?: string; kind?: string }
+    const latestKind = body.kind === "sticker" ? "sticker" : "text"
     const latest = typeof body.content === "string" ? body.content.trim().slice(0, 500) : ""
 
     // 2. 配置：未启用 / 没 key → 静默跳过（客户端忽略，行为=她不回）
@@ -219,9 +220,14 @@ export async function POST(req: NextRequest) {
 
     // 客户端"先插入再触发本路由"，正常情况下 latest 已在 history 末尾。
     // 兜底：若因读写时序 latest 不在末尾，补一条 user 轮，保证模型看到最新这句。
+    // 客户端"先插入再触发本路由"，正常情况下 latest 已在 history 末尾。
+    // 兜底：若因读写时序 latest 不在末尾，补一条 user 轮，保证模型看到最新这句。
+    // 表情包的 latest 是情绪 id，用与 toContextText 一致的心情描述转换，避免补成裸 id。
+    const latestText =
+      latestKind === "sticker" ? `[发了${latest}表情：${emotionLabel(latest)}]` : latest
     const lastUserText = [...history].reverse().find((h) => h.role === "user")?.content ?? ""
-    if (latest && lastUserText !== `${username}：${latest}`) {
-      history.push({ role: "user", content: `${username}：${latest}` })
+    if (latest && lastUserText !== `${username}：${latestText}`) {
+      history.push({ role: "user", content: `${username}：${latestText}` })
     }
 
     // 5d. 自动压缩：待摘要区非空 → 用主模型把「旧摘要 + 待摘要区」压缩成新摘要，写回 DB。

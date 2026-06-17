@@ -654,8 +654,9 @@ export default function FloatingChat() {
             description: rl ? "慢一点～3 秒最多 3 条" : error.message || "请稍后重试",
             variant: "destructive",
           })
-        } else if (a.kind === "dm" && a.id === MENGMEGZI_USER_ID && kind === "text") {
-          // 私聊对象是 hanako：触发独立模型异步回复（fire-and-forget，失败静默）。
+        } else if (a.kind === "dm" && a.id === MENGMEGZI_USER_ID) {
+          // 私聊对象是萌萌子：触发独立模型异步回复（fire-and-forget，失败静默）。
+          // 文本和表情包都触发；表情包的 content 是情绪 id，后端会转成心情描述进上下文。
           // 她的回复经 dm 实时订阅自动出现在会话里，这里无需处理返回值。
           ;(async () => {
             try {
@@ -665,7 +666,7 @@ export default function FloatingChat() {
               await fetch(apiUrl("/api/hanako-dm"), {
                 method: "POST",
                 headers: { "Content-Type": "application/json", Authorization: `Bearer ${tok}` },
-                body: JSON.stringify({ content: text }),
+                body: JSON.stringify({ content: text, kind }),
               })
             } catch {
               // 静默：她没回不影响用户已发出的消息
