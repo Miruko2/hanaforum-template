@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { cdnUrl } from "@/lib/cdn-url"
 import { createPortal } from "react-dom"
 import { motion, AnimatePresence } from "framer-motion"
@@ -26,6 +26,8 @@ interface DisplayMsg {
   avatar_url?: string | null
   kind: "text" | "sticker"
   content: string
+  // 消息时刻：既用于「上翻历史」的游标，也用于缓存命中后合并去重时按时间排序
+  created_at: string
   // 仅「会话中实时新到」的消息为 true → 播放入场动效；历史与切换不动
   isNew?: boolean
   // 私信已读回执：对方读过这条（我发的）消息的时刻；大厅消息恒 undefined
@@ -46,6 +48,9 @@ interface DmConv extends Partner {
 type Active = { kind: "hall" } | ({ kind: "dm" } & Partner)
 
 const MAX_LEN = 300
+// 一页历史的条数：首屏加载、空闲预热、上翻分页统一用它。
+// 索引 idx_dm_pair_created (pair_key, created_at) 支撑，游标查询在万条里也走索引、毫秒级。
+const PAGE_SIZE = 100
 // 空闲预热：最多预拉最近这么多个私聊会话的历史进缓存（控量，纯文本流量很小）
 const PREWARM_MAX_CONVS = 5
 const STICKERS = ["happy", "shy", "confused", "cuddle", "excited", "sleepy"]
@@ -60,6 +65,10 @@ const ASSET_EXTS = ["jpg", "png", "webp", "gif"]
 const IS_TOUCH =
   typeof window !== "undefined" &&
   (window.matchMedia?.("(hover: none) and (pointer: coarse)").matches ?? false)
+
+// 前插历史时的滚动锚定要在「绘制前」补偿 scrollTop，否则会闪一下跳位 → 用 useLayoutEffect。
+// 但客户端组件 SSR 阶段用 useLayoutEffect 会告警，故服务端退回 useEffect（SSR 不跑布局补偿）。
+const useIsoLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect
 
 const pairKey = (a: string, b: string) => [a, b].sort().join(":")
 
@@ -231,6 +240,18 @@ export default function FloatingChat() {
   // 切回看过的会话时立即回显缓存（秒开、不再先空屏），后台再静默拉最新覆盖。
   // ref 跨「面板开关」保留，故关掉面板再开也秒开；仅整页刷新才失效。
   const msgCacheRef = useRef<Map<string, DisplayMsg[]>>(new Map())
+
+  // ── 历史分页（上翻看更早消息）─────────────────────────────────────────────
+  // 游标：当前会话「已加载的最老一条」的 (created_at, id)，作为上翻查询的边界。
+  // 由下方 effect 从 messages[0] 同步，始终指向真实最老一条（本期不裁剪历史）。
+  const oldestCursorRef = useRef<{ created_at: string; id: string } | null>(null)
+  // 是否还有更早历史可翻：上次查询满页(=PAGE_SIZE)即可能还有；不足一页说明到顶。
+  // 乐观初始 true，首查/上翻据 data.length 收敛。用 ref 不触发额外渲染。
+  const hasMoreRef = useRef(true)
+  // 正在上翻：防抖 + 防并发重复拉取（scroll 高频触发）。
+  const loadingOlderRef = useRef(false)
+  // 前插锚定：记录「插入更早消息前」的滚动几何，layout 阶段据此补偿 scrollTop，视线钉住不跳。
+  const pendingAnchorRef = useRef<{ prevHeight: number; prevTop: number } | null>(null)
 
   // Load saved position on mount
   useEffect(() => {
@@ -459,18 +480,28 @@ export default function FloatingChat() {
     // 命中缓存：立即回显（清掉 isNew，切换不重放入场动效）；未命中才空屏等首查。
     setMessages(cached ? cached.map((m) => (m.isNew ? { ...m, isNew: false } : m)) : [])
 
+    // 切会话即重置分页状态：清并发锁、乐观置「可能还有更早」（待首查据 data.length 收敛）。
+    loadingOlderRef.current = false
+    hasMoreRef.current = true
+
     if (active.kind === "hall") {
       ;(async () => {
         const { data, error } = await supabase
           .from("chat_messages")
           .select("id,user_id,username,avatar_url,kind,content,created_at")
           .order("created_at", { ascending: false })
-          .limit(100)
+          .limit(PAGE_SIZE)
         if (!alive || error) return
+        // 满页 → 可能还有更早历史；不足一页 → 已到顶
+        hasMoreRef.current = (data?.length ?? 0) >= PAGE_SIZE
         const rows = ((data ?? []) as ChatRow[]).slice().reverse()
         const mapped = rows.map(mapHall)
-        msgCacheRef.current.set(key, mapped)
-        setMessages(mapped)
+        // 有缓存（可能已上翻出更早历史）→ 合并保历史；无缓存 → 直接用最新一页
+        setMessages((prev) => {
+          const next = cached ? mergeMsgs(prev, mapped) : mapped
+          msgCacheRef.current.set(key, next)
+          return next
+        })
       })()
 
       const msgChannel = supabase
@@ -479,7 +510,9 @@ export default function FloatingChat() {
           const m = payload.new as ChatRow
           setMessages((prev) => {
             if (prev.some((x) => x.id === m.id)) return prev
-            const next = [...prev, { ...mapHall(m), isNew: true }].slice(-200)
+            // 不再 slice(-200)：那会把上翻出来的历史从头部吃掉（看历史时尤其会跳没）。
+            // 单会话内的实时增长由后续虚拟化（Phase 2）处理，本期保完整列表。
+            const next = [...prev, { ...mapHall(m), isNew: true }]
             msgCacheRef.current.set(key, next)
             return next
           })
@@ -533,12 +566,18 @@ export default function FloatingChat() {
         .select("id,sender_id,kind,content,created_at,read_at")
         .eq("pair_key", pk)
         .order("created_at", { ascending: false })
-        .limit(100)
+        .limit(PAGE_SIZE)
       if (!alive || error) return
+      // 满页 → 可能还有更早历史；不足一页 → 已到顶
+      hasMoreRef.current = (data?.length ?? 0) >= PAGE_SIZE
       const rows = ((data ?? []) as DmRow[]).slice().reverse()
       const mapped = rows.map((m) => mapDm(m, myId, myName, partner))
-      msgCacheRef.current.set(key, mapped)
-      setMessages(mapped)
+      // 有缓存（可能已上翻出更早历史）→ 合并保历史；无缓存 → 直接用最新一页
+      setMessages((prev) => {
+        const next = cached ? mergeMsgs(prev, mapped) : mapped
+        msgCacheRef.current.set(key, next)
+        return next
+      })
       markConvRead(partner.id) // 打开会话即视为已读，更新「最后已读」时刻
       void markDmReadServer(partner.id) // 同步回执到服务端，让发送方看到「已读」
     })()
@@ -549,7 +588,9 @@ export default function FloatingChat() {
         const m = payload.new as DmRow
         setMessages((prev) => {
           if (prev.some((x) => x.id === m.id)) return prev
-          const next = [...prev, { ...mapDm(m, myId, myName, partner), isNew: true }].slice(-200)
+          // 不再 slice(-200)：那会把上翻出来的历史从头部吃掉（看历史时尤其会跳没）。
+          // 单会话内的实时增长由后续虚拟化（Phase 2）处理，本期保完整列表。
+          const next = [...prev, { ...mapDm(m, myId, myName, partner), isNew: true }]
           msgCacheRef.current.set(key, next)
           return next
         })
@@ -599,7 +640,7 @@ export default function FloatingChat() {
             .select("id,sender_id,kind,content,created_at,read_at")
             .eq("pair_key", key)
             .order("created_at", { ascending: false })
-            .limit(100)
+            .limit(PAGE_SIZE)
           if (cancelled || error || !data) return
           // 回填时再判一次：期间用户若已点开该会话（主查询/实时已填缓存），不覆盖
           if (msgCacheRef.current.has(key)) return
@@ -665,11 +706,70 @@ export default function FloatingChat() {
     }
   }, [])
 
+  // 上翻加载更早一页历史。以「当前最老一条」为游标查 created_at 更早的 PAGE_SIZE 条，
+  // 去重后前插到列表头。多重守卫：并发锁、无更多则不查、拉取期间切了会话则丢弃结果。
+  const loadOlder = useCallback(async () => {
+    if (loadingOlderRef.current || !hasMoreRef.current || !myId) return
+    const cursor = oldestCursorRef.current
+    if (!cursor) return
+    const a = activeRef.current
+    const key = a.kind === "hall" ? "hall" : pairKey(myId, a.id)
+    loadingOlderRef.current = true
+    try {
+      let older: DisplayMsg[]
+      let pageFull: boolean
+      if (a.kind === "hall") {
+        const { data, error } = await supabase
+          .from("chat_messages")
+          .select("id,user_id,username,avatar_url,kind,content,created_at")
+          .lt("created_at", cursor.created_at)
+          .order("created_at", { ascending: false })
+          .limit(PAGE_SIZE)
+        if (error) return
+        const rows = (data ?? []) as ChatRow[]
+        pageFull = rows.length >= PAGE_SIZE
+        older = rows.slice().reverse().map(mapHall)
+      } else {
+        const partner: Partner = { id: a.id, username: a.username, avatar_url: a.avatar_url }
+        const { data, error } = await supabase
+          .from("dm_messages")
+          .select("id,sender_id,kind,content,created_at,read_at")
+          .eq("pair_key", key)
+          .lt("created_at", cursor.created_at)
+          .order("created_at", { ascending: false })
+          .limit(PAGE_SIZE)
+        if (error) return
+        const rows = (data ?? []) as DmRow[]
+        pageFull = rows.length >= PAGE_SIZE
+        older = rows.slice().reverse().map((m) => mapDm(m, myId, myName, partner))
+      }
+      // 拉取期间用户可能切了会话：当前会话已变则整批丢弃，绝不把 A 的历史插进 B
+      const cur = activeRef.current
+      const curKey = cur.kind === "hall" ? "hall" : pairKey(myId, cur.id)
+      if (curKey !== key) return
+      hasMoreRef.current = pageFull
+      if (older.length === 0) return
+      // 前插锚定：插入前记录滚动几何，layout effect 据此补偿，视线钉住不跳
+      const el = feedRef.current
+      if (el) pendingAnchorRef.current = { prevHeight: el.scrollHeight, prevTop: el.scrollTop }
+      setMessages((prev) => {
+        const existing = new Set(prev.map((m) => m.id))
+        const merged = [...older.filter((m) => !existing.has(m.id)), ...prev]
+        msgCacheRef.current.set(key, merged)
+        return merged
+      })
+    } finally {
+      loadingOlderRef.current = false
+    }
+  }, [myId, myName])
+
   // 贴底才自动滚（看历史不被打断）
   const onScroll = () => {
     const el = feedRef.current
     if (el) {
       atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60
+      // 滚到顶部附近 → 加载更早历史（并发/无更多/切会话由 loadOlder 内部判定，重复触发安全）
+      if (el.scrollTop < 120) void loadOlder()
       if (IS_TOUCH) {
         // 触屏设备：rAF 合并连续 scroll 事件，一帧最多一次 updateBlur
         if (blurRafRef.current == null) {
@@ -693,6 +793,24 @@ export default function FloatingChat() {
       requestAnimationFrame(updateBlur)
     })
   }, [messages, open, active, updateBlur])
+
+  // 游标同步：始终指向当前已加载的最老一条（messages 升序，[0] 即最老）。
+  // 本期不裁剪历史，故 messages[0] 恒为真实最老，loadOlder 据此往更早翻。
+  useEffect(() => {
+    oldestCursorRef.current = messages.length
+      ? { created_at: messages[0].created_at, id: messages[0].id }
+      : null
+  }, [messages])
+
+  // 前插历史的滚动锚定：在浏览器绘制前把 scrollTop 往下补偿「新增内容的高度」，
+  // 让用户视线停在原来那条消息上，不会因为顶部插入而跳动。仅在 loadOlder 设了锚点时生效。
+  useIsoLayoutEffect(() => {
+    const anchor = pendingAnchorRef.current
+    if (!anchor) return
+    pendingAnchorRef.current = null
+    const el = feedRef.current
+    if (el) el.scrollTop = anchor.prevTop + (el.scrollHeight - anchor.prevHeight)
+  }, [messages])
 
   // 打开面板 / 切换会话时无条件贴底。
   // 原本只依赖 atBottomRef（贴底才自动滚），但「打开」那一刻 feedRef 还在
@@ -1269,12 +1387,14 @@ interface ChatRow {
   avatar_url?: string | null
   kind: "text" | "sticker"
   content: string
+  created_at: string
 }
 interface DmRow {
   id: string
   sender_id: string
   kind: "text" | "sticker"
   content: string
+  created_at: string
   read_at?: string | null
 }
 
@@ -1289,6 +1409,7 @@ function mapHall(m: ChatRow): DisplayMsg {
     avatar_url: isHanako ? HANAKO_AVATAR : m.avatar_url,
     kind: m.kind,
     content: m.content,
+    created_at: m.created_at,
   }
 }
 function mapDm(m: DmRow, myId: string, myName: string, partner: Partner): DisplayMsg {
@@ -1303,8 +1424,28 @@ function mapDm(m: DmRow, myId: string, myName: string, partner: Partner): Displa
     avatar_url: mine ? null : fromHanako ? HANAKO_AVATAR : partner.avatar_url ?? null,
     kind: m.kind,
     content: m.content,
+    created_at: m.created_at,
     read_at: m.read_at ?? null,
   }
+}
+
+// 合并两组展示消息：按 id 去重、按 created_at 升序。
+// 用于「缓存命中后台再拉最新一页」时，把新到的消息并入已加载列表（可能已上翻出更早历史），
+// 既不丢历史、也不打乱顺序；对已存在的消息补一次 read_at（已读回执可能在期间更新）。
+function mergeMsgs(prev: DisplayMsg[], incoming: DisplayMsg[]): DisplayMsg[] {
+  const byId = new Map<string, DisplayMsg>()
+  for (const m of prev) byId.set(m.id, m)
+  for (const m of incoming) {
+    const ex = byId.get(m.id)
+    if (ex) {
+      if (!ex.read_at && m.read_at) byId.set(m.id, { ...ex, read_at: m.read_at })
+    } else {
+      byId.set(m.id, m)
+    }
+  }
+  return [...byId.values()].sort((a, b) =>
+    a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0,
+  )
 }
 
 // ───────── 子组件 ─────────
