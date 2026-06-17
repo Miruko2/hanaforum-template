@@ -258,6 +258,15 @@
   box-shadow: 0 3px 12px rgba(249, 168, 200, 0.3);
   transform-origin: right top;
 }
+
+/* 自己发的消息、对方已读：气泡右下角「已读」小字 */
+.readMark {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.4);
+  align-self: flex-end; /* rowMine 的 msgCol 已 align-items:flex-end，贴右 */
+  padding-right: 4px;
+  line-height: 1;
+}
 .msgSticker {
   max-width: 92px;
   max-height: 92px;

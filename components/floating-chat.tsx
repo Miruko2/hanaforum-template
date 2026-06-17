@@ -28,6 +28,8 @@ interface DisplayMsg {
   content: string
   // 仅「会话中实时新到」的消息为 true → 播放入场动效；历史与切换不动
   isNew?: boolean
+  // 私信已读回执：对方读过这条（我发的）消息的时刻；大厅消息恒 undefined
+  read_at?: string | null
 }
 
 interface Partner {
@@ -386,6 +388,25 @@ export default function FloatingChat() {
     if (myId) loadConvs()
   }, [myId, loadConvs])
 
+  // 私信已读：把「对方发给我、未读」的消息在服务端置 read_at=now（单向、仅本人）。
+  // 与本地 markConvRead（维护未读计数）并行调用：本地计数逻辑不动，这里只同步回执到服务端，
+  // 让发送方经 realtime UPDATE 订阅看到「已读」。fire-and-forget，失败静默。
+  const markDmReadServer = useCallback(async (partnerId: string) => {
+    if (!myId) return
+    try {
+      const { data: sd } = await supabase.auth.getSession()
+      const tok = sd?.session?.access_token
+      if (!tok) return
+      await fetch(apiUrl("/api/dm-read"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${tok}` },
+        body: JSON.stringify({ pair_key: pairKey(myId, partnerId) }),
+      })
+    } catch {
+      // 静默：标记失败不影响本地未读计数与聊天
+    }
+  }, [myId])
+
   // 全局常驻：监听「发给我」的私聊 → 更新侧边栏 + 未读。
   // 不依赖面板是否打开——关闭时也要累积未读、让导航栏红点亮起来。
   useEffect(() => {
@@ -401,7 +422,10 @@ export default function FloatingChat() {
           const a = activeRef.current
           // 仅当面板开着且正在看这个人才不计未读；其余（含面板关闭）一律 +1
           const viewing = openRef.current && a.kind === "dm" && a.id === m.sender_id
-          if (viewing) markConvRead(m.sender_id) // 正在看：持续标记已读，避免切走后被当未读
+          if (viewing) {
+            markConvRead(m.sender_id) // 正在看：持续标记已读，避免切走后被当未读
+            void markDmReadServer(m.sender_id) // 同步回执到服务端
+          }
           const known = convsRef.current.some((c) => c.id === m.sender_id)
           setConvs((prev) => {
             const exists = prev.find((c) => c.id === m.sender_id)
@@ -419,7 +443,7 @@ export default function FloatingChat() {
     return () => {
       supabase.removeChannel(ch)
     }
-  }, [myId, loadConvs])
+  }, [myId, loadConvs, markDmReadServer])
 
   // 在线状态全站化：由 PresenceProvider（CF Durable Object + WebSocket）统一维护，
   // 本组件通过 usePresence() 读 onlineUsers / isOnline。原本地心跳逻辑已移除。
@@ -507,7 +531,7 @@ export default function FloatingChat() {
     ;(async () => {
       const { data, error } = await supabase
         .from("dm_messages")
-        .select("id,sender_id,kind,content,created_at")
+        .select("id,sender_id,kind,content,created_at,read_at")
         .eq("pair_key", pk)
         .order("created_at", { ascending: false })
         .limit(100)
@@ -517,6 +541,7 @@ export default function FloatingChat() {
       msgCacheRef.current.set(key, mapped)
       setMessages(mapped)
       markConvRead(partner.id) // 打开会话即视为已读，更新「最后已读」时刻
+      void markDmReadServer(partner.id) // 同步回执到服务端，让发送方看到「已读」
     })()
 
     const ch = supabase
@@ -530,13 +555,26 @@ export default function FloatingChat() {
           return next
         })
       })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "dm_messages", filter: `pair_key=eq.${pk}` }, (payload) => {
+        // 对方把我发的某条消息置 read_at → 更新本地该消息，气泡出现「已读」
+        const m = payload.new as DmRow
+        if (!m.read_at) return
+        setMessages((prev) => {
+          const idx = prev.findIndex((x) => x.id === m.id)
+          if (idx < 0 || prev[idx].read_at) return prev
+          const next = prev.slice()
+          next[idx] = { ...next[idx], read_at: m.read_at }
+          msgCacheRef.current.set(key, next)
+          return next
+        })
+      })
       .subscribe()
 
     return () => {
       alive = false
       supabase.removeChannel(ch)
     }
-  }, [open, myId, myName, active])
+  }, [open, myId, myName, active, markDmReadServer])
 
   // 空闲预热：面板打开后稍候，预拉最近若干个私聊会话的历史进缓存，
   // 让「整页刷新后首次点开」也能秒开。三重克制，避免浪费流量 / 踩实时：
@@ -559,7 +597,7 @@ export default function FloatingChat() {
         ;(async () => {
           const { data, error } = await supabase
             .from("dm_messages")
-            .select("id,sender_id,kind,content,created_at")
+            .select("id,sender_id,kind,content,created_at,read_at")
             .eq("pair_key", key)
             .order("created_at", { ascending: false })
             .limit(100)
@@ -1057,6 +1095,10 @@ export default function FloatingChat() {
                         ) : (
                           <div className={`${styles.bubble} ${mine ? styles.bubbleMine : styles.bubbleOther}`}>{m.content}</div>
                         )}
+                        {/* 自己发的文本消息、对方已读 → 显示「已读」小字（贴右下） */}
+                        {mine && active.kind === "dm" && m.read_at && m.kind === "text" && (
+                          <span className={styles.readMark}>已读</span>
+                        )}
                       </div>
                     </div>
                   )
@@ -1261,6 +1303,7 @@ interface DmRow {
   sender_id: string
   kind: "text" | "sticker"
   content: string
+  read_at?: string | null
 }
 
 function mapHall(m: ChatRow): DisplayMsg {
@@ -1288,6 +1331,7 @@ function mapDm(m: DmRow, myId: string, myName: string, partner: Partner): Displa
     avatar_url: mine ? null : fromHanako ? HANAKO_AVATAR : partner.avatar_url ?? null,
     kind: m.kind,
     content: m.content,
+    read_at: m.read_at ?? null,
   }
 }
 
