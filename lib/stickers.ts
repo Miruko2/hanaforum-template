@@ -4,9 +4,11 @@
 // 不新增任何数据库列——发帖/评论照常存纯文本；展示时再把标记解析回贴纸图片。
 // 资源位于 public/hanako/stickers/<name>.<ext>，扩展名不定（jpg/png/webp/gif），按序探测。
 
+import { normalizeEmotion } from "@/lib/hanako/constants"
+
 // 与聊天窗展示的表情保持一致（floating-chat.tsx 的 STICKERS）。
 // 注：public/hanako/stickers 下另有 angry.jpg，但聊天窗未启用，这里同样不收录以保持一致。
-export const STICKERS = ["happy", "shy", "worried", "yandere", "surprised", "sleepy"] as const
+export const STICKERS = ["happy", "shy", "worried", "cuddle", "surprised", "sleepy"] as const
 
 export type StickerName = (typeof STICKERS)[number]
 
@@ -38,7 +40,8 @@ export function parseStickerText(text: string): StickerSegment[] {
   let lastIndex = 0
   let m: RegExpExecArray | null
   while ((m = re.exec(text)) !== null) {
-    const name = m[1].toLowerCase()
+    // 归一旧别名（如历史数据里的 yandere→cuddle），再判定是否已知贴纸
+    const name = normalizeEmotion(m[1].toLowerCase())
     if (!STICKER_SET.has(name)) continue // 未知贴纸：不切片，保留原文
     if (m.index > lastIndex) {
       segments.push({ type: "text", value: text.slice(lastIndex, m.index) })
@@ -58,7 +61,7 @@ export function hasStickerToken(text: string | null | undefined): boolean {
   const re = new RegExp(STICKER_TOKEN_RE.source, "gi")
   let m: RegExpExecArray | null
   while ((m = re.exec(text)) !== null) {
-    if (STICKER_SET.has(m[1].toLowerCase())) return true
+    if (STICKER_SET.has(normalizeEmotion(m[1].toLowerCase()))) return true
   }
   return false
 }

@@ -7,7 +7,7 @@ export type HanakoEmotion =
   | "shy"
   | "jealous"
   | "worried"
-  | "yandere"
+  | "cuddle"
   | "surprised"
   | "sleepy"
 
@@ -17,7 +17,7 @@ export const EMOTIONS: HanakoEmotion[] = [
   "shy",
   "jealous",
   "worried",
-  "yandere",
+  "cuddle",
   "surprised",
   "sleepy",
 ]
@@ -29,7 +29,7 @@ export const EMOTION_COLORS: Record<HanakoEmotion, string> = {
   shy: "#f9a8d4",       // pink
   jealous: "#fbbf24",   // amber
   worried: "#93c5fd",   // blue
-  yandere: "#f87171",   // red
+  cuddle: "#f87171",    // red
   surprised: "#fde047", // yellow
   sleepy: "#a78bfa",    // purple
 }
@@ -44,14 +44,27 @@ export const EMOTION_LABELS: Record<HanakoEmotion, string> = {
   shy: "害羞",
   jealous: "吃醋",
   worried: "担心",
-  yandere: "贴贴/抱抱",
+  cuddle: "贴贴/抱抱",
   surprised: "惊讶",
   sleepy: "困倦",
 }
 
-/** 把情绪 id 转成上下文里可读的心情文本（未知情绪兜底）。 */
+/** 旧情绪 id → 新 id 的别名映射，兼容历史数据（dm_messages / 帖子 token 里残留的旧值）。
+ *  yandere 已更名为 cuddle（语义从「病娇」改为「贴贴/抱抱」，避免模型把 yandere
+ *  当病娇理解）。历史消息里存的 yandere 在渲染/解析时归一到 cuddle。 */
+export const EMOTION_ALIASES: Record<string, HanakoEmotion> = {
+  yandere: "cuddle",
+}
+
+/** 把任意情绪 id（含旧别名）归一到当前枚举值；未知值原样返回。 */
+export function normalizeEmotion(id: string): string {
+  return EMOTION_ALIASES[id] ?? id
+}
+
+/** 把情绪 id 转成上下文里可读的心情文本（未知情绪兜底，兼容旧别名）。 */
 export function emotionLabel(id: string): string {
-  return (EMOTION_LABELS as Record<string, string>)[id] || "表情"
+  const normalized = normalizeEmotion(id) as HanakoEmotion
+  return EMOTION_LABELS[normalized] || "表情"
 }
 
 /** Hanako 的固定用户 ID（对应 auth.users 和 public.users 中的记录） */

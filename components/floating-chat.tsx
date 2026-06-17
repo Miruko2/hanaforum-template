@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from "framer-motion"
 import { X, Send, Smile, Users, Hash } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
 import { apiUrl } from "@/lib/api-base"
-import { MENGMEGZI_USER_ID, HANAKO_DM_USERNAME, HANAKO_AVATAR } from "@/lib/hanako/constants"
+import { MENGMEGZI_USER_ID, HANAKO_DM_USERNAME, HANAKO_AVATAR, normalizeEmotion } from "@/lib/hanako/constants"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useChatUI } from "@/contexts/chat-ui-context"
 import { usePresence } from "@/contexts/presence-context"
@@ -45,7 +45,7 @@ type Active = { kind: "hall" } | ({ kind: "dm" } & Partner)
 const MAX_LEN = 300
 // 空闲预热：最多预拉最近这么多个私聊会话的历史进缓存（控量，纯文本流量很小）
 const PREWARM_MAX_CONVS = 5
-const STICKERS = ["happy", "shy", "worried", "yandere", "surprised", "sleepy"]
+const STICKERS = ["happy", "shy", "worried", "cuddle", "surprised", "sleepy"]
 const ASSET_EXTS = ["jpg", "png", "webp", "gif"]
 
 // Blur effect constants for scroll fade
@@ -932,7 +932,7 @@ export default function FloatingChat() {
                         {!mine && active.kind === "hall" && <span className={styles.msgName}>{m.username}</span>}
                         {m.kind === "sticker" ? (
                           <HanakoImg
-                            base={`/hanako/stickers/${m.content}`}
+                            base={`/hanako/stickers/${normalizeEmotion(m.content)}`}
                             className={styles.msgSticker}
                             onClick={(src) => setLightboxSrc(src)}
                           />
