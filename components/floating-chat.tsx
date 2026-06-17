@@ -752,7 +752,12 @@ export default function FloatingChat() {
   // hanako 是常驻入口：从会话列表取她的未读数，显示在固定入口的红点上
   const hanakoUnread = convs.find((c) => c.id === HANAKO_USER_ID)?.unread ?? 0
 
-  const headerLabel = active.kind === "hall" ? "聊天大厅" : active.username
+  const headerLabel =
+    active.kind === "hall"
+      ? "聊天大厅"
+      : active.id === HANAKO_USER_ID
+        ? HANAKO_USERNAME
+        : active.username
 
   return (
     <>
@@ -847,6 +852,9 @@ export default function FloatingChat() {
                     <Users className="h-3.5 w-3.5" />
                     {online.length} 在聊
                   </span>
+                ) : active.id === HANAKO_USER_ID ? (
+                  // hanako 是 AI、永远不在 presence 在线列表里，显示"离线"会误导，改标 AI
+                  <span className={styles.headerOnline}>AI</span>
                 ) : (
                   <span className={styles.headerOnline}>
                     <span className={isOnline(active.id) ? styles.onlineDot : styles.offlineDot} />
@@ -1076,11 +1084,14 @@ function mapHall(m: ChatRow): DisplayMsg {
 }
 function mapDm(m: DmRow, myId: string, myName: string, partner: Partner): DisplayMsg {
   const mine = m.sender_id === myId
+  // hanako 的 profiles 行可能是撞名后缀("hanako_1")且无头像；她的消息一律用固定名字/头像，
+  // 不读那条脏数据（与弹幕墙用 HANAKO_USERNAME 常量保持一致）
+  const fromHanako = m.sender_id === HANAKO_USER_ID
   return {
     id: m.id,
     fromId: m.sender_id,
-    username: mine ? myName : partner.username,
-    avatar_url: mine ? null : partner.avatar_url ?? null,
+    username: mine ? myName : fromHanako ? HANAKO_USERNAME : partner.username,
+    avatar_url: mine ? null : fromHanako ? HANAKO_AVATAR : partner.avatar_url ?? null,
     kind: m.kind,
     content: m.content,
   }
