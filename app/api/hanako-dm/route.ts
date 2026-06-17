@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import rateLimiter from "@/lib/hanako/rate-limit"
-import { loadDmAiConfig, buildDmSystemPrompt, dmSupabaseAdmin } from "@/lib/hanako/dm-ai"
+import { loadDmAiConfig, buildDmSystemPrompt, dmSupabaseAdmin, MAX_DM_REPLIES } from "@/lib/hanako/dm-ai"
 import { HANAKO_USER_ID, MAX_REPLY_TOKENS } from "@/lib/hanako/constants"
 
 // 强制动态渲染
@@ -8,31 +8,54 @@ export const dynamic = "force-dynamic"
 
 const pairKey = (a: string, b: string) => [a, b].sort().join(":")
 
-/** 解析模型返回的 {reply, optOut}，容忍 markdown 代码块包裹与少量噪声 */
-function parseReply(raw: string): { reply: string; optOut: boolean } {
+/** 多条回复之间的间隔：让客户端经 realtime 先后收到，呈现「连续发来」的节奏感。
+ *  不宜太长（拖慢响应）、不宜太短（多条挤在一起像一条）。 */
+const REPLY_GAP_MS = 700
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+/** 解析模型返回的 {replies, optOut}，容忍 markdown 代码块包裹与少量噪声。
+ *  replies 为 1～N 条短消息数组；兼容旧的 {reply} 字段与纯文本兜底。 */
+function parseReplies(raw: string): { replies: string[]; optOut: boolean } {
   const cleaned = raw
     .replace(/^```(?:json)?\s*/i, "")
     .replace(/\s*```\s*$/i, "")
     .trim()
-  const tryParse = (s: string) => {
+  const tryParse = (s: string): { replies: string[]; optOut: boolean } => {
     const o = JSON.parse(s)
-    return {
-      reply: typeof o.reply === "string" ? o.reply : "",
-      optOut: o.optOut === true,
+    // 新格式：replies 数组
+    if (Array.isArray(o.replies)) {
+      const rs = o.replies
+        .map((x: unknown) => (typeof x === "string" ? x.trim() : ""))
+        .filter((x: string) => x.length > 0)
+        .slice(0, MAX_DM_REPLIES)
+      return { replies: rs, optOut: o.optOut === true }
     }
-  }
-  try {
-    return tryParse(cleaned)
-  } catch {
-    const m = cleaned.match(/\{[\s\S]*"reply"[\s\S]*\}/)
-    if (m) {
-      try {
-        return tryParse(m[0])
-      } catch {}
+    // 兼容旧格式 / 模型偶尔输出单 reply 字段
+    if (typeof o.reply === "string" && o.reply.trim()) {
+      return { replies: [o.reply.trim()], optOut: o.optOut === true }
     }
-    // 不是 JSON 的纯文本：当作 reply 本身兜底
-    return { reply: cleaned.includes('"reply"') ? "" : cleaned.slice(0, 480), optOut: false }
+    return { replies: [], optOut: o.optOut === true }
   }
+  const parsed = (() => {
+    try {
+      return tryParse(cleaned)
+    } catch {
+      const m = cleaned.match(/\{[\s\S]*"repl(?:y|ies)"[\s\S]*\}/)
+      if (m) {
+        try {
+          return tryParse(m[0])
+        } catch {}
+      }
+      return null
+    }
+  })()
+  if (parsed && parsed.replies.length > 0) return parsed
+  // 不是 JSON 的纯文本：当作单条 reply 兜底
+  if (parsed && parsed.replies.length === 0) {
+    return { replies: [], optOut: parsed.optOut }
+  }
+  return { replies: cleaned && !cleaned.includes('"repl') ? [cleaned.slice(0, 480)] : [], optOut: false }
 }
 
 export async function POST(req: NextRequest) {
@@ -135,9 +158,9 @@ export async function POST(req: NextRequest) {
     }
     const aiData = await aiResponse.json()
     const rawReply = aiData.choices?.[0]?.message?.content?.trim() || ""
-    const { reply, optOut } = parseReply(rawReply)
+    const { replies, optOut } = parseReplies(rawReply)
 
-    if (!reply) {
+    if (replies.length === 0) {
       console.warn("[HanakoDM] 解析回复失败:", rawReply.slice(0, 80))
       return NextResponse.json({ error: "AI 未生成有效回复" }, { status: 500 })
     }
@@ -153,22 +176,39 @@ export async function POST(req: NextRequest) {
         .upsert({ user_id: userId, unanswered_streak: 0, updated_at: new Date().toISOString() })
     }
 
-    // 8. 写回复（service role 绕 RLS）。对方客户端经 dm_incoming / dm_<pair> 订阅实时收到
-    const { error: insertError } = await dmSupabaseAdmin.from("dm_messages").insert([
-      {
-        pair_key: pk,
-        sender_id: HANAKO_USER_ID,
-        recipient_id: userId,
-        kind: "text",
-        content: reply.slice(0, 500),
-      },
-    ])
-    if (insertError) {
-      console.error("[HanakoDM] 写入失败:", insertError)
+    // 8. 逐条写入（service role 绕 RLS）。多条之间间隔 REPLY_GAP_MS 依次插入，
+    //    并显式递增 created_at —— 既保证历史查询的时间顺序，也让对方客户端经
+    //    dm_incoming / dm_<pair> 实时订阅先后收到，呈现「连续发来多条」的节奏感。
+    const baseTs = Date.now()
+    let written = 0
+    for (let i = 0; i < replies.length; i++) {
+      if (i > 0) await sleep(REPLY_GAP_MS)
+      // created_at 递增 1ms，确保按时间排序时多条回复顺序稳定（不与同毫秒的其它行碰撞）
+      const createdAt = new Date(baseTs + i).toISOString()
+      const { error: insertError } = await dmSupabaseAdmin.from("dm_messages").insert([
+        {
+          pair_key: pk,
+          sender_id: HANAKO_USER_ID,
+          recipient_id: userId,
+          kind: "text",
+          content: replies[i].slice(0, 500),
+          created_at: createdAt,
+        },
+      ])
+      if (insertError) {
+        // 单条失败不中断后续条；全部失败才报错
+        console.error("[HanakoDM] 写入失败:", insertError)
+      } else {
+        written += 1
+      }
+    }
+    if (written === 0) {
       return NextResponse.json({ error: "写入失败" }, { status: 500 })
     }
 
-    return NextResponse.json({ reply, optOut })
+    // 返回合并后的全文（兼容旧返回结构）；客户端是 fire-and-forget，不读返回值，
+    // 回复纯靠 realtime 推送，故这里返回什么不影响前端逐条呈现。
+    return NextResponse.json({ reply: replies.join("\n"), replies, optOut })
   } catch (error: any) {
     console.error("[HanakoDM] 未知错误:", error)
     return NextResponse.json({ error: error?.message || "服务器内部错误" }, { status: 500 })
