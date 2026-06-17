@@ -207,9 +207,13 @@ export async function POST(req: NextRequest) {
 
     const { replies, optOut } = parseReplies(rawReply)
 
+    // 兜底：模型正文为空（推理模型 thinking 吃满 token 预算 / 模型异常未输出）时，
+    // 不再静默 500——给一条友好回复，让主人知道萌萌子收到了、只是答不上来。
+    // 仍记 warn 便于排查根因（看 rawReply 是不是真空、还是格式问题）。
+    let finalReplies = replies
     if (replies.length === 0) {
-      console.warn("[HanakoDM] 解析回复失败:", rawReply.slice(0, 80))
-      return NextResponse.json({ error: "AI 未生成有效回复" }, { status: 500 })
+      console.warn("[HanakoDM] 解析回复失败，走兜底:", JSON.stringify(rawReply.slice(0, 80)))
+      finalReplies = ["唔……萌萌子想了半天，这个一下子不知道该怎么回你 にゃ（挠头）"]
     }
 
     // 8. 护栏状态：opt-out 或重置未回计数（用户回应了说明在聊）
@@ -231,7 +235,7 @@ export async function POST(req: NextRequest) {
     //    （避免旧逻辑把整条当文本、剥掉表情标记导致表情包丢失）。未知 [s:xxx] 当文本保留。
     const baseTs = Date.now()
     let written = 0
-    for (const reply of replies) {
+    for (const reply of finalReplies) {
       for (const row of splitRepliesIntoRows(reply)) {
         const content =
           row.kind === "sticker" ? row.content : row.content.slice(0, 500)
@@ -263,7 +267,7 @@ export async function POST(req: NextRequest) {
 
     // 返回合并后的全文（兼容旧返回结构）；客户端是 fire-and-forget，不读返回值，
     // 回复纯靠 realtime 推送，故这里返回什么不影响前端逐条呈现。
-    return NextResponse.json({ reply: replies.join("\n"), replies, optOut })
+    return NextResponse.json({ reply: finalReplies.join("\n"), replies: finalReplies, optOut })
   } catch (error: any) {
     console.error("[HanakoDM] 未知错误:", error)
     return NextResponse.json({ error: error?.message || "服务器内部错误" }, { status: 500 })

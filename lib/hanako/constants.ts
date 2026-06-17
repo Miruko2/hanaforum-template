@@ -117,11 +117,12 @@ export const DM_GLOBAL_MAX_CONCURRENT = 4
  * - 推理模型（mimo / deepseek-reasoner / R1 / o1 / Qwen-QwQ 等）：
  *   思考链常占 500~1500 token，再加上最终 JSON 输出
  *
- * 设 1500 是兼顾"推理模型也能跑通"的稳妥值。
- * 提示词里明确要求 1~3 句话回复，实际不会因为上限高就生成很长内容。
- * 真要超长，模型也会被 EOS / JSON 闭合提前终止。
+ * 设 4000：1500 时推理模型在"需要先搜索再组织长内容"的场景（如剧透/讲解）
+ * 会把预算全用在 thinking 上、正文输出为空，导致 parseReplies 拿到空串 → 500 静默。
+ * 提到 4000 让 thinking 有余量、正文也能输出。max_tokens 只是上限，日常闲聊
+ * 模型实际用 50~150 token 就 EOS 了，不会因为上限高就多花钱。
  */
-export const MAX_REPLY_TOKENS = 1500
+export const MAX_REPLY_TOKENS = 4000
 
 /* ============================================================
  * 私信 AI（萌萌子）上下文压缩参数 ——「记性优先」档
