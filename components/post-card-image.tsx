@@ -141,6 +141,16 @@ export default function PostCardImage({
     }
   }, [onImageLoad]);
   
+  // 处理图片加载错误：先回退主图，主图也挂才进错误态。
+  // 必须放在所有 early return 之前——hooks 不能条件调用（react-hooks/rules-of-hooks）。
+  const handleError = useCallback(() => {
+    if (!useFullImage && thumbUrl) {
+      setUseFullImage(true)
+    } else {
+      setImageError(true)
+    }
+  }, [useFullImage, thumbUrl])
+
   // 如果没有图片URL也没有imageContent，不渲染图片区域
   if (!post.image_url && !hasImageContent) {
     return null
@@ -161,15 +171,6 @@ export default function PostCardImage({
     )
   }
   
-  // 处理图片加载错误：先回退主图，主图也挂才进错误态
-  const handleError = useCallback(() => {
-    if (!useFullImage && thumbUrl) {
-      setUseFullImage(true)
-    } else {
-      setImageError(true)
-    }
-  }, [useFullImage, thumbUrl])
-
   // 如果图片加载出错，显示错误状态
   if (imageError) {
     const { heightClass, aspectStyle } = getImageSizing()

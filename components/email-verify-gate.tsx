@@ -231,7 +231,7 @@ export default function EmailVerifyGate() {
               {/* 型号风头部条：危险条 + 单色等宽标签 + 闪烁状态点 + 收起 */}
               <div className="evg-head">
                 <span className="evg-head-haz" aria-hidden />
-                <span className="evg-head-label">// 認証 · SECURITY</span>
+                <span className="evg-head-label">{"// 認証 · SECURITY"}</span>
                 <span className="evg-head-stat"><i className="evg-dot" aria-hidden />REQ-OTP</span>
                 <button type="button" className="evg-close" aria-label="收起" onClick={minimize}>
                   <X style={{ width: 15, height: 15 }} />
