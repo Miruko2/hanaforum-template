@@ -160,4 +160,11 @@ export const DM_MAX_FOLD_BATCH = 200
 /** 生成会话摘要时的最大输出 token。摘要要求精炼（~800 字内），保留关键事实。 */
 export const DM_SUMMARY_MAX_TOKENS = 1200
 
+/** 萌萌子单轮回复带表情包的目标概率。
+ *  prompt 已引导「频繁发」，但模型（尤其 deepseek-chat）偏保守、常不够主动；
+ *  故在发给模型的上下文末尾按此概率临时注入一条「本轮配个表情包」的 system 提示，
+ *  推高实际命中率。该提示只存在于本次请求、不写库、不污染历史记忆。
+ *  0.55 ≈ 一半多回复带表情包：活泼有萌点但不刷屏。可随时调。 */
+export const DM_STICKER_INJECT_PROBABILITY = 0.55
+
 // 白名单从数据库表 hanako_allowed_users 读取（见 app/api/ai-reply/route.ts）

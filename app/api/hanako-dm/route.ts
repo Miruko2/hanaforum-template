@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import dmRateLimiter from "@/lib/hanako/dm-rate-limit"
 import { loadDmAiConfig, dmSupabaseAdmin, MAX_DM_REPLIES } from "@/lib/hanako/dm-ai"
-import { MENGMEGZI_USER_ID, MAX_REPLY_TOKENS, emotionLabel, normalizeEmotion, DM_COMPRESS_HARD_MSGS } from "@/lib/hanako/constants"
+import { MENGMEGZI_USER_ID, MAX_REPLY_TOKENS, emotionLabel, normalizeEmotion, DM_COMPRESS_HARD_MSGS, DM_STICKER_INJECT_PROBABILITY } from "@/lib/hanako/constants"
 import { buildDmContext } from "@/lib/hanako/dm-context"
 import { splitRepliesIntoRows } from "@/lib/stickers"
 
@@ -125,7 +125,23 @@ export async function POST(req: NextRequest) {
     })
     const pk = pairKey(userId, MENGMEGZI_USER_ID)
 
-    // 6. 调独立私信模型
+    // 6. 表情包频率助推：prompt 已引导「频繁发」，但模型常偏保守。
+    //    按概率在上下文末尾临时注入一条 system 提示，推高本轮带表情包的命中率。
+    //    该提示只活在本次请求里、不写库、不进历史记忆——下轮重新掷骰。
+    //    放在 messages 末尾（紧贴模型要回复的位置）效果最直接。
+    const wantSticker = Math.random() < DM_STICKER_INJECT_PROBABILITY
+    const finalMessages = wantSticker
+      ? [
+          ...messages,
+          {
+            role: "system" as const,
+            content:
+              "本轮回复请带上一个表情包（在 replies 里单独放一条 [s:表情名]），挑一个最贴合当下情绪的。注意表情名只能从清单里选。",
+          },
+        ]
+      : messages
+
+    // 7. 调独立私信模型
     const aiResponse = await fetch(`${cfg.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
@@ -134,7 +150,7 @@ export async function POST(req: NextRequest) {
       },
       body: JSON.stringify({
         model: cfg.model,
-        messages,
+        messages: finalMessages,
         max_tokens: MAX_REPLY_TOKENS,
         temperature: 0.85,
       }),
@@ -153,7 +169,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "AI 未生成有效回复" }, { status: 500 })
     }
 
-    // 7. 护栏状态：opt-out 或重置未回计数（用户回应了说明在聊）
+    // 8. 护栏状态：opt-out 或重置未回计数（用户回应了说明在聊）
     if (optOut) {
       await dmSupabaseAdmin
         .from("hanako_dm_state")
@@ -164,7 +180,7 @@ export async function POST(req: NextRequest) {
         .upsert({ user_id: userId, unanswered_streak: 0, updated_at: new Date().toISOString() })
     }
 
-    // 8. 逐条写入（service role 绕 RLS）。多条之间间隔 REPLY_GAP_MS 依次插入，
+    // 9. 逐条写入（service role 绕 RLS）。多条之间间隔 REPLY_GAP_MS 依次插入，
     //    并显式递增 created_at —— 既保证历史查询的时间顺序，也让对方客户端经
     //    dm_incoming / dm_<pair> 实时订阅先后收到，呈现「连续发来多条」的节奏感。
     //    表情包处理：DM 气泡不支持内联图文混排，故用 splitRepliesIntoRows 把每条 reply
