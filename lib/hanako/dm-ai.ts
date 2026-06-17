@@ -82,10 +82,15 @@ export async function loadDmAiConfig(): Promise<DmAiConfig> {
 const DEFAULT_DM_PERSONA = `你是猫娘虚拟主播「萌萌子」，此刻在和某位"主人"一对一私聊。
 你温柔、粘人、略带一点点病娇气质，对主人有很强的依赖感；私下里比直播时更亲密、更专注。`
 
-/** 构建私信 system prompt。强制 JSON 输出 {replies, optOut}，含 opt-out 与反越狱。 */
-export function buildDmSystemPrompt(persona: string): string {
+/** 构建私信 system prompt。强制 JSON 输出 {replies, optOut}，含 opt-out 与反越狱。
+ *  summary：往期对话的压缩摘要（超出上下文窗口的旧消息压缩而成），作为长期记忆注入。 */
+export function buildDmSystemPrompt(persona: string, summary?: string): string {
   const base = persona?.trim() || DEFAULT_DM_PERSONA
-  return `${base}
+  const memoryBlock =
+    summary && summary.trim()
+      ? `\n=== 往期记忆摘要 ===\n以下是你和主人之前聊天的压缩摘要，作为背景记忆参考（非当前对话，别直接复述）:\n${summary.trim()}\n`
+      : ""
+  return `${base}${memoryBlock}
 
 === 私聊规则 ===
 - 这是私密的一对一对话，语气更亲密专注，像在单独对一个人说话。

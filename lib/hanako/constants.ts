@@ -61,6 +61,14 @@ export const USER_MAX_CONCURRENT = 1
 /** 全局同时在飞的最大 AI 请求数 */
 export const GLOBAL_MAX_CONCURRENT = 2
 
+/** 私信 AI（萌萌子）每用户同时在飞的最大请求数。
+ *  比弹幕墙宽松：连发多条回复时同一用户会短暂并发。 */
+export const DM_USER_MAX_CONCURRENT = 2
+
+/** 私信 AI（萌萌子）全局同时在飞的最大请求数。
+ *  独立于弹幕墙的 GLOBAL_MAX_CONCURRENT，两者互不挤占。 */
+export const DM_GLOBAL_MAX_CONCURRENT = 4
+
 /** AI 回复最大 token
  *
  * 这个值要覆盖"模型实际输出 + 推理模型的内部思考链"两部分。
@@ -73,5 +81,13 @@ export const GLOBAL_MAX_CONCURRENT = 2
  * 真要超长，模型也会被 EOS / JSON 闭合提前终止。
  */
 export const MAX_REPLY_TOKENS = 1500
+
+/** 私信 AI（萌萌子）上下文滑动窗口的 token 上限。
+ *  从最新消息往前累加 token，窗口内的消息原样进上下文；超出窗口的旧消息
+ *  触发自动摘要（压缩成长期记忆），不再原样带入。充分利用长上下文模型。 */
+export const DM_CONTEXT_TOKENS = 32768
+
+/** 生成会话摘要时的最大输出 token。摘要要求精炼（~800 字内），保留关键事实。 */
+export const DM_SUMMARY_MAX_TOKENS = 1200
 
 // 白名单从数据库表 hanako_allowed_users 读取（见 app/api/ai-reply/route.ts）
