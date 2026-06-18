@@ -3,7 +3,7 @@
 import React, { useState, useCallback, useLayoutEffect, useRef } from "react"
 import { cdnUrl } from "@/lib/cdn-url"
 import { motion, AnimatePresence, useMotionValue, useTransform, animate } from "framer-motion"
-import { X, MessageSquare, Maximize2, Bot } from "lucide-react"
+import { X, MessageSquare, Maximize2 } from "lucide-react"
 import { createPortal } from "react-dom"
 import { useRouter } from "next/navigation"
 import type { Post } from "@/lib/types"
@@ -14,12 +14,10 @@ import PostImageCarousel from "./post-image-carousel"
 import ImageLightbox from "./image-lightbox"
 import TextualHero from "./textual-hero"
 import CommentList, { prefetchComments } from "./comment/comment-list"
-import { StickerText } from "@/components/stickers/sticker-text"
+import { StickerText } from "./stickers/sticker-text"
 import LikeButton from "./ui/like-button"
 import { CATEGORIES } from "@/lib/categories"
 import { postImageList } from "@/lib/post-images"
-import { useMengmegziCommand } from "@/hooks/use-mengmegzi-command"
-import { useToast } from "@/hooks/use-toast"
 
 // 安卓（含 Capacitor WebView）：合成器对 backdrop-filter 的逐帧重采样远弱于
 // iOS/桌面，开/关帖动画期间的玻璃面板与渐进模糊带在安卓上降级（实底/纯渐变）。
@@ -71,14 +69,6 @@ export default function PostDetailModal({
   // ImageLightbox 自己处理：点击立即打开、先显 loading、原图就绪后再弹入，
   // 故这里不再做阻塞式预加载。
   const router = useRouter()
-  const { sending: mmSending, send: mmSend } = useMengmegziCommand()
-  const { toast } = useToast()
-
-  // 管理员一键派萌萌子来本帖留言
-  const handleMmComment = async () => {
-    const r = await mmSend({ action: "comment_now", post_id: post.id })
-    toast({ title: r.ok ? "已派萌萌子" : "失败", description: r.message })
-  }
 
   const [lightboxOpen, setLightboxOpen] = useState(false)
   // 多图：详情页轮播当前页 / 灯箱起始页（两者共享，点开即看同一张）
@@ -372,20 +362,6 @@ export default function PostDetailModal({
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4 }}
         >
-          {/* 管理员一键派萌萌子来本帖留言 */}
-          {isAdmin && (
-            <div className="mb-3 flex justify-end">
-              <button
-                onClick={handleMmComment}
-                disabled={mmSending}
-                className="flex items-center gap-1.5 rounded-full border border-purple-400/30 bg-purple-500/10 px-3 py-1 text-xs text-purple-300 hover:bg-purple-500/20 disabled:opacity-50"
-                title="派萌萌子来这个帖子留言"
-              >
-                <Bot className="h-3.5 w-3.5" />
-                {mmSending ? "派发中..." : "萌萌子留言"}
-              </button>
-            </div>
-          )}
           <CommentList
             postId={post.id}
             onCommentAdded={onCommentAdded}

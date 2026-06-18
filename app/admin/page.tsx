@@ -24,7 +24,6 @@ import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import { useToast } from "@/hooks/use-toast"
 import { broadcastAnnouncement } from "@/lib/supabase"
-import MengmegziAgentPanel from "@/components/admin/mengmegzi-agent-panel"
 
 // ─── 模块级缓存 ────────────────────────────────────────────
 // 同一个 tab 内导航走又回来时，沿用上次数据，避免每次都重新请求 spinner。
@@ -1060,10 +1059,6 @@ export default function AdminPage() {
             <Megaphone className="mr-2 h-4 w-4" />
             公告
           </TabsTrigger>
-          <TabsTrigger value="mengmegzi" className="data-[state=active]:bg-lime-900/30 data-[state=active]:text-lime-400">
-            <Bot className="mr-2 h-4 w-4" />
-            萌萌子
-          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="admins">
@@ -1783,10 +1778,6 @@ export default function AdminPage() {
               </Button>
             </CardFooter>
           </Card>
-        </TabsContent>
-
-        <TabsContent value="mengmegzi">
-          <MengmegziAgentPanel />
         </TabsContent>
       </Tabs>
 
