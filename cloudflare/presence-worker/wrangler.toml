@@ -22,13 +22,10 @@ ALLOWED_ORIGINS = "https://hanakos.cc,https://www.hanakos.cc,http://localhost:30
 # 主动私信触发器用（非敏感；service_role key 走 wrangler secret）
 SUPABASE_URL = "https://uvkupdbfbnodeybulczd.supabase.co"
 MENGMEGZI_USER_ID = "78257113-e5da-4bcb-bb7a-9b1824439cd1"
-# 萌萌子 agent tick：戳 Next.js 的 /api/mengmegzi-tick（生产填线上域名）
-MENGMEGZI_TICK_URL = "https://hanakos.cc/api/mengmegzi-tick"
 
 # 主动私信触发器：cron 每 5 分钟扫描在线用户
-# 萌萌子 agent tick：cron 每 2 分钟戳 /api/mengmegzi-tick
 [triggers]
-crons = ["*/5 * * * *", "*/2 * * * *"]
+crons = ["*/5 * * * *"]
 
 # 路由（部署后子域名生效；首次部署可先注释，用 *.workers.dev 测好再上）
 # routes = [
