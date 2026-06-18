@@ -6,7 +6,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { formatDate, cn } from "@/lib/utils"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
-import { Reply, ThumbsUp, Trash2, ChevronDown, ChevronUp } from "lucide-react"
+import { Reply, ThumbsUp, Trash2, ChevronDown, ChevronUp, Bot } from "lucide-react"
 import type { Comment } from "@/lib/types"
 import CommentForm from "./comment-form"
 import { StickerText } from "@/components/stickers/sticker-text"
@@ -14,6 +14,7 @@ import { checkCommentLiked, likeComment, unlikeComment, getCommentLikesCount, de
 import { supabase } from "@/lib/supabaseClient"
 import { useRouter } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
+import { useMengmegziCommand } from "@/hooks/use-mengmegzi-command"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -76,6 +77,7 @@ function ReplyRow({
   const [isLiking, setIsLiking] = useState(false)
   const [showDeleteAlert, setShowDeleteAlert] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+  const { sending: mmSending, send: mmSend } = useMengmegziCommand()
 
   const displayName = authorNameOf(reply)
   const avatarUrl = reply.user?.avatar_url || "/logo.png"
@@ -83,6 +85,12 @@ function ReplyRow({
   const goToProfile = () => router.push(`/user?id=${reply.user_id}`)
   const isAuthor = !!user && user.id === reply.user_id
   const canDelete = isAuthor || isAdmin
+
+  // 管理员一键派萌萌子回复本条回复
+  const handleMmReply = async () => {
+    const r = await mmSend({ action: "reply_now", comment_id: reply.id })
+    toast({ title: r.ok ? "已派萌萌子" : "失败", description: r.message })
+  }
 
   // 点赞状态与计数（与主评论一致逻辑）
   useEffect(() => {
@@ -198,6 +206,17 @@ function ReplyRow({
             >
               <Reply className="h-3 w-3" />
             </button>
+            {isAdmin && (
+              <button
+                onClick={handleMmReply}
+                disabled={mmSending}
+                className="flex items-center gap-1 text-[11px] text-gray-500 hover:text-purple-400 disabled:opacity-50"
+                aria-label="让萌萌子回复"
+                title="派萌萌子来回复这条"
+              >
+                <Bot className="h-3 w-3" />
+              </button>
+            )}
             {canDelete && (
               <button
                 onClick={() => setShowDeleteAlert(true)}
@@ -279,8 +298,15 @@ export default function CommentItem({
   const [showAllReplies, setShowAllReplies] = useState(false)
   const { user } = useSimpleAuth()
   const { toast } = useToast()
+  const { sending: mmSending, send: mmSend } = useMengmegziCommand()
   const router = useRouter()
   const goToProfile = () => router.push(`/user?id=${comment.user_id}`)
+
+  // 管理员一键派萌萌子回复本条评论
+  const handleMmReply = async () => {
+    const r = await mmSend({ action: "reply_now", comment_id: comment.id })
+    toast({ title: r.ok ? "已派萌萌子" : "失败", description: r.message })
+  }
 
   // 是否本人评论；本人或管理员均可删除（非乐观更新中的临时评论）
   const isAuthor = !!user && user.id === comment.user_id
@@ -461,6 +487,19 @@ export default function CommentItem({
               <Reply className="h-3.5 w-3.5" />
               <span>回复</span>
             </button>
+
+            {isAdmin && (
+              <button
+                onClick={handleMmReply}
+                disabled={mmSending}
+                className="flex items-center gap-1 text-xs text-gray-500 hover:text-purple-400 disabled:opacity-50"
+                aria-label="让萌萌子回复"
+                title="派萌萌子来回复这条评论"
+              >
+                <Bot className="h-3.5 w-3.5" />
+                <span>萌萌子回复</span>
+              </button>
+            )}
 
             {canDelete && (
               <button

@@ -10,6 +10,7 @@ import PageTransition from "@/components/page-transition"
 import PageSwipe from "@/components/page-swipe"
 import PageRibbonTransition from "@/components/page-ribbon-transition"
 import RouteWarmup from "@/components/route-warmup"
+import MengmegziStatusBubble from "@/components/mengmegzi-status-bubble"
 import Script from "next/script"
 import dynamic from "next/dynamic"
 
@@ -130,6 +131,9 @@ export function Providers({ children }: { children: ReactNode }) {
             <PageSwipe />
             <PageRibbonTransition />
             <RouteWarmup />
+
+            {/* 萌萌子 Agent 状态悬浮泡：右下角全局可见，仅管理员能看到 */}
+            <MengmegziStatusBubble />
             </PlaybackProvider>
             </ChatUIProvider>
             </CinemaModeProvider>

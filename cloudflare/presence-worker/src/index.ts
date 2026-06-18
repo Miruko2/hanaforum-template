@@ -22,6 +22,9 @@ export interface Env {
   SUPABASE_URL: string
   SUPABASE_SERVICE_ROLE_KEY: string
   MENGMEGZI_USER_ID: string
+  // 萌萌子 agent tick（cron scheduled 用，戳 Next.js 的 /api/mengmegzi-tick）
+  MENGMEGZI_TICK_URL: string
+  MENGMEGZI_CRON_SECRET: string
 }
 
 function corsHeaders(origin: string | null, env: Env): HeadersInit {
@@ -98,13 +101,34 @@ export default {
     return stub.fetch(fwd)
   },
 
-  // cron 每 5 分钟触发：萌萌子主动私信在线已验证用户
-  async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
-    // 顶层 try/catch：防止单次扫描的未捕获异常在日志里刷成 unhandled rejection
+  // cron 触发：*/5 走主动私信，*/2 走萌萌子 agent tick
+  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+    if (event.cron === "*/2 * * * *") {
+      ctx.waitUntil(
+        tickMengmegzi(env).catch((err) => {
+          console.error("[mengmegzi-tick] 异常:", err?.message || err)
+        }),
+      )
+      return
+    }
+    // 默认（*/5 * * * *）走主动私信
     ctx.waitUntil(
       runProactiveSweep(env).catch((err) => {
         console.error("[proactive] 扫描异常:", err?.message || err)
       }),
     )
   },
+}
+
+/** 萌萌子 agent tick：戳 Next.js 的 /api/mengmegzi-tick */
+async function tickMengmegzi(env: Env): Promise<void> {
+  const url = env.MENGMEGZI_TICK_URL
+  if (!url) return
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "x-cron-secret": env.MENGMEGZI_CRON_SECRET },
+  })
+  if (!res.ok) {
+    console.warn("[mengmegzi-tick] 非 2xx:", res.status, await res.text().catch(() => ""))
+  }
 }
