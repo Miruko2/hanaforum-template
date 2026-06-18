@@ -1,39 +1,141 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useRef, useState, useCallback } from "react"
 import { createPortal } from "react-dom"
 import { AnimatePresence, motion } from "framer-motion"
-import { Trash2, Loader2 } from "lucide-react"
+import { Loader2 } from "lucide-react"
 
 interface DeleteConfirmDialogProps {
   open: boolean
   onClose: () => void
   onConfirm: () => void
-  /** 删除进行中：确认按钮禁用并显示「删除中...」 */
+  /** 删除进行中：滑块禁用并显示「删除中...」 */
   loading?: boolean
-  /** 可选：被删对象的预览标题（如帖子标题），展示在正文上方 */
+  /** 可选：被删对象的预览标题（如帖子标题）—— 极简版仅作 a11y 提示用 */
   title?: string
 }
 
+// ---------------------------------------------------------------------------
+// 点阵渲染：5×7 字模（'1'=亮珠），用于轨道内提示文字；与注册弹窗 GLYPHS 同思路。
+// 窄滑动条里中文点阵字模太复杂且糊，改用英文短词（SLIDE / DELETE / RELEASE），清晰且工业感统一。
+// ---------------------------------------------------------------------------
+const FONT_5x7: Record<string, string[]> = {
+  A: ["01110", "10001", "10001", "11111", "10001", "10001", "10001"],
+  B: ["11110", "10001", "10001", "11110", "10001", "10001", "11110"],
+  C: ["01111", "10000", "10000", "10000", "10000", "10000", "01111"],
+  D: ["11110", "10001", "10001", "10001", "10001", "10001", "11110"],
+  E: ["11111", "10000", "10000", "11110", "10000", "10000", "11111"],
+  G: ["01111", "10000", "10000", "10111", "10001", "10001", "01111"],
+  I: ["11111", "00100", "00100", "00100", "00100", "00100", "11111"],
+  L: ["10000", "10000", "10000", "10000", "10000", "10000", "11111"],
+  N: ["10001", "11001", "10101", "10011", "10001", "10001", "10001"],
+  R: ["11110", "10001", "10001", "11110", "10100", "10010", "10001"],
+  S: ["01111", "10000", "10000", "01110", "00001", "00001", "11110"],
+  T: ["11111", "00100", "00100", "00100", "00100", "00100", "00100"],
+  V: ["10001", "10001", "10001", "10001", "10001", "01010", "00100"],
+  " ": ["00000", "00000", "00000", "00000", "00000", "00000", "00000"],
+}
+
+// 点阵垃圾桶图标：7 列 × 9 行。盖（顶部横条 + 提手）+ 桶身（梯形 + 竖纹）。
+const TRASH_GLYPH = [
+  "0011100",
+  "0011100",
+  "0111110",
+  "1111111",
+  "1001001",
+  "1001001",
+  "1010101",
+  "1001001",
+  "0111110",
+]
+
+/** 把字模数组渲染成点阵。cell=单个珠子直径，gap=珠间距，on/off 控制亮灭珠颜色。 */
+function DotMatrix({
+  glyph,
+  cell = 2,
+  gap = 1,
+  onColor = "rgba(255, 220, 225, 0.95)",
+  offColor = "transparent",
+}: {
+  glyph: string[]
+  cell?: number
+  gap?: number
+  onColor?: string
+  offColor?: string
+}) {
+  const cols = glyph[0].length
+  const rows = glyph.length
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: `repeat(${cols}, ${cell}px)`,
+        gridTemplateRows: `repeat(${rows}, ${cell}px)`,
+        gap: `${gap}px`,
+        lineHeight: 0,
+      }}
+    >
+      {glyph.flatMap((row, r) =>
+        row.split("").map((ch, c) => {
+          const on = ch === "1"
+          return (
+            <span
+              key={`${r}-${c}`}
+              style={{
+                width: cell,
+                height: cell,
+                borderRadius: "50%",
+                background: on ? onColor : offColor,
+                boxShadow: on ? `0 0 ${cell * 0.8}px ${onColor}` : "none",
+              }}
+            />
+          )
+        }),
+      )}
+    </div>
+  )
+}
+
+/** 把一段英文渲染成横向排列的点阵字符（每字一个 5×7 块，字间留 1 列空）。 */
+function DotText({
+  text,
+  cell = 2,
+  gap = 1,
+  charGap = 3,
+  onColor,
+}: {
+  text: string
+  cell?: number
+  gap?: number
+  charGap?: number
+  onColor?: string
+}) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: `${charGap}px` }}>
+      {text.split("").map((ch, i) => {
+        const g = FONT_5x7[ch.toUpperCase()]
+        return g ? (
+          <DotMatrix key={i} glyph={g} cell={cell} gap={gap} onColor={onColor} />
+        ) : null
+      })}
+    </div>
+  )
+}
+
 /**
- * 删除确认弹窗：磨砂毛玻璃 + 警示色，复刻站点 announcement-modal 的视觉语言。
+ * 删除确认 · iOS 风滑动删除条（极简）。
  *
- * 与通知/公告弹窗保持同款：深色玻璃面板、白底反光描边、framer-motion spring 入场、
- * 圆形图标抬头。这里把图标换成 Trash2 + 红/橙警示色，传达「危险操作」的语气。
+ * 不再是大卡片框，只有一根红色滑动条：滑块从左滑到右端（≥阈值）= 确认删除；
+ * 未达阈值松手 = 回弹取消；点轨道外遮罩空白 = 关闭弹窗；ESC = 关闭。
  *
- * ⚠️ 毛玻璃铁律（此处曾翻车「一直透明、没磨砂」）：backdrop-filter 一旦有任一【祖先】
- * 元素建立了 "backdrop root"，子孙就只能采样到那个祖先、采不到页面背景 → 模糊彻底失效。
- * 建立 backdrop root 的属性：opacity<1、filter(哪怕 blur0)、will-change 含上述属性、
- * mask/clip-path、mix-blend-mode、isolation、preserve-3d；注意 transform(scale/translate)
- * 不会建立。所以这里：
- *   1) 最外层全屏 wrapper 只做布局，绝不挂 opacity 动画 / willChange:"opacity"——否则它会
- *      成为 backdrop root，把内部遮罩与卡片的毛玻璃全部废掉（常驻 willChange 更是永久透明）。
- *   2) 入场 opacity 淡入直接挂在【毛玻璃本体那一个元素上】（遮罩、卡片各自淡入）；同一元素上
- *      backdrop-filter 与 opacity/transform 合法共存。
- * 毛玻璃【从首帧就在】：backdrop-filter 一直开着，入场只淡入 opacity + 轻微 spring，于是是
- * 「磨砂玻璃整体淡入」而非「先透明、约 1 秒后突然上玻璃」。早期版本用 glassReady 定时器延迟
- * 开 blur（仿 announcement-modal），但定时器在弹窗打开瞬间主线程繁忙时会被推迟很久才触发，
- * 用户先看到一层无模糊的透明面板，故已移除。背景详见 app/globals.css 的 .glass-card 注释。
+ * 视觉：危险红渐变 + 红色发光 + 毛玻璃底（与站点玻璃拟态语言一致）。
+ * 装饰风格选「毛玻璃 + 发光」而非像素化——契合站点已有的 backdrop-filter 语言，
+ * 红色 box-shadow 发光强化「删除」危险语义，且无逐帧动画、安卓 WebView 安全。
+ *
+ * ⚠️ 毛玻璃铁律：最外层 wrapper 只做布局，不挂 opacity 动画 / willChange:"opacity"，
+ * 否则它会成为 backdrop root，废掉内部遮罩/滑条的 backdrop-filter。入场 opacity 淡入
+ * 直接挂在【毛玻璃本体那一个元素上】（遮罩、滑条各自淡入）；同一元素上 backdrop-filter
+ * 与 opacity/transform 合法共存。
  */
 export default function DeleteConfirmDialog({
   open,
@@ -42,6 +144,26 @@ export default function DeleteConfirmDialog({
   loading = false,
   title,
 }: DeleteConfirmDialogProps) {
+  const trackRef = useRef<HTMLDivElement | null>(null)
+  const knobRef = useRef<HTMLDivElement | null>(null)
+
+  // 拖动几何状态（用 ref 存，避免每帧 setState 引发重渲染）
+  const dragState = useRef({
+    dragging: false,
+    startX: 0,
+    startLeft: 0,
+    maxLeft: 0,
+  })
+
+  const [left, setLeft] = useState(0)
+  const [maxLeft, setMaxLeft] = useState(0)
+  const [confirmed, setConfirmed] = useState(false)
+  const [dragging, setDragging] = useState(false)
+  const [noTransition, setNoTransition] = useState(false)
+
+  const THRESHOLD = 0.85 // 拖到 85% 即视为确认（iOS 风偏严，防误触）
+  const KNOB_PAD = 3
+
   // 打开时锁滚
   useEffect(() => {
     if (open) {
@@ -54,27 +176,112 @@ export default function DeleteConfirmDialog({
     }
   }, [open])
 
-  // ESC 关闭（删除中时不允许）
+  // ESC 关闭（删除中 / 已确认时不允许）
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !loading) onClose()
+      if (e.key === "Escape" && !loading && !confirmed) onClose()
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [open, loading, onClose])
+  }, [open, loading, confirmed, onClose])
+
+  // 弹窗每次打开时重置状态
+  useEffect(() => {
+    if (open) {
+      setConfirmed(false)
+      setLeft(KNOB_PAD)
+      requestAnimationFrame(() => {
+        const track = trackRef.current
+        const knob = knobRef.current
+        if (track && knob) {
+          setMaxLeft(track.clientWidth - knob.clientWidth - KNOB_PAD * 2)
+        }
+      })
+    }
+  }, [open])
+
+  // 窗口缩放时重算行程上限
+  useEffect(() => {
+    if (!open) return
+    const onResize = () => {
+      const track = trackRef.current
+      const knob = knobRef.current
+      if (track && knob) {
+        const m = track.clientWidth - knob.clientWidth - KNOB_PAD * 2
+        setMaxLeft(m)
+        setLeft((prev) => Math.min(prev, m))
+      }
+    }
+    window.addEventListener("resize", onResize)
+    return () => window.removeEventListener("resize", onResize)
+  }, [open])
+
+  const beginDrag = useCallback(
+    (clientX: number) => {
+      if (loading || confirmed) return
+      const track = trackRef.current
+      const knob = knobRef.current
+      if (!track || !knob) return
+      const m = track.clientWidth - knob.clientWidth - KNOB_PAD * 2
+      dragState.current = { dragging: true, startX: clientX, startLeft: left, maxLeft: m }
+      setMaxLeft(m)
+      setNoTransition(true)
+      setDragging(true)
+    },
+    [loading, confirmed, left],
+  )
+
+  const moveDrag = useCallback((clientX: number) => {
+    if (!dragState.current.dragging) return
+    const { startX, startLeft, maxLeft } = dragState.current
+    const l = Math.max(KNOB_PAD, Math.min(maxLeft, startLeft + (clientX - startX)))
+    setLeft(l)
+  }, [])
+
+  const endDrag = useCallback(() => {
+    if (!dragState.current.dragging) return
+    dragState.current.dragging = false
+    setNoTransition(false)
+    setDragging(false)
+    const { maxLeft } = dragState.current
+    const progress = maxLeft > 0 ? (left - KNOB_PAD) / (maxLeft - KNOB_PAD) : 0
+    if (progress >= THRESHOLD) {
+      setLeft(maxLeft)
+      setConfirmed(true)
+      onConfirm()
+    } else {
+      setLeft(KNOB_PAD)
+    }
+  }, [left, onConfirm])
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    e.preventDefault()
+    beginDrag(e.clientX)
+    ;(e.target as HTMLElement).setPointerCapture?.(e.pointerId)
+  }
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!dragState.current.dragging) return
+    moveDrag(e.clientX)
+  }
+  const onPointerUp = (e: React.PointerEvent) => {
+    if (!dragState.current.dragging) return
+    ;(e.target as HTMLElement).releasePointerCapture?.(e.pointerId)
+    endDrag()
+  }
+
+  const progress = maxLeft > 0 ? Math.max(0, Math.min(1, (left - KNOB_PAD) / (maxLeft - KNOB_PAD))) : 0
+  const reachedThreshold = progress >= THRESHOLD
 
   if (typeof document === "undefined") return null
 
   return createPortal(
     <AnimatePresence>
       {open && (
-        /* 最外层 wrapper 只做布局：不挂 opacity 动画、不挂 willChange:"opacity"，否则它会成为
-           backdrop root，废掉内部遮罩/卡片的 backdrop-filter（见顶部注释）。入场/退场的淡入淡出
-           分别下放到下面的遮罩层和卡片自己身上。 */
+        /* 最外层 wrapper 只做布局：不挂 opacity 动画 / willChange:"opacity"，
+           否则它会成为 backdrop root，废掉内部毛玻璃（见顶部注释）。 */
         <motion.div className="fixed inset-0 z-[10000] flex items-center justify-center p-4">
-          {/* 背景遮罩：毛玻璃常开，入场只淡入 opacity（与本元素 backdrop-filter 合法共存），
-              透出底层帖子墙的磨砂。 */}
+          {/* 背景遮罩：毛玻璃常开，入场只淡入 opacity。点空白 = 关闭。 */}
           <motion.div
             className="absolute inset-0"
             initial={{ opacity: 0 }}
@@ -87,111 +294,102 @@ export default function DeleteConfirmDialog({
               WebkitBackdropFilter: "blur(14px) saturate(150%)",
             }}
             onClick={() => {
-              if (!loading) onClose()
+              if (!loading && !confirmed) onClose()
             }}
           />
 
-          {/* 删除确认卡片 */}
+          {/* 极简：只有一根滑动条。点击不冒泡到遮罩（否则一点条就关闭）。 */}
           <motion.div
-            className="relative w-full max-w-md overflow-hidden flex flex-col rounded-2xl border border-white/20 shadow-2xl"
-            style={{
-              background: "rgba(20, 16, 22, 0.38)",
-              backdropFilter: "blur(24px) saturate(180%)",
-              WebkitBackdropFilter: "blur(24px) saturate(180%)",
-              willChange: "transform, opacity",
-              transform: "translateZ(0)",
-              boxShadow:
-                "0 24px 60px rgba(0,0,0,0.45), 0 0 30px rgba(244,63,94,0.12), inset 0 1px 0 rgba(255,255,255,0.18)",
-            }}
-            initial={{ scale: 0.96, y: 8, opacity: 0 }}
-            animate={{ scale: 1, y: 0, opacity: 1 }}
-            exit={{ scale: 0.97, y: 4, opacity: 0 }}
-            transition={{ type: "spring", stiffness: 340, damping: 30, mass: 0.8 }}
             onClick={(e) => e.stopPropagation()}
+            initial={{ scale: 0.92, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.94, opacity: 0 }}
+            transition={{ type: "spring", stiffness: 360, damping: 28, mass: 0.7 }}
+            style={{ width: "min(92vw, 420px)" }}
+            role="alertdialog"
+            aria-label={title ? `删除帖子「${title}」，滑动确认` : "滑动确认删除帖子"}
           >
-            {/* 玻璃上沿高光线（与站点其它毛玻璃面板同款反光） */}
-            <span
-              aria-hidden
-              className="absolute top-0 left-[12%] right-[12%] h-px pointer-events-none"
+            <div
+              ref={trackRef}
+              className="relative overflow-hidden rounded-full select-none"
               style={{
-                background:
-                  "linear-gradient(90deg, transparent, rgba(255,255,255,0.35), transparent)",
+                height: 56,
+                // 毛玻璃底 + 红色调
+                background: "rgba(40, 14, 18, 0.5)",
+                backdropFilter: "blur(18px) saturate(160%)",
+                WebkitBackdropFilter: "blur(18px) saturate(160%)",
+                border: "1px solid rgba(244, 63, 94, 0.4)",
+                boxShadow:
+                  "0 12px 40px rgba(0,0,0,0.45), 0 0 28px rgba(244,63,94,0.22), inset 0 1px 0 rgba(255,255,255,0.12)",
+                touchAction: "none",
+                cursor: loading || confirmed ? "default" : dragging ? "grabbing" : "grab",
               }}
-            />
-
-            {/* 头部：警示图标 + 标题 */}
-            <div className="flex flex-col items-center text-center px-6 pt-7 pb-3">
+            >
+              {/* 进度填充：红色 LED 点阵 + 斜向流光遮罩来回扫动（参考注册弹窗 evg-btn 加载态）。
+                  三层叠加：暗红底 → 红色点阵（radial 平铺）→ -55deg 斜向暗带遮罩流动。
+                  background-position 用 alternate 来回扫，遮罩留出的透明窗在点阵上掠过形成流光。
+                  宽度跟随滑块推进（left + 滑块宽），未滑过区域不渲染（width 控制）。 */}
               <div
-                className="h-14 w-14 rounded-full flex items-center justify-center mb-4"
+                className="absolute left-0 top-0 bottom-0 pointer-events-none rounded-full dcg-fill"
                 style={{
-                  background: "linear-gradient(135deg, rgba(244,63,94,0.22), rgba(249,115,22,0.16))",
-                  border: "1px solid rgba(244,63,94,0.35)",
-                  boxShadow: "0 0 22px rgba(244,63,94,0.25), inset 0 1px 0 rgba(255,255,255,0.14)",
+                  width: left + 50,
+                  transition: noTransition ? "none" : "width 0.35s cubic-bezier(0.34, 1.56, 0.64, 1)",
                 }}
-              >
-                <Trash2 className="h-6 w-6 text-rose-400" strokeWidth={2.2} />
-              </div>
-              <p className="text-xs font-medium text-rose-300/90 mb-1">危险操作 · 不可撤销</p>
-              <h3 className="text-lg font-bold text-white">确认删除</h3>
-            </div>
+              />
 
-            {/* 正文 */}
-            <div className="px-6 pb-5">
-              {title ? (
-                <p className="text-sm text-white/70 leading-relaxed text-center">
-                  你确定要删除这个帖子吗？
-                  <br />
-                  <span className="text-white/85 font-medium line-clamp-2 break-words">
-                    「{title}」
-                  </span>
-                  <br />
-                  这个操作不可撤销，所有评论也将被删除。
-                </p>
-              ) : (
-                <p className="text-sm text-white/75 leading-relaxed text-center">
-                  你确定要删除这个帖子吗？这个操作不可撤销，所有评论也将被删除。
-                </p>
-              )}
-            </div>
-
-            {/* 操作按钮 */}
-            <div className="flex gap-3 px-6 pb-6">
-              <button
-                type="button"
-                onClick={onClose}
-                disabled={loading}
-                className="flex-1 h-11 rounded-xl text-sm font-medium transition disabled:opacity-50 disabled:cursor-not-allowed"
+              {/* 轨道内居中提示文字：点阵英文字体，与进度填充的点阵语言统一。
+                  窄条内中文点阵糊且字模庞大，改用英文短词：SLIDE / RELEASE / DELETING。 */}
+              <div
+                className="absolute inset-0 flex items-center justify-center pointer-events-none"
                 style={{
-                  background: "rgba(255,255,255,0.06)",
-                  border: "1px solid rgba(255,255,255,0.14)",
-                  color: "rgba(255,255,255,0.85)",
-                }}
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                onClick={onConfirm}
-                disabled={loading}
-                className="flex-1 h-11 rounded-xl text-sm font-semibold inline-flex items-center justify-center gap-2 transition disabled:opacity-60 disabled:cursor-not-allowed"
-                style={{
-                  background: loading
-                    ? "rgba(244,63,94,0.55)"
-                    : "linear-gradient(135deg, #f43f5e, #e11d48)",
-                  border: "1px solid rgba(255,255,255,0.18)",
-                  color: "#fff",
-                  boxShadow: "0 8px 22px -6px rgba(244,63,94,0.55), inset 0 1px 0 rgba(255,255,255,0.18)",
+                  opacity: confirmed ? 0 : 1,
+                  transition: "opacity 0.2s",
                 }}
               >
                 {loading ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    删除中...
-                  </>
+                  <DotText text="DELETING" cell={2} gap={1} charGap={3} onColor="rgba(255,255,255,0.9)" />
+                ) : reachedThreshold ? (
+                  <DotText text="RELEASE" cell={2} gap={1} charGap={3} onColor="rgba(255,255,255,0.95)" />
                 ) : (
-                  "确认删除"
+                  <DotText text="SLIDE TO DELETE" cell={2} gap={1} charGap={3} onColor="rgba(255,210,215,0.85)" />
                 )}
-              </button>
+              </div>
+
+              {/* 滑块 */}
+              <div
+                ref={knobRef}
+                onPointerDown={onPointerDown}
+                onPointerMove={onPointerMove}
+                onPointerUp={onPointerUp}
+                onPointerCancel={onPointerUp}
+                className="absolute top-1/2 flex items-center justify-center rounded-full"
+                style={{
+                  left,
+                  transform: "translateY(-50%)",
+                  height: 46,
+                  width: 46,
+                  background: confirmed
+                    ? "linear-gradient(135deg, #f43f5e, #be123c)"
+                    : "linear-gradient(135deg, #fb7185, #e11d48)",
+                  border: "1px solid rgba(255,255,255,0.35)",
+                  color: "#fff",
+                  boxShadow: dragging
+                    ? "0 0 24px rgba(244,63,94,1), 0 4px 14px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.4)"
+                    : "0 0 16px rgba(244,63,94,0.7), 0 3px 10px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.35)",
+                  transition: noTransition
+                    ? "none"
+                    : "left 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.2s, box-shadow 0.2s",
+                  willChange: "left",
+                  cursor: loading || confirmed ? "default" : "grab",
+                  touchAction: "none",
+                }}
+              >
+                {loading ? (
+                  <Loader2 className="h-5 w-5 animate-spin" strokeWidth={2.4} />
+                ) : (
+                  <DotMatrix glyph={TRASH_GLYPH} cell={2} gap={1} onColor="rgba(255,255,255,0.95)" />
+                )}
+              </div>
             </div>
           </motion.div>
         </motion.div>

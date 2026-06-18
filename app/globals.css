@@ -4338,3 +4338,45 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
   .mp-title { clip-path: none; }
   .mp-watermark { transform: translateY(-50%); }
 }
+
+/* ============================================================
+   删除确认弹窗（极简滑动条）—— 进度填充：红色点阵斜向流动 + 固定斜彩带
+   --------------------------------------------------------
+   delete-confirm-dialog.tsx 里 .dcg-fill。参考注册弹窗 evg-btn 加载态的三层
+   背景叠加语言，改成红色危险版：
+     1) 暗红底 #2a0d10（静止）
+     2) 红色 LED 点阵（radial-gradient 平铺，9px 间距灯珠）—— 这层流动
+     3) -55deg 斜向暗带彩带 —— 这层固定不动
+   关键：斜彩带本身静止，只让点阵沿斜向（垂直于彩带走向）上下来回扫动。
+   点阵层 background-position 同时改 X/Y（16.1, 22.9 = 9px 间距的斜向位移分量，
+   对齐 -55° 方向，使点阵沿彩带法向流动、无缝衔接），彩带层与底色层 position 不变。
+   宽度由组件按滑块进度控制（width），点阵流动动画独立常驻无限循环。
+   纯 background-position 动画，无位移/合成层创建，安卓 WebView 安全。
+   ============================================================ */
+.dcg-fill {
+  background:
+    repeating-linear-gradient(-55deg,
+      rgba(20, 6, 8, 0) 0,
+      rgba(20, 6, 8, 0) 7px,
+      rgba(20, 6, 8, 0.82) 13px,
+      rgba(20, 6, 8, 0.82) 28px),
+    radial-gradient(circle, #f43f5e 1.5px, transparent 2.4px),
+    #2a0d10;
+  background-size: auto, 9px 9px, auto;
+  box-shadow: 0 0 18px rgba(244, 63, 94, 0.4);
+  /* 点阵层沿 -55° 法向持续从下往上单向流动（不往复、不停），且循环无缝。
+     无缝铁律：点阵 background-size 为 9×9 正交网格，故一个周期的位移在 X、Y 两轴
+     必须各自是 9px 的整数倍（首尾图案才能重合，否则每循环跳一次 = 抖动）。
+     取最简整数比 m:n = 7:10（≈ cos55°:sin55°，方向角 arctan(90/63)=55°，对齐条纹法向）：
+       Δx = 7×9 = 63px（向右），Δy = -10×9 = -90px（向上，CSS 坐标 Y 负=图案上移=视觉上流）。
+     位移距离 ≈109.7px，为保持视觉速度与原 1.4s/53.9px 一致，周期拉长到 2.8s。
+     彩带层(第1层)与底色层(第3层) position 保持 0 不动。 */
+  animation: dcg-flow 2.8s linear infinite;
+}
+@keyframes dcg-flow {
+  from { background-position: 0 0, 0 0, 0 0; }
+  to   { background-position: 0 0, 63px -90px, 0 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dcg-fill { animation: none; }
+}

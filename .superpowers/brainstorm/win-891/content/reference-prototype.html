@@ -1,0 +1,66 @@
+<h2>参考原型：私信通知弹窗</h2>
+<p class="subtitle">这是我们要借鉴的视觉原型（announcement-popup.tsx）。先确认下面这个长椭圆卡片的布局是你要参考的对象。</p>
+
+<div class="mockup" style="max-width:520px;margin:24px auto">
+  <div class="mockup-header">参考原型 · 当前私信通知弹窗</div>
+  <div class="mockup-body" style="background:#0a0a0f;padding:28px 16px;display:flex;justify-content:center">
+    <!-- 长椭圆卡片 -->
+    <div style="
+      width:100%;max-width:460px;
+      display:flex;align-items:center;gap:12px;
+      padding:9px 13px;
+      border-radius:20px;
+      border:1px solid rgba(255,255,255,0.14);
+      background:rgba(22,22,30,0.62);
+      backdrop-filter:blur(26px) saturate(150%);
+      box-shadow:0 14px 40px rgba(0,0,0,0.45), 0 0 26px rgba(163,230,53,0.10), inset 0 1px 0 rgba(255,255,255,0.10);
+      position:relative;overflow:hidden;
+    ">
+      <!-- 顶部高光线 -->
+      <span style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.35),transparent)"></span>
+
+      <!-- 左侧圆形头像 -->
+      <div style="
+        width:40px;height:40px;border-radius:9999px;flex-shrink:0;
+        border:1px solid rgba(255,255,255,0.18);background:rgba(0,0,0,0.4);
+        background-image:linear-gradient(135deg,#3a4a2a,#1a2a1a);
+        display:flex;align-items:center;justify-content:center;
+        font-size:18px;
+      ">🐤</div>
+
+      <!-- 中间内容 -->
+      <div style="flex:1;min-width:0;text-align:left">
+        <div style="font-size:10px;font-weight:600;color:#a3e635;letter-spacing:0.04em">私信</div>
+        <div style="font-size:14px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">萌萌子</div>
+        <div style="font-size:12.5px;line-height:1.4;color:#c3cad2;white-space:pre-wrap;word-break:break-word;max-height:2.8em;overflow:hidden">想我了没？今晚的月光很适合聊天哦～</div>
+      </div>
+
+      <!-- 右侧 X + 倒计时环 -->
+      <div style="
+        width:34px;height:34px;border-radius:9999px;flex-shrink:0;position:relative;
+        display:flex;align-items:center;justify-content:center;cursor:pointer;
+      ">
+        <svg width="34" height="34" viewBox="0 0 32 32" style="position:absolute;inset:0">
+          <circle cx="16" cy="16" r="12" fill="none" stroke="rgba(255,255,255,0.16)" stroke-width="2.5"></circle>
+          <circle cx="16" cy="16" r="12" fill="none" stroke="#a3e635" stroke-width="2.5"
+            stroke-linecap="round" stroke-dasharray="75.4" stroke-dashoffset="30"
+            transform="rotate(-90 16 16)" style="filter:drop-shadow(0 0 3px rgba(163,230,53,0.6))"></circle>
+        </svg>
+        <span style="font-size:13px;color:rgba(255,255,255,0.72);position:relative;z-index:1">✕</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="max-width:520px;margin:0 auto">
+  <p style="color:#9ca3af;font-size:13px;line-height:1.6">
+    <strong style="color:#e5e7eb">布局拆解：</strong><br>
+    ① 长椭圆卡片（圆角 20px，宽 ≤460px）<br>
+    ② 左侧 40px 圆形头像<br>
+    ③ 中间内容（眉标+标题+正文）<br>
+    ④ 右侧 34px 圆形：倒计时环 + X 关闭<br>
+    配色：青柠绿 <code>#a3e635</code> 强调色 + 深色玻璃拟态
+  </p>
+</div>
+
+<p class="subtitle" style="margin-top:24px">在终端告诉我：这就是你想借鉴的样式来源吗？确认后我会进入下一屏，展示几种"滑动确认删除"的改造方案。</p>

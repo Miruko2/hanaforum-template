@@ -2,6 +2,9 @@
   "name": "my-v0-project",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "dev": "next dev",
     "dev:debug": "next dev --config next.config.dev.mjs",
@@ -80,6 +83,7 @@
     "react-masonry-css": "^1.0.16",
     "react-virtualized-auto-sizer": "^1.0.26",
     "react-window": "^1.8.11",
+    "sharp": "^0.35.1",
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7",
     "three": "^0.160.1"
@@ -93,6 +97,7 @@
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",
+    "@types/sharp": "^0.31.1",
     "@types/three": "^0.184.1",
     "autoprefixer": "^10.0.1",
     "critters": "^0.0.23",
