@@ -28,6 +28,8 @@ export interface AgentState {
   last_error_at: string | null
   busy_since: string | null
   pending_task: PendingTask | null
+  /** 上次自动发帖时间（定时发帖轮询独立计时，与 last_action_at 解耦） */
+  last_post_at: string | null
 }
 
 export interface AgentConfig {
@@ -36,13 +38,17 @@ export interface AgentConfig {
   comment_scan_hours: number
   busy_timeout_min: number
   image_sources: Record<string, any>
+  /** 定时自动发帖：开关 / 间隔（分钟）/ 分类（''=随机） */
+  post_polling_enabled: boolean
+  post_interval_min: number
+  post_category: string
 }
 
 export async function loadState(): Promise<AgentState | null> {
   const { data } = await supabaseAdmin
     .from("mengmegzi_agent_state")
     .select(
-      "status, current_task, last_error, last_action_at, last_error_at, busy_since, pending_task",
+      "status, current_task, last_error, last_action_at, last_error_at, busy_since, pending_task, last_post_at",
     )
     .eq("id", 1)
     .maybeSingle()
@@ -53,7 +59,7 @@ export async function loadConfig(): Promise<AgentConfig | null> {
   const { data } = await supabaseAdmin
     .from("mengmegzi_config")
     .select(
-      "comment_polling_enabled, comment_interval_min, comment_scan_hours, busy_timeout_min, image_sources",
+      "comment_polling_enabled, comment_interval_min, comment_scan_hours, busy_timeout_min, image_sources, post_polling_enabled, post_interval_min, post_category",
     )
     .eq("id", 1)
     .maybeSingle()
@@ -130,6 +136,14 @@ export async function clearPendingTask(): Promise<void> {
   await supabaseAdmin
     .from("mengmegzi_agent_state")
     .update({ pending_task: null, updated_at: new Date().toISOString() })
+    .eq("id", 1)
+}
+
+/** 记录本次定时发帖时间（发帖轮询独立计时，与 last_action_at 解耦） */
+export async function setLastPostAt(): Promise<void> {
+  await supabaseAdmin
+    .from("mengmegzi_agent_state")
+    .update({ last_post_at: new Date().toISOString(), updated_at: new Date().toISOString() })
     .eq("id", 1)
 }
 

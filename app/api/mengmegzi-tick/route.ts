@@ -12,6 +12,7 @@ import {
   markIdle,
   markDead,
   clearPendingTask,
+  setLastPostAt,
   logAction,
 } from "@/lib/mengmegzi/state"
 import {
@@ -107,7 +108,22 @@ async function runTick(): Promise<void> {
     return
   }
 
-  // 5. 轮询
+  // 5. 定时自动发帖轮询（独立间隔，按 last_post_at 计时；分类按 post_category，空=随机）
+  if (cfg.post_polling_enabled) {
+    const sincePostMs = state.last_post_at ? new Date(state.last_post_at).getTime() : 0
+    if (Date.now() - sincePostMs >= cfg.post_interval_min * 60 * 1000) {
+      const cat =
+        cfg.post_category && isValidCategory(cfg.post_category)
+          ? (cfg.post_category as CategoryValue)
+          : undefined
+      // 先占住时间戳：防本次发完、下个 tick 因 last_post_at 仍旧值又立刻发
+      await setLastPostAt()
+      await runTask("正在定时发帖", () => executePost(cat), "post", null)
+      return
+    }
+  }
+
+  // 6. 留言/回复轮询
   if (!cfg.comment_polling_enabled) return
   const sinceMs = state.last_action_at ? new Date(state.last_action_at).getTime() : 0
   const elapsed = Date.now() - sinceMs

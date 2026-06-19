@@ -4,6 +4,7 @@
 
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
+import { isValidCategory } from "@/lib/categories"
 
 export const dynamic = "force-dynamic"
 
@@ -34,7 +35,7 @@ export async function GET(req: NextRequest) {
   const { data } = await supabaseAdmin
     .from("mengmegzi_config")
     .select(
-      "comment_polling_enabled, comment_interval_min, comment_scan_hours, busy_timeout_min, image_sources, updated_at",
+      "comment_polling_enabled, comment_interval_min, comment_scan_hours, busy_timeout_min, image_sources, post_polling_enabled, post_interval_min, post_category, updated_at",
     )
     .eq("id", 1)
     .maybeSingle()
@@ -49,6 +50,9 @@ export async function PATCH(req: NextRequest) {
     comment_interval_min?: number
     comment_scan_hours?: number
     busy_timeout_min?: number
+    post_polling_enabled?: boolean
+    post_interval_min?: number
+    post_category?: string
   }
   const patch: Record<string, any> = { updated_at: new Date().toISOString() }
   if (typeof body.comment_polling_enabled === "boolean")
@@ -59,6 +63,13 @@ export async function PATCH(req: NextRequest) {
     patch.comment_scan_hours = Math.min(Math.max(Math.round(body.comment_scan_hours), 1), 168)
   if (typeof body.busy_timeout_min === "number")
     patch.busy_timeout_min = Math.min(Math.max(Math.round(body.busy_timeout_min), 1), 60)
+  // 定时自动发帖
+  if (typeof body.post_polling_enabled === "boolean")
+    patch.post_polling_enabled = body.post_polling_enabled
+  if (typeof body.post_interval_min === "number")
+    patch.post_interval_min = Math.min(Math.max(Math.round(body.post_interval_min), 1), 10080)
+  if (typeof body.post_category === "string")
+    patch.post_category = isValidCategory(body.post_category) ? body.post_category : ""
 
   const { error } = await supabaseAdmin.from("mengmegzi_config").update(patch).eq("id", 1)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

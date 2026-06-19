@@ -23,6 +23,7 @@ interface StateData {
   last_action_at: string | null
   last_error_at: string | null
   pending_task: any
+  last_post_at: string | null
 }
 
 interface ConfigData {
@@ -30,6 +31,9 @@ interface ConfigData {
   comment_interval_min: number
   comment_scan_hours: number
   busy_timeout_min: number
+  post_polling_enabled: boolean
+  post_interval_min: number
+  post_category: string
 }
 
 interface LogRow {
@@ -128,6 +132,16 @@ export default function MengmegziAgentPanel() {
     alert("配置已保存")
   }
 
+  /** 即时存一项配置（开关类用，免点保存） */
+  async function patchConfig(partial: Record<string, any>) {
+    await fetch(apiUrl("/api/admin/mengmegzi-agent/config"), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+      body: JSON.stringify(partial),
+    })
+    await refreshAll()
+  }
+
   const disabled = state?.status === "dead"
 
   return (
@@ -166,6 +180,9 @@ export default function MengmegziAgentPanel() {
           {state?.current_task && <div>当前任务：{state.current_task}</div>}
           {state?.last_action_at && (
             <div>上次行动：{new Date(state.last_action_at).toLocaleString()}</div>
+          )}
+          {state?.last_post_at && (
+            <div>上次定时发帖：{new Date(state.last_post_at).toLocaleString()}</div>
           )}
           {state?.status === "dead" && state.last_error && (
             <div className="text-red-400">最近错误：{state.last_error}</div>
@@ -268,6 +285,21 @@ export default function MengmegziAgentPanel() {
               <span className="text-xs text-purple-300">·自动中</span>
             )}
           </div>
+          <div className="flex items-center gap-2">
+            <Send className="h-4 w-4 text-white/70" />
+            <span className="text-sm text-white/80">定时自动发帖</span>
+            <Switch
+              checked={config?.post_polling_enabled || false}
+              onCheckedChange={(v) => patchConfig({ post_polling_enabled: v })}
+              className="data-[state=checked]:bg-lime-500 data-[state=unchecked]:bg-white/20"
+            />
+            {config?.post_polling_enabled && (
+              <span className="text-xs text-purple-300">
+                ·每 {config.post_interval_min} 分钟发「
+                {config.post_category ? CATEGORY_LABELS[config.post_category] : "随机"}」
+              </span>
+            )}
+          </div>
         </div>
       </section>
 
@@ -318,6 +350,46 @@ export default function MengmegziAgentPanel() {
                 className="w-24 border-white/15 bg-white/5 text-white focus:border-lime-400/50"
               />
             </label>
+            {/* 定时自动发帖：开关在上方指令卡；间隔/分类在这里改、点「保存配置」生效 */}
+            <div className="pt-3 border-t border-white/10 space-y-3">
+              <label className="flex items-center gap-3 text-white/80">
+                <span className="w-44">定时发帖间隔（分钟）：</span>
+                <Input
+                  type="number"
+                  value={config.post_interval_min ?? 120}
+                  onChange={(e) =>
+                    setConfig({
+                      ...config,
+                      post_interval_min: parseInt(e.target.value, 10) || 120,
+                    })
+                  }
+                  className="w-24 border-white/15 bg-white/5 text-white focus:border-lime-400/50"
+                />
+              </label>
+              <div className="flex items-start gap-3 text-white/80">
+                <span className="w-44 pt-1.5">定时发帖分类：</span>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setConfig({ ...config, post_category: "" })}
+                    className={chipCls((config.post_category ?? "") === "")}
+                  >
+                    随机
+                  </button>
+                  {CATEGORIES.map((c) => (
+                    <button
+                      key={c.value}
+                      type="button"
+                      onClick={() => setConfig({ ...config, post_category: c.value })}
+                      className={chipCls(config.post_category === c.value)}
+                    >
+                      <span className="opacity-70 mr-0.5">{c.glyph}</span>
+                      {c.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
             <Button
               onClick={saveConfig}
               className="bg-lime-500/90 text-black hover:bg-lime-400"
