@@ -13,7 +13,7 @@ import { LoadingAnimation } from "./ui/loading-animation"
 import { DotMatrixInput } from "@/components/auth/dot-matrix-input"
 import { getRecentAccounts, matchAccount, rememberAccount, type RecentAccount } from "@/lib/recent-accounts"
 
-export default function LoginForm() {
+export default function LoginForm({ onSuccess }: { onSuccess?: () => void }) {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [isLoading, setIsLoading] = useState(false)
@@ -31,6 +31,8 @@ export default function LoginForm() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
+    // 登录成功后会触发卡片消散过渡并跳转；其间保持 loading 态，故标记「正在跳转」。
+    let navigatingAway = false
 
     if (!email || !password) {
       setError("请填写所有必填字段")
@@ -80,10 +82,16 @@ export default function LoginForm() {
             // 记不住就降级为「不出头像」，不影响登录
           }
 
-          // 简化登录后的处理：直接刷新页面到首页
-          // 这样可以确保所有状态都是干净的，避免任何缓存或状态问题
-          console.debug('🔄 登录成功: 刷新页面到首页');
-          window.location.href = '/';
+          // 登录成功：交给外层 LoginCard 播放「卡片高斯模糊消散」过渡后再跳转首页；
+          // 无 onSuccess（独立使用本组件时）则退化为原来的直接硬跳转。
+          // 跳转仍走整页刷新，确保 auth / posts 等上下文以干净状态重新挂载。
+          navigatingAway = true
+          console.debug('🔄 登录成功: 启动登录卡片消散过渡 → 首页');
+          if (onSuccess) {
+            onSuccess()
+          } else {
+            window.location.href = '/';
+          }
         } else {
           console.warn('⚠️ LoginForm: 登录成功但会话为空')
           // 如果没有会话，保持在登录页面，给用户反馈
@@ -98,7 +106,8 @@ export default function LoginForm() {
       console.error('💥 LoginForm: 登录异常:', err.message)
       setError(err.message || "登录过程中发生错误")
     } finally {
-      setIsLoading(false)
+      // 跳转中（消散过渡进行时）保持按钮 loading 态，避免「登录中…→登录」文字回跳闪烁。
+      if (!navigatingAway) setIsLoading(false)
     }
   }
 

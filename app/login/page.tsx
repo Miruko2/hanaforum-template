@@ -1,8 +1,7 @@
-import { Suspense } from "react"
-import LoginForm from "@/components/login-form"
+import LoginCard from "@/components/auth/login-card"
 
 export default function LoginPage() {
-  // 百叶窗效果样式
+  // 百叶窗效果样式（与首页一致，登录卡片消散后两页背景层无缝衔接）
   const blindsOverlayStyle = {
     position: "fixed" as const,
     top: 0,
@@ -26,17 +25,8 @@ export default function LoginPage() {
       {/* 百叶窗效果 */}
       <div style={blindsOverlayStyle}></div>
 
-      <div
-        className="w-full max-w-md p-8 rounded-2xl z-10 relative
-        bg-black/20 backdrop-blur-lg border border-white/10 shadow-2xl
-        transition-all duration-300"
-      >
-        {/* LoginForm 内部用 useSearchParams() 读 ?redirect=...；
-            output:'export' 模式下必须包 Suspense，否则 build 报错。 */}
-        <Suspense fallback={null}>
-          <LoginForm />
-        </Suspense>
-      </div>
+      {/* 登录卡片：含登录成功后的「高斯模糊消散」过渡，再无缝跳转首页 */}
+      <LoginCard />
     </div>
   )
 }
