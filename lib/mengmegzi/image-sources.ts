@@ -163,6 +163,13 @@ function extToContentType(ext: string): string {
   return "image/jpeg"
 }
 
+// danbooru/yande.re 也托管动图/视频（mp4/webm/ugoira-zip）。这些 URL 常无图片后缀，会被
+// guessExt 误判成 jpg、存成几十 MB 的「假图」（论坛上是破图 + 烧巨量 egress）。按 file_ext 排除。
+const NON_IMAGE_EXTS = new Set(["mp4", "webm", "zip", "swf", "ugoira"])
+function isAllowedMediaExt(ext?: string): boolean {
+  return !ext || !NON_IMAGE_EXTS.has(ext.toLowerCase())
+}
+
 // ── danbooru（二次元动漫图） ──
 
 const DANBOORU_TIMEOUT = 8000
@@ -207,12 +214,14 @@ async function fetchFromDanbooru(tag: string, opts: BooruFetchOpts): Promise<Ima
       rating?: string
       tag_string?: string
       score?: number
+      file_ext?: string
     }>
     if (!Array.isArray(posts) || posts.length === 0) return null
-    // 三重防线：rating 必须等于请求级别、有可下载 sample URL、tag 不命中黑名单
+    // 四重防线：rating 必须等于请求级别、是静态图(排除 mp4/webm/ugoira)、有可下载 URL、tag 干净
     const clean = posts.filter(
       (p) =>
         p.rating === opts.rating &&
+        isAllowedMediaExt(p.file_ext) &&
         Boolean(p.large_file_url || p.file_url) &&
         !tagHitsAny(p.tag_string || "", block),
     )
@@ -288,11 +297,13 @@ async function fetchFromYandere(tag: string, opts: BooruFetchOpts): Promise<Imag
       rating?: string
       tags?: string
       score?: number
+      file_ext?: string
     }>
     if (!Array.isArray(posts) || posts.length === 0) return null
     const clean = posts.filter(
       (p) =>
         p.rating === opts.rating &&
+        isAllowedMediaExt(p.file_ext) &&
         Boolean(p.sample_url || p.jpeg_url || p.file_url) &&
         !tagHitsAny(p.tags || "", block),
     )

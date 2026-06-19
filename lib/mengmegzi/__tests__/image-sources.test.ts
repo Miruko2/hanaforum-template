@@ -128,6 +128,18 @@ describe("image-sources", () => {
     expect(r!.imageUrl).toContain("gen.jpg")
   })
 
+  test("danbooru: 排除动图/视频(file_ext=mp4)，只留静态图", async () => {
+    mockSources({
+      danbooru: [
+        danbooruPost({ file_ext: "mp4", large_file_url: "https://cdn.donmai.us/sample/vid.jpg" }),
+        danbooruPost({ file_ext: "jpg", large_file_url: "https://cdn.donmai.us/sample/img.jpg" }),
+      ],
+      yandere: [],
+    })
+    const r = await fetchImageForCategory({ provider: "danbooru", query: "x" }, "y")
+    expect(r!.imageUrl).toContain("img.jpg")
+  })
+
   test("yande.re: 过滤性感 tag(swimsuit) 与 rating 非 s", async () => {
     mockSources({
       danbooru: [],
