@@ -193,6 +193,16 @@ describe("image-sources", () => {
     expect(new URL(yCall[0]).searchParams.get("tags")).toBe("thighhighs rating:q order:score")
   })
 
+  test("suggestive: 两源都命中时优先 yande.re（画质更高）", async () => {
+    mockSources({
+      danbooru: [danbooruPost({ rating: "s", large_file_url: "https://cdn.donmai.us/sample/db.jpg" })],
+      yandere: [yanderePost({ rating: "q", sample_url: "https://files.yande.re/sample/ya.jpg" })],
+    })
+    const r = await fetchImageForCategory({ provider: "suggestive", query: "swimsuit" }, "thighhighs")
+    expect(r!.source).toBe("yandere")
+    expect(r!.imageUrl).toContain("ya.jpg")
+  })
+
   test("suggestive: 放行 swimsuit/bikini（性感不露点，安全路径反而会拦）", async () => {
     mockSources({
       danbooru: [],

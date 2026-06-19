@@ -342,15 +342,18 @@ async function fetchFromSafeBooruSources(tag: string): Promise<ImageResult | nul
 }
 
 /**
- * 软色情双源聚合（色图 nsfw）：danbooru rating:s（性感不露点·安全锚）+ yande.re rating:q（更辣），
+ * 软色情双源聚合（色图 nsfw）：danbooru rating:s（性感不露点）+ yande.re rating:q（更辣），
  * 两源都套 SUGGESTIVE_EXTRA_BLOCK（拦露点/性行为）+ BOORU_TAG_BLOCKLIST（loli/shota 等红线）。
- * danbooru s 定义上即不露点，作安全底；yande.re q 提供辣度、靠黑名单兜「不露点」。
+ * **yande.re 优先**：它画质更高（~1500px 精选板），命中就用它；只有 yande.re 没命中该 tag
+ * 或在 Vercel 挂了，才回退 danbooru s（安全网，定义上即不露点，色图永不会因 yande.re 抽风没图）。
+ * 两源仍并行发，不增延迟——danbooru 只是顺手拿着兜底，「选」时偏向 yande.re。
  */
 async function fetchFromSuggestiveBooruSources(tag: string): Promise<ImageResult | null> {
-  return mergeBooruSources([
+  const [danbooru, yandere] = await Promise.all([
     fetchFromDanbooru(tag, { rating: "s", extraBlock: SUGGESTIVE_EXTRA_BLOCK }).catch(() => null),
     fetchFromYandere(tag, { rating: "q", extraBlock: SUGGESTIVE_EXTRA_BLOCK }).catch(() => null),
   ])
+  return yandere || danbooru || null
 }
 
 /** 合并多源结果：过滤 null，剩余里随机选一张（容错——单源挂掉只要另一源有就出图）。 */
