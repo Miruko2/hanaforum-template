@@ -4,7 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { cdnUrl } from "@/lib/cdn-url"
 import { createPortal } from "react-dom"
 import { motion, AnimatePresence } from "framer-motion"
-import { X, Send, Smile, Users, Hash } from "lucide-react"
+import { X, Send, Smile, Users, Hash, CalendarDays } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
 import { apiUrl } from "@/lib/api-base"
 import { MENGMEGZI_USER_ID, HANAKO_DM_USERNAME, HANAKO_AVATAR, normalizeEmotion, DM_KEEP_RECENT_MSGS, HALL_CHIME_IN_PROBABILITY, HALL_MENTION_REGEX } from "@/lib/hanako/constants"
@@ -14,6 +14,8 @@ import { usePresence } from "@/contexts/presence-context"
 import { useRouter } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
 import ChatUserCard from "./chat-user-card"
+import ChatDateRail from "./chat-date-rail"
+import { cnDate, cnDayRangeUTC, type DateBucket } from "@/lib/cn-date"
 import { fetchUserCardData } from "@/lib/user-card"
 import { guardVerify, openVerifyGate } from "@/lib/verify-gate-bus"
 import styles from "./floating-chat.module.css"
@@ -253,6 +255,35 @@ export default function FloatingChat() {
   // 前插锚定：记录「插入更早消息前」的滚动几何，layout 阶段据此补偿 scrollTop，视线钉住不跳。
   const pendingAnchorRef = useRef<{ prevHeight: number; prevTop: number } | null>(null)
 
+  // ── 窗口模式（日期跳转）──────────────────────────────────────────────────
+  // 跳到历史某天后，messages 变成「那段窗口」而非直达最新尾。
+  // isAtLiveTail：当前数组尾部是不是真·最新。true=正常实时模式；false=在看历史窗口。
+  // ref 供实时/滚动回调读最新值；state 仅驱动 UI（回到最新按钮、提示）。
+  const isAtLiveTailRef = useRef(true)
+  const [atLiveTail, setAtLiveTail] = useState(true)
+  const setLiveTail = useCallback((v: boolean) => {
+    isAtLiveTailRef.current = v
+    setAtLiveTail(v)
+  }, [])
+  // 已加载的最新一条游标（messages[末]）；loadNewer 据此往更新方向翻。
+  const newestCursorRef = useRef<{ created_at: string; id: string } | null>(null)
+  const loadingNewerRef = useRef(false)
+  // 窗口模式下、用户没在看的最新段又来了多少条（驱动「N 条新消息」提示）。
+  const [newWhileAway, setNewWhileAway] = useState(0)
+
+  // ── 日期索引（刻度轨数据）────────────────────────────────────────────────
+  // key → 该会话有消息的日期+条数（dm_active_dates，新→旧）。缓存避免重复 RPC。
+  const activeDatesRef = useRef<Map<string, DateBucket[]>>(new Map())
+  const [activeDates, setActiveDates] = useState<DateBucket[]>([])
+  // 刻度轨当前高亮日期：滚动空闲时按读线处消息算；跳转时设为目标日。
+  const [activeDate, setActiveDate] = useState<string | null>(null)
+  // 刻度轨是否展开：默认收起，点 header 的按钮才出现（私聊+大厅都有）。
+  const [railOpen, setRailOpen] = useState(false)
+  // 滚动空闲去抖：算 activeDate 是一次性 O(n) DOM 读，挪到停滚后再做。
+  const scrollIdleRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // messages 的 ref 镜像：供 jumpToDate 等回调读当前列表，不必把 messages 进依赖反复重建。
+  const messagesRef = useRef<DisplayMsg[]>([])
+
   // Load saved position on mount
   useEffect(() => {
     const saved = loadSavedPosition()
@@ -480,9 +511,16 @@ export default function FloatingChat() {
     // 命中缓存：立即回显（清掉 isNew，切换不重放入场动效）；未命中才空屏等首查。
     setMessages(cached ? cached.map((m) => (m.isNew ? { ...m, isNew: false } : m)) : [])
 
-    // 切会话即重置分页状态：清并发锁、乐观置「可能还有更早」（待首查据 data.length 收敛）。
+    // 切会话即重置分页 + 窗口模式状态：清并发锁、乐观置「可能还有更早」（待首查据 data.length 收敛）、
+    // 回到实时模式、清「N条新消息」、刻度轨数据先回显缓存（无则空，待 RPC 填）。
     loadingOlderRef.current = false
+    loadingNewerRef.current = false
     hasMoreRef.current = true
+    setLiveTail(true)
+    setNewWhileAway(0)
+    setActiveDate(null)
+    setRailOpen(false) // 切会话先收起刻度轨，由用户在新会话里再点开（懒拉对应日期）
+    setActiveDates(activeDatesRef.current.get(key) ?? [])
 
     if (active.kind === "hall") {
       ;(async () => {
@@ -508,15 +546,25 @@ export default function FloatingChat() {
         .channel("chat_room_messages")
         .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_messages" }, (payload) => {
           const m = payload.new as ChatRow
-          setMessages((prev) => {
-            if (prev.some((x) => x.id === m.id)) return prev
-            // 不再 slice(-200)：那会把上翻出来的历史从头部吃掉（看历史时尤其会跳没）。
-            // 单会话内的实时增长由后续虚拟化（Phase 2）处理，本期保完整列表。
-            const next = [...prev, { ...mapHall(m), isNew: true }]
-            msgCacheRef.current.set(key, next)
-            return next
-          })
-          // 萌萌子大厅发言触发：每来一条「非萌萌子自己发的」新消息——
+          noteActiveDate(key, m.created_at) // 新消息日期并入刻度轨
+          if (isAtLiveTailRef.current) {
+            setMessages((prev) => {
+              if (prev.some((x) => x.id === m.id)) return prev
+              // 不再 slice(-200)：那会把上翻出来的历史从头部吃掉（看历史时尤其会跳没）。
+              // 单会话内的实时增长由后续虚拟化（Phase 2）处理，本期保完整列表。
+              const next = [...prev, { ...mapHall(m), isNew: true }]
+              msgCacheRef.current.set(key, next)
+              return next
+            })
+          } else {
+            // 窗口模式（在看历史）：不进可见列表，只累加提示 + 追缓存（保持缓存=最新尾）
+            const cached2 = msgCacheRef.current.get(key)
+            if (cached2 && !cached2.some((x) => x.id === m.id)) {
+              msgCacheRef.current.set(key, [...cached2, mapHall(m)])
+            }
+            setNewWhileAway((n) => n + 1)
+          }
+          // 萌萌子大厅发言触发（不受是否在看历史影响，照常）：每来一条「非萌萌子自己发的」新消息——
           // 1) 文本里 @萌萌子（HALL_MENTION_REGEX）→ 必回：force=true 直接调，绕过概率与冷却；
           // 2) 否则按 HALL_CHIME_IN_PROBABILITY 概率掷骰插话。
           // 萌萌子自己的发言不触发（防递归）；表情包消息无文本不检测 @。fire-and-forget，失败静默。
@@ -586,6 +634,17 @@ export default function FloatingChat() {
       .channel(`dm_${pk}`)
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "dm_messages", filter: `pair_key=eq.${pk}` }, (payload) => {
         const m = payload.new as DmRow
+        noteActiveDate(key, m.created_at) // 新消息日期并入刻度轨
+        if (!isAtLiveTailRef.current) {
+          // 窗口模式：这条属于用户没在看的最新段——不进可见列表，只累加提示；
+          // 仍追到缓存里（缓存恒=最新尾，回到最新时即时可用、保持一致）。
+          const cached = msgCacheRef.current.get(key)
+          if (cached && !cached.some((x) => x.id === m.id)) {
+            msgCacheRef.current.set(key, [...cached, mapDm(m, myId, myName, partner)])
+          }
+          setNewWhileAway((n) => n + 1)
+          return
+        }
         setMessages((prev) => {
           if (prev.some((x) => x.id === m.id)) return prev
           // 不再 slice(-200)：那会把上翻出来的历史从头部吃掉（看历史时尤其会跳没）。
@@ -755,7 +814,8 @@ export default function FloatingChat() {
       setMessages((prev) => {
         const existing = new Set(prev.map((m) => m.id))
         const merged = [...older.filter((m) => !existing.has(m.id)), ...prev]
-        msgCacheRef.current.set(key, merged)
+        // 仅正常模式（缓存=最新尾数组）才回写缓存；窗口模式(!liveTail)上翻的是历史窗口，不能污染缓存
+        if (isAtLiveTailRef.current) msgCacheRef.current.set(key, merged)
         return merged
       })
     } finally {
@@ -763,24 +823,268 @@ export default function FloatingChat() {
     }
   }, [myId, myName])
 
+  // 下滑加载更新一页（仅窗口模式有意义：正常模式尾部已是最新、靠实时追加）。
+  // 以「当前最新一条」为游标查 created_at 更新的 PAGE_SIZE 条，去重后追加到尾部。
+  // 若不足一页 → 已追到真·最新 → 切回实时模式(liveTail)、清「N条新消息」、回写缓存。
+  const loadNewer = useCallback(async () => {
+    if (loadingNewerRef.current || isAtLiveTailRef.current || !myId) return
+    const cursor = newestCursorRef.current
+    if (!cursor) return
+    const a = activeRef.current
+    const key = a.kind === "hall" ? "hall" : pairKey(myId, a.id)
+    loadingNewerRef.current = true
+    try {
+      let newer: DisplayMsg[]
+      let pageFull: boolean
+      if (a.kind === "hall") {
+        const { data, error } = await supabase
+          .from("chat_messages")
+          .select("id,user_id,username,avatar_url,kind,content,created_at")
+          .gt("created_at", cursor.created_at)
+          .order("created_at", { ascending: true })
+          .limit(PAGE_SIZE)
+        if (error) return
+        const rows = (data ?? []) as ChatRow[]
+        pageFull = rows.length >= PAGE_SIZE
+        newer = rows.map(mapHall)
+      } else {
+        const partner: Partner = { id: a.id, username: a.username, avatar_url: a.avatar_url }
+        const { data, error } = await supabase
+          .from("dm_messages")
+          .select("id,sender_id,kind,content,created_at,read_at")
+          .eq("pair_key", key)
+          .gt("created_at", cursor.created_at)
+          .order("created_at", { ascending: true })
+          .limit(PAGE_SIZE)
+        if (error) return
+        const rows = (data ?? []) as DmRow[]
+        pageFull = rows.length >= PAGE_SIZE
+        newer = rows.map((m) => mapDm(m, myId, myName, partner))
+      }
+      // 拉取期间切了会话则丢弃
+      const cur = activeRef.current
+      const curKey = cur.kind === "hall" ? "hall" : pairKey(myId, cur.id)
+      if (curKey !== key) return
+      const reachedTail = !pageFull // 不足一页=已到最新
+      setMessages((prev) => {
+        const existing = new Set(prev.map((m) => m.id))
+        const merged = [...prev, ...newer.filter((m) => !existing.has(m.id))]
+        // 追到真·最新时，这段就等于最新尾数组 → 回写缓存
+        if (reachedTail) msgCacheRef.current.set(key, merged)
+        return merged
+      })
+      if (reachedTail) {
+        setLiveTail(true)
+        setNewWhileAway(0)
+      }
+    } finally {
+      loadingNewerRef.current = false
+    }
+  }, [myId, myName, setLiveTail])
+
+  // 拉取某会话的「日期索引」进缓存 + 设为当前刻度轨数据（已缓存则直接用）。
+  // key="hall" → 查大厅 hall_active_dates()；否则 key 即 pairKey → dm_active_dates(pk)。
+  const ensureActiveDates = useCallback(
+    async (key: string) => {
+      const cached = activeDatesRef.current.get(key)
+      if (cached) {
+        setActiveDates(cached)
+        return
+      }
+      const { data, error } =
+        key === "hall"
+          ? await supabase.rpc("hall_active_dates")
+          : await supabase.rpc("dm_active_dates", { pk: key })
+      if (error || !data) return
+      const buckets = (data as { d: string; cnt: number }[]).map((r) => ({ d: r.d, cnt: r.cnt }))
+      activeDatesRef.current.set(key, buckets)
+      // 落库前再确认仍是当前会话，避免把 A 的日期塞给 B
+      const a = activeRef.current
+      const curKey = a.kind === "hall" ? "hall" : pairKey(myId ?? "", a.id)
+      if (curKey === key) setActiveDates(buckets)
+    },
+    [myId],
+  )
+
+  // 新消息的日期并入刻度轨索引：已有当日则 cnt+1，新日期则前插（新→旧序）。
+  const noteActiveDate = useCallback(
+    (key: string, iso: string) => {
+      const d = cnDate(iso)
+      const cur = activeDatesRef.current.get(key) ?? []
+      const idx = cur.findIndex((b) => b.d === d)
+      let next: DateBucket[]
+      if (idx >= 0) {
+        next = cur.slice()
+        next[idx] = { ...next[idx], cnt: next[idx].cnt + 1 }
+      } else {
+        next = [{ d, cnt: 1 }, ...cur]
+      }
+      activeDatesRef.current.set(key, next)
+      const a = activeRef.current
+      const curKey = a.kind === "hall" ? "hall" : pairKey(myId ?? "", a.id)
+      if (curKey === key) setActiveDates(next)
+    },
+    [myId],
+  )
+
+  // 跳转到某天（dateStr=上海当地 "YYYY-MM-DD"）。
+  //   已加载 → 直接滚到那天第一条；未加载 → 拉那天窗口替换列表、进窗口模式、滚过去。
+  const jumpToDate = useCallback(
+    async (dateStr: string) => {
+      if (!myId) return
+      setActiveDate(dateStr)
+      const a = activeRef.current
+      const key = a.kind === "hall" ? "hall" : pairKey(myId, a.id)
+
+      // 1) 已在内存：滚到那天第一条
+      const scrollToDay = () => {
+        const el = feedRef.current
+        if (!el) return
+        const row = el.querySelector<HTMLElement>(`[data-day="${dateStr}"]`)
+        if (row) row.scrollIntoView({ block: "start", behavior: "smooth" })
+      }
+      const loadedHasDay = messagesRef.current.some((m) => cnDate(m.created_at) === dateStr)
+      if (loadedHasDay) {
+        scrollToDay()
+        return
+      }
+
+      // 2) 未加载：拉那天起的一页（升序），替换为窗口、进窗口模式
+      const { startUTC } = cnDayRangeUTC(dateStr)
+      let win: DisplayMsg[] = []
+      if (a.kind === "hall") {
+        const { data, error } = await supabase
+          .from("chat_messages")
+          .select("id,user_id,username,avatar_url,kind,content,created_at")
+          .gte("created_at", startUTC)
+          .order("created_at", { ascending: true })
+          .limit(PAGE_SIZE)
+        if (error) return
+        win = ((data ?? []) as ChatRow[]).map(mapHall)
+      } else {
+        const partner: Partner = { id: a.id, username: a.username, avatar_url: a.avatar_url }
+        const { data, error } = await supabase
+          .from("dm_messages")
+          .select("id,sender_id,kind,content,created_at,read_at")
+          .eq("pair_key", key)
+          .gte("created_at", startUTC)
+          .order("created_at", { ascending: true })
+          .limit(PAGE_SIZE)
+        if (error) return
+        win = ((data ?? []) as DmRow[]).map((m) => mapDm(m, myId, myName, partner))
+      }
+      // 切会话守卫
+      const cur = activeRef.current
+      const curKey = cur.kind === "hall" ? "hall" : pairKey(myId, cur.id)
+      if (curKey !== key) return
+      if (win.length === 0) return
+      // 窗口末尾是否已是真·最新：不足一页说明从该天到现在的消息都拿全了 → 仍是 live
+      const reachedTail = win.length < PAGE_SIZE
+      hasMoreRef.current = true // 窗口上方一定还有更早（该天恰为最早时，loadOlder 空查会自纠）
+      setLiveTail(reachedTail)
+      setNewWhileAway(0)
+      setMessages(win)
+      // 渲染后滚到那天第一条
+      requestAnimationFrame(() => requestAnimationFrame(scrollToDay))
+    },
+    [myId, myName, setLiveTail],
+  )
+
+  // 回到最新：重拉最新一页、替换列表、切回实时模式、滚到底、清提示。
+  const returnToLatest = useCallback(async () => {
+    if (!myId) return
+    const a = activeRef.current
+    const key = a.kind === "hall" ? "hall" : pairKey(myId, a.id)
+    let latest: DisplayMsg[] = []
+    if (a.kind === "hall") {
+      const { data, error } = await supabase
+        .from("chat_messages")
+        .select("id,user_id,username,avatar_url,kind,content,created_at")
+        .order("created_at", { ascending: false })
+        .limit(PAGE_SIZE)
+      if (error) return
+      latest = ((data ?? []) as ChatRow[]).slice().reverse().map(mapHall)
+    } else {
+      const partner: Partner = { id: a.id, username: a.username, avatar_url: a.avatar_url }
+      const { data, error } = await supabase
+        .from("dm_messages")
+        .select("id,sender_id,kind,content,created_at,read_at")
+        .eq("pair_key", key)
+        .order("created_at", { ascending: false })
+        .limit(PAGE_SIZE)
+      if (error) return
+      latest = ((data ?? []) as DmRow[]).slice().reverse().map((m) => mapDm(m, myId, myName, partner))
+    }
+    const cur = activeRef.current
+    const curKey = cur.kind === "hall" ? "hall" : pairKey(myId, cur.id)
+    if (curKey !== key) return
+    hasMoreRef.current = latest.length >= PAGE_SIZE
+    msgCacheRef.current.set(key, latest)
+    setLiveTail(true)
+    setNewWhileAway(0)
+    setActiveDate(latest.length ? cnDate(latest[latest.length - 1].created_at) : null)
+    setMessages(latest)
+    atBottomRef.current = true
+    requestAnimationFrame(() => {
+      const el = feedRef.current
+      if (el) el.scrollTop = el.scrollHeight
+    })
+  }, [myId, myName, setLiveTail])
+
+  // 算刻度轨高亮日期：取读线（feed 顶部）处第一条仍在视口内的消息的 data-day。
+  // 一次性 O(n) DOM 读，由 onScroll 去抖到停滚后调用。
+  const computeActiveDate = useCallback(() => {
+    const el = feedRef.current
+    if (!el) return
+    const top = el.getBoundingClientRect().top
+    const rows = el.querySelectorAll<HTMLElement>("[data-day]")
+    for (let i = 0; i < rows.length; i++) {
+      if (rows[i].getBoundingClientRect().bottom >= top + 8) {
+        const d = rows[i].getAttribute("data-day")
+        if (d) setActiveDate(d)
+        return
+      }
+    }
+  }, [])
+
+  // 切换刻度轨展开/收起（私聊+大厅通用）。打开时才懒拉日期索引 + 按当前滚动位置定高亮，
+  // 用户不点就一次 RPC 都不发。
+  const toggleRail = () => {
+    const next = !railOpen
+    setRailOpen(next)
+    if (next) {
+      const a = activeRef.current
+      const key = a.kind === "hall" ? "hall" : pairKey(myId ?? "", a.id)
+      void ensureActiveDates(key)
+      requestAnimationFrame(computeActiveDate)
+    }
+  }
+
   // 贴底才自动滚（看历史不被打断）
   const onScroll = () => {
     const el = feedRef.current
-    if (el) {
-      atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60
-      // 滚到顶部附近 → 加载更早历史（并发/无更多/切会话由 loadOlder 内部判定，重复触发安全）
-      if (el.scrollTop < 120) void loadOlder()
-      if (IS_TOUCH) {
-        // 触屏设备：rAF 合并连续 scroll 事件，一帧最多一次 updateBlur
-        if (blurRafRef.current == null) {
-          blurRafRef.current = requestAnimationFrame(() => {
-            blurRafRef.current = null
-            updateBlur()
-          })
-        }
-      } else {
-        updateBlur()
+    if (!el) return
+    const distToBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    atBottomRef.current = distToBottom < 60
+    // 滚到顶部附近 → 加载更早历史（并发/无更多/切会话由 loadOlder 内部判定，重复触发安全）
+    if (el.scrollTop < 120) void loadOlder()
+    // 窗口模式下滑到底部附近 → 加载更新的一页（正常模式靠实时，不触发）
+    if (distToBottom < 200 && !isAtLiveTailRef.current) void loadNewer()
+    // 停滚后算刻度轨高亮（仅轨道展开时才算；去抖，避免每帧 O(n) DOM 读）
+    if (railOpen) {
+      if (scrollIdleRef.current) clearTimeout(scrollIdleRef.current)
+      scrollIdleRef.current = setTimeout(computeActiveDate, 140)
+    }
+    if (IS_TOUCH) {
+      // 触屏设备：rAF 合并连续 scroll 事件，一帧最多一次 updateBlur
+      if (blurRafRef.current == null) {
+        blurRafRef.current = requestAnimationFrame(() => {
+          blurRafRef.current = null
+          updateBlur()
+        })
       }
+    } else {
+      updateBlur()
     }
   }
   useEffect(() => {
@@ -794,11 +1098,15 @@ export default function FloatingChat() {
     })
   }, [messages, open, active, updateBlur])
 
-  // 游标同步：始终指向当前已加载的最老一条（messages 升序，[0] 即最老）。
-  // 本期不裁剪历史，故 messages[0] 恒为真实最老，loadOlder 据此往更早翻。
+  // 游标同步：分别指向已加载的最老一条([0])与最新一条([末])。messages 升序。
+  // loadOlder 用 oldest 往更早翻；loadNewer（窗口模式下滑）用 newest 往更新翻。
   useEffect(() => {
+    messagesRef.current = messages
     oldestCursorRef.current = messages.length
       ? { created_at: messages[0].created_at, id: messages[0].id }
+      : null
+    newestCursorRef.current = messages.length
+      ? { created_at: messages[messages.length - 1].created_at, id: messages[messages.length - 1].id }
       : null
   }, [messages])
 
@@ -1111,9 +1419,20 @@ export default function FloatingChat() {
                   </span>
                 )}
               </div>
-              <button className={styles.headerClose} onClick={() => setOpen(false)} aria-label="关闭">
-                <X className="h-5 w-5" />
-              </button>
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <button
+                  className={styles.headerClose}
+                  onClick={toggleRail}
+                  aria-label="日期时间线"
+                  title="日期时间线"
+                  style={railOpen ? { color: "#a3e635" } : undefined}
+                >
+                  <CalendarDays className="h-5 w-5" />
+                </button>
+                <button className={styles.headerClose} onClick={() => setOpen(false)} aria-label="关闭">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
             </header>
 
             {active.kind === "hall" && online.length > 0 && (
@@ -1145,6 +1464,7 @@ export default function FloatingChat() {
               </div>
             )}
 
+            <div style={{ position: "relative", flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
             <div ref={feedRef} className={styles.feed} onScroll={onScroll}>
               {messages.length === 0 ? (
                 <div className={styles.empty}>
@@ -1154,7 +1474,7 @@ export default function FloatingChat() {
                 messages.map((m) => {
                   const mine = m.fromId === user.id
                   return (
-                    <div key={m.id} className={`${styles.row} ${mine ? styles.rowMine : styles.rowOther} ${m.isNew ? styles.rowNew : ""}`}>
+                    <div key={m.id} data-day={cnDate(m.created_at)} className={`${styles.row} ${mine ? styles.rowMine : styles.rowOther} ${m.isNew ? styles.rowNew : ""}`}>
                       {!mine &&
                         (active.kind === "hall" ? (
                           <button
@@ -1193,6 +1513,23 @@ export default function FloatingChat() {
                     </div>
                   )
                 })
+              )}
+            </div>
+
+              {/* 日期刻度轨（点 header 按钮才展开；私聊+大厅通用；少于2个日期时组件内部自不渲染） */}
+              {railOpen && (
+                <ChatDateRail dates={activeDates} activeDate={activeDate} onJump={jumpToDate} />
+              )}
+
+              {/* 窗口模式（看历史时）：右下角「回到最新」；期间来了新消息则提示条数 */}
+              {!atLiveTail && (
+                <button
+                  type="button"
+                  onClick={() => void returnToLatest()}
+                  className="absolute bottom-3 left-1/2 z-20 -translate-x-1/2 rounded-full border border-white/20 bg-neutral-900/85 px-3.5 py-1.5 text-[12px] text-white shadow-[0_8px_24px_rgba(0,0,0,0.5)] transition-transform hover:scale-105"
+                >
+                  {newWhileAway > 0 ? `${newWhileAway} 条新消息 ↓` : "回到最新 ↓"}
+                </button>
               )}
             </div>
 
