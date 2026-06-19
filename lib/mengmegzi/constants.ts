@@ -17,21 +17,38 @@ export const COMMENT_TEMPERATURE = 0.7
 /** max_tokens（复用 hanako 的 MAX_REPLY_TOKENS，覆盖推理模型思考链） */
 export const MAX_AGENT_TOKENS = 4000
 
-/** 图片压缩参数（与客户端 lib/image-compress.ts 一致：maxEdge 1920 / quality 0.82 / webp） */
+/** 主图压缩参数（与客户端 lib/image-compress.ts 一致：maxEdge 1920 / quality 82 / webp）。
+ *  现走 Unsplash imgix URL 参数（&w=&h=&fit=max&fm=webp&q=）下载即压好，不再用 sharp。 */
 export const IMAGE_MAX_EDGE = 1920
 export const IMAGE_QUALITY = 82
 
-/** Storage 桶名 + 路径前缀（萌萌子发的帖的图单独放一个前缀目录，方便日后清理） */
+/** Storage 桶名（与真人发帖同桶 post-images） */
 export const POSTS_BUCKET = "post-images"
+/**
+ * 萌萌子图的文件名前缀（注意：是「前缀」不是「子目录」）。
+ * 存桶根目录、用连字符拼成 `mengmegzi-<id>.webp`——既能一眼认出/批量清理，
+ * 又满足缩略图约定 postThumbUrl 对「路径不含 /」的要求：子目录会让它直接返回 null，
+ * 卡片永远拿不到 640px 缩略图、退而加载全尺寸主图烧 egress。
+ */
 export const MENGMEGZI_STORAGE_PREFIX = "mengmegzi"
 
-/** 默认 image_sources（与表里的初始值一致；代码里用于校验/回退）。
- *  nsfw 走 none（不配图，露点内容不接入）。 */
+/** booru 配图 nsfw 二次过滤黑名单：post 的 tag_string 命中任一即丢弃。
+ *  `rating:g` 已排除露点/性感，但 loli/shota 等年龄向 tag 即使 g 级也可能经匿名 API 返回
+ *  （danbooru issue #2096），必须事后过滤。见 image-sources.fetchFromDanbooru。 */
+export const BOORU_TAG_BLOCKLIST = [
+  "loli", "lolicon", "shota", "shotacon", "toddlercon",
+  "nude", "nipples", "pussy", "penis", "sex", "cum", "anus",
+  "guro", "gore",
+] as const
+
+/** 默认 image_sources（代码里用于回退；DB 里以 mengmegzi_config.image_sources 为准）。
+ *  二次元论坛改用 danbooru 动漫图：query 字段 = AI 关键词搜不到时的「回退 booru tag」。
+ *  nsfw/code/help 走 none（不配图）。 */
 export const DEFAULT_IMAGE_SOURCES = {
-  general: { provider: "unsplash", query: "daily life" },
+  general: { provider: "danbooru", query: "original" },
   nsfw: { provider: "none" },
-  game: { provider: "unsplash", query: "video game" },
+  game: { provider: "danbooru", query: "video_game" },
   code: { provider: "none" },
-  life: { provider: "unsplash", query: "lifestyle" },
+  life: { provider: "danbooru", query: "scenery" },
   help: { provider: "none" },
 } as const

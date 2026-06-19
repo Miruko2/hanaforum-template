@@ -44,6 +44,8 @@ interface PostGen {
   title: string
   content: string
   description: string
+  /** AI 顺手吐的英文配图关键词（可选；空/搜不到则回退分类固定词） */
+  image_query?: string
 }
 
 /**
@@ -72,11 +74,12 @@ export async function executePost(forcedCategory?: CategoryValue): Promise<strin
   let imageUrl: string | null = null
   let imageRatio: number | null = null
   const srcCfg = (agentCfg?.image_sources?.[category] as ImageSourceConfig) || { provider: "none" }
-  const img = await fetchImageForCategory(category, srcCfg)
+  // AI 顺手吐的 image_query 优先（贴合正文、每帖不同），搜不到回退分类固定词
+  const img = await fetchImageForCategory(srcCfg, gen.image_query)
   if (img) {
-    // 用临时 uuid 作 Storage 路径（post_id 此时还没生成）
-    const tempId = crypto.randomUUID()
-    const processed = await downloadCompressUpload(img.url, tempId)
+    // 用临时 uuid 作 Storage 文件名（post_id 此时还没生成）
+    const fileId = crypto.randomUUID()
+    const processed = await downloadCompressUpload(img, fileId)
     if (processed) {
       imageUrl = processed.publicUrl
       imageRatio = processed.ratio
@@ -209,14 +212,7 @@ export async function executeReply(commentId: string): Promise<string> {
 export async function findCommentablePost(scanHours: number): Promise<string | null> {
   const since = new Date(Date.now() - scanHours * 3600 * 1000).toISOString()
 
-  // 查已成功留言过的帖子 id（跳过防重复）
-  const { data: done } = await supabaseAdmin
-    .from("mengmegzi_action_log")
-    .select("target_id")
-    .eq("action_type", "comment")
-    .eq("result", "success")
-  const doneIds = new Set((done || []).map((r: any) => r.target_id))
-
+  // 先取最近 scanHours 内、非萌萌子自己的帖
   const { data: posts } = await supabaseAdmin
     .from("posts")
     .select("id")
@@ -224,11 +220,21 @@ export async function findCommentablePost(scanHours: number): Promise<string | n
     .neq("user_id", MENGMEGZI_USER_ID)
     .order("created_at", { ascending: false })
     .limit(200)
+  const ids = (posts || []).map((p: any) => p.id)
+  if (ids.length === 0) return null
 
-  const candidates = (posts || []).filter((p: any) => !doneIds.has(p.id))
+  // 只在这批候选帖里查「已成功留言过的」（查询有界：随窗口帖数、不随全历史日志增长）
+  const { data: done } = await supabaseAdmin
+    .from("mengmegzi_action_log")
+    .select("target_id")
+    .eq("action_type", "comment")
+    .eq("result", "success")
+    .in("target_id", ids)
+  const doneIds = new Set((done || []).map((r: any) => r.target_id))
+
+  const candidates = ids.filter((id: string) => !doneIds.has(id))
   if (candidates.length === 0) return null
-  const pick = candidates[Math.floor(Math.random() * candidates.length)]
-  return pick.id
+  return candidates[Math.floor(Math.random() * candidates.length)]
 }
 
 /**
@@ -236,22 +242,17 @@ export async function findCommentablePost(scanHours: number): Promise<string | n
  * 没有候选返回 null。
  */
 export async function findReplyableComment(): Promise<string | null> {
-  // 萌萌子的帖 id 集合
+  // 萌萌子最近 200 帖（避免随历史发帖量无界增长 + .in() 数组过大）
   const { data: myPosts } = await supabaseAdmin
     .from("posts")
     .select("id")
     .eq("user_id", MENGMEGZI_USER_ID)
+    .order("created_at", { ascending: false })
+    .limit(200)
   const myPostIds = (myPosts || []).map((p: any) => p.id)
   if (myPostIds.length === 0) return null
 
-  // 已回复过的评论 id
-  const { data: done } = await supabaseAdmin
-    .from("mengmegzi_action_log")
-    .select("target_id")
-    .eq("action_type", "reply")
-    .eq("result", "success")
-  const doneIds = new Set((done || []).map((r: any) => r.target_id))
-
+  // 这些帖下、非萌萌子发的评论（最早优先）
   const { data: comments } = await supabaseAdmin
     .from("comments")
     .select("id")
@@ -259,8 +260,18 @@ export async function findReplyableComment(): Promise<string | null> {
     .neq("user_id", MENGMEGZI_USER_ID)
     .order("created_at", { ascending: true })
     .limit(200)
+  const commentIds = (comments || []).map((c: any) => c.id)
+  if (commentIds.length === 0) return null
 
-  const candidates = (comments || []).filter((c: any) => !doneIds.has(c.id))
-  if (candidates.length === 0) return null
-  return candidates[0].id
+  // 只在这批候选评论里查「已回复过的」（查询有界）
+  const { data: done } = await supabaseAdmin
+    .from("mengmegzi_action_log")
+    .select("target_id")
+    .eq("action_type", "reply")
+    .eq("result", "success")
+    .in("target_id", commentIds)
+  const doneIds = new Set((done || []).map((r: any) => r.target_id))
+
+  const target = commentIds.find((id: string) => !doneIds.has(id))
+  return target || null
 }

@@ -102,48 +102,64 @@ CF Worker (每2分钟) → POST /api/mengmegzi-tick (带 x-cron-secret)
 
 ---
 
-## 三、萌萌子发帖图片的压缩机制（重点）
+## 三、萌萌子发帖图片机制（重点 · 2026-06-19 审查后重构）
 
 ### 核心矛盾
-那个文本 AI 不支持图片识别 → 配图完全由代码决定，AI 只生成文字。
+那个文本 AI 不支持图片识别 → 配图由代码决定，AI 只负责文字 + 顺手吐一个英文配图关键词。
 
 ### 分工
 | 决策 | 谁做 |
 |---|---|
 | 帖子标题/正文/分类 | 文本 AI 生成（分类代码随机指定） |
+| 配图关键词 `image_query` | 文本 AI 顺手生成（英文，贴合正文） |
 | 用哪个图源 | 代码按分类查 `image_sources` 配置 |
-| 拉哪张图 | 代码调对应 API |
-| 下载/压缩/上传 | 代码（sharp + Supabase Storage） |
+| 拉哪张图 | 代码调 Unsplash（AI 关键词优先 → 搜不到回退分类固定词 → top10 随机选一张） |
+| 压缩/缩略图/上传 | 代码（Unsplash imgix URL 参数 + Supabase Storage，**不用 sharp**） |
 
 ### 图源（image_sources 配置）
-- `general`/`game`/`life` → Unsplash 按关键词搜（真实照片）
+- `general`/`game`/`life` → Unsplash 搜真实照片
 - `code`/`help`/`nsfw` → `none`（不配图，纯文字帖；nsfw 因露点内容不接入）
+- 注：AI 吐的 `image_query` 只对 unsplash 分类生效；none 分类直接纯文字。
+
+### 为什么不用 sharp（关键决策）
+Unsplash 图床本身是 imgix——图片 URL 加参数 `&w=&h=&fit=max&fm=webp&q=` 就能直接返回
+指定尺寸/格式/质量的图，**下载到的就是压好的 webp**，根本不需要服务端 sharp。这样：
+- 彻底绕开 sharp（曾导致 Vercel 构建期 micromatch 爆栈，见坑4；且从 package.json
+  移除后运行时 `require("sharp")` 在 Vercel lambda 里大概率拿不到 → 会静默退化成上传未压缩原图）
+- 不碰 `package.json` / `next.config`，零构建风险
+- 宽高直接从 Unsplash search API 的 `width`/`height` 拿，不必再读图 metadata
 
 ### 完整发帖图片流程
 ```
 1. 代码随机选分类（如 life）
-2. 调文本 AI 生成 {title, content, description}
-3. 查 image_sources[life] = {provider: "unsplash", query: "lifestyle"}
-4. fetchImageForCategory() → 调 Unsplash search API 拿一张图的 URL
-5. fetch(imageUrl) 下载图片字节流到服务端内存
-6. sharp 压缩：
-   - resize(1920, 1920, {fit:'inside', withoutEnlargement:true}) 限最大边
-   - webp({quality: 82}) 转 webp
-   - 参数与客户端 lib/image-compress.ts 完全一致
-   - 同时读 metadata 拿 width/height 算 ratio（前端按比例占位防抖）
-7. 上传到 Supabase Storage 的 post-images 桶，路径 mengmegzi/<postId>.webp
-8. 拿到自己的 CDN URL，存进 posts.image_url / image_urls / image_ratio
+2. 调文本 AI 生成 {title, content, description, image_query}
+3. 查 image_sources[life] = {provider:"unsplash", query:"lifestyle"}（query 现作回退固定词）
+4. fetchImageForCategory(cfg, image_query):
+   - 先用 AI 的 image_query 搜（per_page=10、content_filter=high、squarish），随机选一张
+   - 搜不到 → 用分类固定词 query 再搜
+   - 返回 { rawUrl(imgix 基址), width, height }
+5. downloadCompressUpload(img, fileId):   // fileId = crypto.randomUUID()
+   - 主图：fetch(rawUrl + &w=1920&h=1920&fit=max&fm=webp&q=82&auto=compress) → 已压好的 webp
+   - ratio = height / width（全站约定方向；消费端 post-card-image 按此取倒数渲染）
+   - 上传主图：post-images 桶根目录、文件名 mengmegzi-<uuid>.webp、cacheControl 1 年
+   - 缩略图：fetch(rawUrl + &w=640&h=640...&q=80) → 上传 mengmegzi-<uuid>_thumb.webp（失败不阻断）
+6. 把自己的 publicUrl 存进 posts.image_url / image_urls / image_ratio
+   （前端渲染时 cdnUrl() 再重写到 img.hanakos.cc CDN 层）
 ```
 
+### 与真人发帖对齐的两个关键点（审查后修正）
+- **缩略图**：文件名走桶根目录 + `mengmegzi-` 连字符前缀（**不是** `mengmegzi/` 子目录），
+  这样 `postThumbUrl` 才认（它拒绝带 `/` 的路径）→ 列表卡片能用 640px 缩略图省 egress。
+  原先放子目录 + 不生成缩略图 → feed 卡片直接拉全尺寸主图，抵消了 egress 优化。
+- **image_ratio 方向**：存 `height/width`，与 create-post-modal / post-card-image 全站约定一致。
+  原先存反了（`width/height`）→ 卡片占位横竖颠倒。
+
 ### 失败降级（关键设计）
-- Unsplash key 缺失/调用失败 → 跳过配图，纯文字帖
-- 图片下载失败 → 纯文字帖
-- sharp 不可用（运行时拿不到）→ **用原图上传**（不压缩，但功能不中断）
-- 上传 Storage 失败 → 纯文字帖
+- Unsplash key 缺失 / 搜图失败 / 空结果 → 跳过配图，纯文字帖
+- 主图下载或上传失败 → 纯文字帖
+- 缩略图下载/上传失败 → **不阻断**（主图照常，卡片 onError 回退主图）
 
 **核心原则**：图片相关失败永远不阻断发帖（降级纯文字），只有 AI 生成本身或写库失败才死机。
-
-### ⚠️ sharp 的特殊处理（见下方"坑"）
 
 ---
 
@@ -174,6 +190,7 @@ CF Worker (每2分钟) → POST /api/mengmegzi-tick (带 x-cron-secret)
 **根因**：sharp 作为显式依赖，其原生模块依赖树在 Vercel(Linux) 构建环境的 file tracing 阶段触发 micromatch 递归。本地 Windows 的 node_modules 结构不同所以能过。
 **解决**：从 `package.json` 移除 sharp 依赖，`image-pipeline.ts` 改运行时 `require("sharp")`。Vercel 运行时由 Next.js 自带 sharp（图片优化用），构建时不再扫 sharp 依赖树。
 **降级**：运行时拿不到 sharp 则用原图上传（不压缩），功能不中断。
+**后续（2026-06-19 审查）**：上面"移除依赖 + 运行时 require"只解决了构建爆栈——但运行时 require 在 Vercel lambda 里大概率拿不到，会**静默退化成上传未压缩原图**（还把 ratio 退成 1）。最终**彻底去掉 sharp**，改用 Unsplash imgix URL 参数下载即压好的 webp（见第三节），从根上消除对 sharp 的依赖，本地与生产链路一致。
 
 ### 坑 5：戳错域名
 **现象**：测生产 tick 端点一直 404，所有 `/api/*` 全 404。
@@ -191,14 +208,14 @@ CF Worker (每2分钟) → POST /api/mengmegzi-tick (带 x-cron-secret)
 ### 新增（lib + api + 组件 + 文档）
 ```
 lib/mengmegzi/
-  constants.ts          常量（USER_ID/分类/温度/压缩参数/桶名）
-  image-sources.ts      图源适配层（none/unsplash）
-  image-pipeline.ts     下载+压缩+上传管线（运行时 require sharp）
-  prompts.ts            3 套 prompt 构建（复用 persona）
+  constants.ts          常量（USER_ID/分类/温度/压缩参数/桶名 + 文件名前缀）
+  image-sources.ts      图源适配层（none/unsplash；AI 关键词优先 + 回退 + top10 随机）
+  image-pipeline.ts     下载 + 缩略图 + 上传管线（Unsplash imgix 参数，不用 sharp）
+  prompts.ts            3 套 prompt 构建（复用 persona；发帖含 image_query）
   ai-client.ts          AI 调用 + JSON 鲁棒解析
   state.ts              状态机读写 + pending_task + 日志
-  executor.ts           执行内核（发帖/留言/回复 + 目标筛选）
-  __tests__/            image-sources + ai-client 测试（16 个）
+  executor.ts           执行内核（发帖/留言/回复 + 目标筛选，轮询查询有界）
+  __tests__/            image-sources + ai-client 测试（18 个）
 
 app/api/admin/mengmegzi-agent/
   state/route.ts        状态读写
@@ -256,7 +273,8 @@ SITE_URL=http://localhost:3000                           (本地，生产用 for
 
 ## 七、未来可扩展（未实现）
 
-- 管理员上传图 + AI 生成文字的发帖模式
+- 管理员上传图 + AI 生成文字的发帖模式（注意：用户上传的图不来自 Unsplash imgix，届时
+  需重新引入服务端压缩——sharp 走 `next.config` 的 `serverExternalPackages` 排除文件追踪以避开坑4，或换别的压缩方案）
 - `image_sources` 的 UI 配置界面（目前直接改 DB）
 - nsfw 配图（已明确否决，露点内容不接入）
 - 发帖分类权重的 UI 调节
@@ -275,3 +293,25 @@ f8db12b fix(build): use runtime require for sharp to avoid micromatch stack over
 
 设计文档：`docs/superpowers/specs/2026-06-19-mengmegzi-agent-design.md`
 实现计划：`docs/superpowers/plans/2026-06-19-mengmegzi-agent.md`
+
+---
+
+## 九、审查后修复（2026-06-19 同日）
+
+代码审查发现几处真 bug 与 egress 隐患，已修复（7 个文件，未动数据库）：
+
+| # | 问题 | 修复 |
+|---|---|---|
+| 1 | 🔴 tick 端点无 `maxDuration`，AI 调用 >10s 会被 Vercel 杀 → 卡 busy → 判死机 | `mengmegzi-tick/route.ts` 加 `export const maxDuration = 60`（Hobby 上限；推理模型 >60s 需上 Pro 调 300 或移到 CF Worker） |
+| 2 | 🔴 `image_ratio` 存反了（`width/height`，全站约定是 `height/width`） | pipeline 改 `height/width`，且直接用 Unsplash API 宽高 |
+| 3 | 🟠 sharp 运行时在 Vercel lambda 拿不到 → 静默不压缩 | 彻底去 sharp，改 Unsplash imgix 参数下载即压好的 webp |
+| 4 | 🟠 `mengmegzi/` 子目录破坏缩略图约定 + 不生成缩略图 → feed 拉全尺寸主图 | 改桶根目录 + `mengmegzi-` 前缀文件名；同步生成 `_thumb.webp` |
+| 5 | 🟠 上传缺 `cacheControl`（默认 1h）→ 多回源 egress | 主图 + 缩略图都加 `cacheControl: "31536000"`（1 年） |
+| 6 | 🟡 配图"每类永远同一张"（`per_page=1` + 固定词） | AI 出 `image_query` 关键词按正文搜图 + `per_page=10` 随机选 + `content_filter=high` |
+| 7 | 🟡 轮询查询随历史无界增长 | `findCommentablePost`/`findReplyableComment` 改成先查候选、再用候选 id 反查日志，两边有界 |
+
+**验证**：18 个单元测试全过；`tsc --noEmit` 无相关类型错误；未新增环境变量、未改数据库。
+
+**待运维确认**：生产实发一帖看 Storage 是否有 `mengmegzi-<id>.webp` + `_thumb.webp` 两个 webp 文件、`image_ratio` 是否合理、连发是否图不重样；`maxDuration=60` 是否够（取决于计划与模型速度）。
+
+**已知未做**（保持与现有 hanako 一致）：内容不过 `moderate-text` 审核；Unsplash 未做署名/download 端点（严格合规可后续补）。

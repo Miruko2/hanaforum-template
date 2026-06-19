@@ -26,6 +26,10 @@ import { isValidCategory } from "@/lib/categories"
 import type { PendingTask } from "@/lib/mengmegzi/state"
 
 export const dynamic = "force-dynamic"
+// Vercel 函数超时：tick 内同步跑 AI（可能数十秒）+ 图片管线，默认 10s 会被杀 → 卡 busy →
+// busy_timeout 后判死机。60 是 Hobby 计划上限；若用推理模型且单次仍 >60s，需上 Pro 调到
+// 300，或把重活挪到 CF Worker / Supabase Edge Function（执行预算更长）。
+export const maxDuration = 60
 
 // 查帖子标题用于 current_task 文案（查不到就回退短 id，绝不因查标题失败阻断执行）
 const supabaseAdmin = createClient(
