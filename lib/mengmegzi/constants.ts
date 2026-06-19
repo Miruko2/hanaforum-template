@@ -17,6 +17,11 @@ export const COMMENT_TEMPERATURE = 0.7
 /** max_tokens（复用 hanako 的 MAX_REPLY_TOKENS，覆盖推理模型思考链） */
 export const MAX_AGENT_TOKENS = 4000
 
+/** 萌萌子发帖/留言/回复带表情包的目标概率（对齐私信 DM_STICKER_INJECT_PROBABILITY=0.55）。
+ *  prompt 已引导「适当用」，但模型偏保守，故按此概率在上下文末尾临时注入一条「本轮配个表情包」
+ *  的 system 提示推高命中率。该提示只活本次请求、不写库。0.5 ≈ 一半动作带表情包，活泼不刷屏。 */
+export const STICKER_INJECT_PROBABILITY = 0.5
+
 /** 主图压缩参数（与客户端 lib/image-compress.ts 一致：maxEdge 1920 / quality 82 / webp）。
  *  现走 Unsplash imgix URL 参数（&w=&h=&fit=max&fm=webp&q=）下载即压好，不再用 sharp。 */
 export const IMAGE_MAX_EDGE = 1920

@@ -20,6 +20,7 @@ import {
   buildCommentUserMessage,
   buildReplySystemPrompt,
   buildReplyUserMessage,
+  maybeInjectStickerBoost,
   type TargetPost,
 } from "./prompts"
 import { callAiForJson } from "./ai-client"
@@ -65,7 +66,12 @@ export async function executePost(forcedCategory?: CategoryValue): Promise<strin
     { role: "system" as const, content: buildPostSystemPrompt(cfg.persona) },
     { role: "user" as const, content: buildPostUserMessage(category) },
   ]
-  const gen = (await callAiForJson(cfg, messages, POST_TEMPERATURE, MAX_AGENT_TOKENS)) as PostGen
+  const gen = (await callAiForJson(
+    cfg,
+    maybeInjectStickerBoost(messages),
+    POST_TEMPERATURE,
+    MAX_AGENT_TOKENS,
+  )) as PostGen
   if (!gen?.title || !gen?.content) {
     throw new Error("AI 输出缺 title/content")
   }
@@ -145,7 +151,12 @@ export async function executeComment(postId: string): Promise<string> {
     { role: "system" as const, content: buildCommentSystemPrompt(cfg.persona) },
     { role: "user" as const, content: buildCommentUserMessage(target) },
   ]
-  const gen = (await callAiForJson(cfg, messages, COMMENT_TEMPERATURE, MAX_AGENT_TOKENS)) as {
+  const gen = (await callAiForJson(
+    cfg,
+    maybeInjectStickerBoost(messages),
+    COMMENT_TEMPERATURE,
+    MAX_AGENT_TOKENS,
+  )) as {
     content: string
   }
   if (!gen?.content) throw new Error("AI 输出缺 content")
@@ -195,7 +206,12 @@ export async function executeReply(commentId: string): Promise<string> {
       content: buildReplyUserMessage(target, { content: comment.content }),
     },
   ]
-  const gen = (await callAiForJson(cfg, messages, COMMENT_TEMPERATURE, MAX_AGENT_TOKENS)) as {
+  const gen = (await callAiForJson(
+    cfg,
+    maybeInjectStickerBoost(messages),
+    COMMENT_TEMPERATURE,
+    MAX_AGENT_TOKENS,
+  )) as {
     content: string
   }
   if (!gen?.content) throw new Error("AI 输出缺 content")

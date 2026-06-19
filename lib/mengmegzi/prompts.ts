@@ -6,6 +6,10 @@
 
 import { CATEGORY_LABELS } from "@/lib/categories"
 import type { CategoryValue } from "@/lib/categories"
+import { STICKERS } from "@/lib/stickers"
+import { emotionLabel } from "@/lib/hanako/constants"
+import { STICKER_INJECT_PROBABILITY } from "./constants"
+import type { ChatMessage } from "./ai-client"
 
 export interface TargetPost {
   id: string
@@ -14,11 +18,39 @@ export interface TargetPost {
   category: string
 }
 
+/** 表情清单（名+含义）：从 STICKERS + emotionLabel 生成，避免与表情资源/标签漂移。对齐私信 dm-ai。 */
+const STICKER_GUIDE = STICKERS.map((id) => `${id}（${emotionLabel(id)}）`).join("、")
+
+/** 发表情包引导段（内联风格；发帖/留言/回复三套 prompt 复用）。
+ *  与私信差异：帖子/评论用 StickerText 支持 [s:name] 内联混排，故引导「夹在句子里」而非单独成条。 */
+const STICKER_SECTION = `=== 发表情包（适当用）===
+- 可以在 content 里夹一个 [s:表情名] 表达情绪，自然嵌在句子里（通常放句末）。
+- 可用表情名（含义）：${STICKER_GUIDE}。表情名只能从这里面选，不要自创。
+- 适当用，别每句都带；情绪贴切时加一个就好（长正文 0~1 个最自然）。
+- 表情标记只放进 content，不要放进 title / description。
+- 例：「今天天气真好呀 [s:happy]」「这个问题我也卡过 [s:confused]」`
+
+/** 按概率在 messages 末尾临时注入「本轮配个表情包」的 system 提示（只活本次请求、不写库）。
+ *  prompt 已引导但模型偏保守，叠加概率助推推高命中率（对齐私信 hanako-dm 手法）。 */
+export function maybeInjectStickerBoost(messages: ChatMessage[]): ChatMessage[] {
+  if (Math.random() >= STICKER_INJECT_PROBABILITY) return messages
+  return [
+    ...messages,
+    {
+      role: "system",
+      content:
+        "本轮输出请带上一个表情包（在 content 里夹一个 [s:表情名]，自然嵌在句末），挑一个最贴合当下情绪的。表情名只能从清单里选、不要自创。",
+    },
+  ]
+}
+
 /** 发帖 system prompt（分类由代码指定，注入 user 消息） */
 export function buildPostSystemPrompt(persona: string): string {
   return `${persona}
 
 你现在要像普通用户一样发一个新帖子。
+
+${STICKER_SECTION}
 
 输出严格 JSON，不要任何多余文字：
 {"title": "<标题，10~30字>", "content": "<正文，50~300字>", "description": "<一句话摘要，20字内>", "image_query": "<英文配图关键词>"}
@@ -60,6 +92,8 @@ export function buildCommentSystemPrompt(persona: string): string {
 
 你要在别人的帖子下面留一条评论。
 
+${STICKER_SECTION}
+
 输出严格 JSON：
 {"content": "<评论内容，10~80字>"}
 
@@ -81,6 +115,8 @@ export function buildReplySystemPrompt(persona: string): string {
   return `${persona}
 
 有人在你（或你回复过）的内容下评论了，你要回复他。
+
+${STICKER_SECTION}
 
 输出严格 JSON：
 {"content": "<回复内容，10~80字>"}
