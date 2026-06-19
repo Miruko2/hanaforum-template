@@ -105,8 +105,12 @@ export function CoverBackdrop({ lite = false }: Props = {}) {
       className="pointer-events-none absolute inset-0 overflow-hidden"
       aria-hidden
     >
-      <Layer track={layerA} visible={active === "a"} imgRef={imgRefA} kbClass={lite ? "" : "cover-kb-a"} lite={lite} />
-      <Layer track={layerB} visible={active === "b"} imgRef={imgRefB} kbClass={lite ? "" : "cover-kb-b"} lite={lite} />
+      {/* kbClass 一律空：Ken Burns 的持续 transform 会每帧让 blur 缓存失效、被迫整屏
+          重新模糊（与 video blur 同源的卡顿）。卡片透出的毛玻璃需要「静态」模糊背景，
+          故去掉缓动、让 blur 一次栅格化缓存复用；律动仍靠 audio-pulse 的 opacity
+          （合成属性、不触发重模糊）。 */}
+      <Layer track={layerA} visible={active === "a"} imgRef={imgRefA} kbClass="" lite={lite} />
+      <Layer track={layerB} visible={active === "b"} imgRef={imgRefB} kbClass="" lite={lite} />
       {/* Bottom fade to keep player chrome + hint legible despite the now
           much more dominant cover background. */}
       <div
