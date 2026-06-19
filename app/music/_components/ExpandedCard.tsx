@@ -8,6 +8,7 @@ import { type Track } from "../_data/tracks"
 import { usePlayback, usePlaybackTime, useTracks } from "../_context/PlaybackContext"
 import { useDominantHue } from "../_lib/useDominantHue"
 import { useReducedMotion } from "../_lib/useReducedMotion"
+import { useMyBackgroundUrl } from "@/hooks/use-my-background"
 import { useLyrics } from "../_lib/lyrics"
 import { useIsAndroid } from "../_lib/useIsAndroid"
 import { useIsMobile } from "../_lib/useIsMobile"
@@ -93,6 +94,7 @@ function ExpandedInner({
     volume,
     getAudioIntensity,
     liquidFx,
+    liquidBg,
   } = usePlayback()
   const { currentTime, duration } = usePlaybackTime()
   const tracks = useTracks()
@@ -115,6 +117,8 @@ function ExpandedInner({
   // 歌词：仅当前播放曲目才有时间轴可同步；无有效歌词（纯音乐/仅元信息/非
   // meting 音源/实例全挂）时为 null，整个歌词层不渲染。
   const lyrics = useLyrics(shown, isCurrent && lyricsEnabled)
+  // 个人首页背景（background 底图来源用；与卡片墙 ImageBackdrop 共用，已带 CORS + cdnUrl）。
+  const userBgUrl = useMyBackgroundUrl()
 
   // ---- Responsive sizing ----
   // Watch viewport width; below COMPACT_VW the panel + disk shrink so the
@@ -264,6 +268,9 @@ function ExpandedInner({
             volume={volume}
             getIntensity={getAudioIntensity}
             mode={liquidFx}
+            bgMode={liquidBg}
+            coverUrl={shown.cover ?? null}
+            userBgUrl={userBgUrl}
           />
           {/* 雪花叠层（库的 snowflakes1，透明叠在液面之上、卡片之下；不与水面交互）。
               仅 rain 模式：rain = 雪花飘落 + 液面；center 是中间涟漪、不挂雪花。 */}

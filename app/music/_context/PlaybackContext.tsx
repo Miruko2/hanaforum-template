@@ -26,6 +26,7 @@ const SOURCE_KEY = "music-source-v1"
 const VOLUME_KEY = "music-volume-v1"
 const LYRICS_KEY = "music-lyrics-v1"
 const LIQUID_FX_KEY = "music-liquidfx-v1"
+const LIQUID_BG_KEY = "music-liquidbg-v1"
 const HEALTHY_BASE_KEY = "music-meting-base-v2" // 上次探测出的健康 meting 实例：{ base, at }
 // 缓存只在足够「新鲜」时才同步采信：实例健康状态偶尔翻转，几小时内的缓存基本仍准
 //（帮首曲在探测返回前就用对实例）；但跨天的旧缓存可能指向已死实例，那还不如退回构建
@@ -40,6 +41,9 @@ export type PlayMode = "list" | "one" | "once"
 
 /** 详情页桌面液面背景的自动律动模式（off = 默认，只留鼠标交互）。 */
 export type LiquidFx = "rain" | "center" | "off"
+
+/** 详情页桌面液面背景的「底图来源」：纯色渐变 / 当前封面 / 个人首页背景。 */
+export type LiquidBg = "gradient" | "cover" | "background"
 
 // ---- 音频拉取冷却 / 复用（防 ban、防滥用）----
 // REUSE_TTL：同一首在此窗口内已拉取过 → 复用，不重置 src、不再打外部源。
@@ -86,6 +90,9 @@ export type PlaybackState = {
   /** 详情页桌面液面背景的自动律动模式，持久化到 localStorage。 */
   liquidFx: LiquidFx
   setLiquidFx: (m: LiquidFx) => void
+  /** 详情页液面背景的「底图来源」（渐变/封面/首页背景），持久化到 localStorage。 */
+  liquidBg: LiquidBg
+  setLiquidBg: (m: LiquidBg) => void
   /**
    * Returns the current audio intensity in [0, 1], smoothed across frames.
    * Implementation strategy:
@@ -454,6 +461,27 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     try {
       const v = localStorage.getItem(LIQUID_FX_KEY)
       if (v === "rain" || v === "center" || v === "off") setLiquidFxState(v)
+    } catch {
+      /* ignore */
+    }
+  }, [])
+
+  // 液面底图来源（gradient 纯色渐变 / cover 当前封面 / background 个人首页背景）。默认渐变。
+  const [liquidBg, setLiquidBgState] = useState<LiquidBg>("gradient")
+  const setLiquidBg = useCallback((m: LiquidBg) => {
+    setLiquidBgState(m)
+    try {
+      localStorage.setItem(LIQUID_BG_KEY, m)
+    } catch {
+      /* ignore */
+    }
+  }, [])
+
+  // ---- 载入持久化的液面底图来源（默认 gradient） ----
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem(LIQUID_BG_KEY)
+      if (v === "gradient" || v === "cover" || v === "background") setLiquidBgState(v)
     } catch {
       /* ignore */
     }
@@ -867,10 +895,12 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       setLyricsEnabled,
       liquidFx,
       setLiquidFx,
+      liquidBg,
+      setLiquidBg,
       getAudioIntensity,
       refreshTracks,
     }),
-    [currentTrack, isPlaying, isFallback, playMode, history, favorites, tracks, play, pause, togglePlay, seek, next, prev, clearHistory, isFavorite, toggleFavorite, setPlayMode, volume, setVolume, lyricsEnabled, setLyricsEnabled, liquidFx, setLiquidFx, getAudioIntensity, refreshTracks],
+    [currentTrack, isPlaying, isFallback, playMode, history, favorites, tracks, play, pause, togglePlay, seek, next, prev, clearHistory, isFavorite, toggleFavorite, setPlayMode, volume, setVolume, lyricsEnabled, setLyricsEnabled, liquidFx, setLiquidFx, liquidBg, setLiquidBg, getAudioIntensity, refreshTracks],
   )
 
   const tracksCtxValue = useMemo<TrackSourceCtx>(

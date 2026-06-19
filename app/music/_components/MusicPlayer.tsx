@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Pause, Play, SkipBack, SkipForward, History as HistoryIcon, Heart, Repeat, Repeat1, Square, CloudSnow, Target, Droplet } from "lucide-react"
+import { Pause, Play, SkipBack, SkipForward, History as HistoryIcon, Heart, Repeat, Repeat1, Square, CloudSnow, Target, Droplet, Palette, Image as ImageIcon, Wallpaper } from "lucide-react"
 import { usePlayback, usePlaybackTime } from "../_context/PlaybackContext"
 import { useDominantHue } from "../_lib/useDominantHue"
 import { useIsAndroidApp } from "../_lib/useIsAndroid"
@@ -130,7 +130,7 @@ function ProgressBar({
 }
 
 export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
-  const { currentTrack, isPlaying, isFallback, togglePlay, seek, next, prev, isFavorite, toggleFavorite, playMode, setPlayMode, volume, setVolume, liquidFx, setLiquidFx } =
+  const { currentTrack, isPlaying, isFallback, togglePlay, seek, next, prev, isFavorite, toggleFavorite, playMode, setPlayMode, volume, setVolume, liquidFx, setLiquidFx, liquidBg, setLiquidBg } =
     usePlayback()
   const { currentTime, duration, buffered } = usePlaybackTime()
   const fav = currentTrack ? isFavorite(currentTrack.id) : false
@@ -324,6 +324,38 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
                   <Target size={15} />
                 ) : (
                   <Droplet size={15} />
+                )}
+              </button>
+            )}
+            {/* 水波底图来源切换（仅桌面/iPad，且水波开着才有意义；循环 渐变 → 封面 → 首页背景）。 */}
+            {!isMobile && liquidFx !== "off" && (
+              <button
+                type="button"
+                aria-label="水波底图"
+                title={
+                  liquidBg === "gradient"
+                    ? "水波底图：纯色渐变（点击切当前封面）"
+                    : liquidBg === "cover"
+                      ? "水波底图：当前封面（点击切首页背景）"
+                      : "水波底图：个人首页背景（点击切纯色渐变）"
+                }
+                className="h-8 w-8 grid place-items-center rounded-full hover:bg-white/10 transition-colors"
+                style={{
+                  color: liquidBg === "gradient" ? "rgba(255,255,255,0.55)" : `hsl(${hue} 75% 65%)`,
+                }}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setLiquidBg(
+                    liquidBg === "gradient" ? "cover" : liquidBg === "cover" ? "background" : "gradient",
+                  )
+                }}
+              >
+                {liquidBg === "gradient" ? (
+                  <Palette size={15} />
+                ) : liquidBg === "cover" ? (
+                  <ImageIcon size={15} />
+                ) : (
+                  <Wallpaper size={15} />
                 )}
               </button>
             )}
