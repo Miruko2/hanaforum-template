@@ -55,8 +55,11 @@ export async function fetchImageForCategory(
   if (config.provider === "danbooru") {
     const aiTag = toBooruTag(ai)
     if (aiTag) {
-      const r = await fetchFromDanbooru(aiTag)
-      if (r) return { ...r, viaFallback: false }
+      // tag 逐级降级：复合词搜不到就去前缀修饰词重试，命中即用（减少回退到泛分类 tag）
+      for (const cand of tagDescentCandidates(aiTag)) {
+        const r = await fetchFromDanbooru(cand)
+        if (r) return { ...r, viaFallback: false }
+      }
     }
     const fb = await fetchFromDanbooru(toBooruTag(config.query || ""))
     return fb ? { ...fb, viaFallback: true } : null
@@ -87,6 +90,20 @@ function toBooruTag(s: string): string {
     .trim()
     .replace(/\s+/g, "_")
     .slice(0, 40)
+}
+
+/**
+ * 复合 booru tag 逐级降级候选：去前缀修饰词、保留核心名词，让 AI 出的过具体词
+ * (pink_game_controller) 也有机会命中真实 tag(controller)、不至一步退回泛分类 tag。
+ * 最多 3 个（控请求数）：pink_game_controller → [pink_game_controller, game_controller, controller]
+ */
+function tagDescentCandidates(tag: string): string[] {
+  const parts = tag.split("_").filter(Boolean)
+  if (parts.length <= 1) return [tag]
+  const cands = [tag]
+  if (parts.length >= 3) cands.push(parts.slice(-2).join("_"))
+  cands.push(parts[parts.length - 1])
+  return [...new Set(cands)]
 }
 
 /** post 是否命中 nsfw 黑名单（tag_string 含任一黑名单词，整词匹配） */

@@ -103,6 +103,26 @@ describe("image-sources", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
+  test("danbooru: 复合词搜不到 → 逐级降级命中 (pink_game_controller→controller)", async () => {
+    fetchMock
+      .mockResolvedValueOnce(danbooruResp([])) // pink_game_controller 空
+      .mockResolvedValueOnce(danbooruResp([])) // game_controller 空
+      .mockResolvedValueOnce(danbooruResp([danbooruPost()])) // controller 命中
+    const r = await fetchImageForCategory(
+      { provider: "danbooru", query: "video_game" },
+      "pink game controller",
+    )
+    expect(r).not.toBeNull()
+    expect(r!.viaFallback).toBe(false) // 降级命中，不算分类回退
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(new URL(fetchMock.mock.calls[0][0]).searchParams.get("tags")).toBe(
+      "pink_game_controller rating:g order:score",
+    )
+    expect(new URL(fetchMock.mock.calls[2][0]).searchParams.get("tags")).toBe(
+      "controller rating:g order:score",
+    )
+  })
+
   test("danbooru: HTTP 失败返回 null", async () => {
     fetchMock.mockResolvedValue({ ok: false, status: 500 } as any)
     const r = await fetchImageForCategory({ provider: "danbooru", query: "x" }, "y")
