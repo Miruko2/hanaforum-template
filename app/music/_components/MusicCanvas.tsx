@@ -12,15 +12,14 @@ import {
 } from "../_lib/canvas"
 import { MusicCard } from "./MusicCard"
 import type { ExpandRect } from "./ExpandedCard"
-import { CoverBackdrop } from "./CoverBackdrop"
-import { VideoBackdrop } from "./VideoBackdrop"
+import { ImageBackdrop } from "./ImageBackdrop"
 import { Grain } from "./Grain"
 import { useReducedMotion } from "../_lib/useReducedMotion"
 import { useIsMobile } from "../_lib/useIsMobile"
 import { useIsAndroid, useIsAndroidApp } from "../_lib/useIsAndroid"
 import { usePlaybackWall, useTracks } from "../_context/PlaybackContext"
-// Toggle between cover-image backdrop (per track) and a single looping video.
-const USE_VIDEO_BACKDROP = true
+// 卡片墙背景：站点同款底图 /mos-background.webp 的「静态模糊」层（见 ImageBackdrop）。
+// 不用 video / 每卡 backdrop-filter —— 两者都会每帧重新模糊全屏 / 几十张卡而卡死渲染。
 
 // Layout knobs
 const UNIT_W_DESKTOP = 180
@@ -402,22 +401,16 @@ export function MusicCanvas({ onExpand, overlayOpen = false }: Props) {
           // 模糊量化 → 字符串跨帧稳定 → 合成器复用已糊图层、不必每帧重栅格化。
           // 安卓：完全关闭 fisheye 景深模糊 —— filter:blur 在低端安卓 GPU 上是拖动时
           //   每卡每帧重栅格化的主要成本，小屏景深虚化肉眼难辨；3D 缩放/旋转/透视保留。
-          // B1 iPhone(lite 非安卓)：0/1/2px 粗量化；桌面/iPad：0.5px 细腻模糊。
-          let filter = ""
-          if (!isAndroid && f.blur > 0.15) {
-            if (lite) {
-              const lb = Math.min(2, Math.round(f.blur))
-              filter = lb > 0 ? `blur(${lb}px)` : ""
-            } else {
-              filter = `blur(${(Math.round(f.blur * 2) / 2).toFixed(1)}px)`
-            }
-          }
+          // 鱼眼景深模糊已移除：卡片要用 backdrop-filter 做真毛玻璃（糊各自身后的背景），
+          // 而元素自身有 filter 会废掉它自己的 backdrop-filter（只剩正中心一张生效，就是
+          // 之前「只有中间糊」的现象）。远近改纯靠 3D 透视缩放区分。
+          const filter = ""
 
-          // A2：外围卡整张已被鱼眼 filter:blur 糊过，其底部信息栏里那层 backdrop-blur
-          // 此时根本看不见 —— 标记 data-far=1，用 CSS 关掉这层昂贵的 backdrop-filter，
-          // 省下一大笔 GPU 重采样。中心清晰卡(far=0)保留毛玻璃。阈值 2.0px（鱼眼最大
-          // 3.5px）：到这个糊度整卡已明显模糊，毛玻璃→实底的切换被完全盖住、看不出
-          // 跳变；想更省把阈值调低、想更稳调高。
+          // data-far：按鱼眼模糊量给外围卡标 "1"、中心清晰卡标 "0"。原用途是配合一条
+          // CSS 规则关掉卡片底部信息栏那层「远处整卡已糊、backdrop-blur 看不见却仍在烧
+          // GPU」的 backdrop-filter。现卡片改为整张实底、全程无 backdrop-filter（见
+          // MusicCard 顶部注释），那条 CSS 已删、此标记暂无消费者，仅保留写入以备未来
+          // 「按远近切换卡片视觉」时复用。阈值 2.0px = 鱼眼最大 3.5px 的明显糊度。
           const far = f.blur > 2.0 ? "1" : "0"
 
           // 安卓 app + 播放中：落入底部播放器矩形区的卡片整张隐藏，根除穿透鬼影。
@@ -519,10 +512,8 @@ export function MusicCanvas({ onExpand, overlayOpen = false }: Props) {
         />
       </div>
 
-      {/* Background — looping mp4 by default. Falls back to the static per-track
-          cover backdrop on lite tier: phones can't decode the 1080p video at
-          60fps, and users with prefers-reduced-motion explicitly want stillness. */}
-      {USE_VIDEO_BACKDROP && !lite ? <VideoBackdrop /> : <CoverBackdrop lite={lite} />}
+      {/* Background — 站点同款底图（/mos-background.webp）静态模糊，卡片透出它＝毛玻璃。 */}
+      <ImageBackdrop />
 
       {/* δ — Film-grain shimmer over the backdrop. Skipped on lite tier:
           imperceptible on small screens and a real cost on weak GPUs. */}

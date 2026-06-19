@@ -1,7 +1,7 @@
 "use client"
 
 import { forwardRef, memo, useRef } from "react"
-import { Pause, Play, Heart, MoreHorizontal, SkipBack, SkipForward } from "lucide-react"
+import { Pause, Play, Heart, SkipBack, SkipForward } from "lucide-react"
 import type { Track } from "../_data/tracks"
 import type { ExpandRect } from "./ExpandedCard"
 import { usePlaybackWall } from "../_context/PlaybackContext"
@@ -12,51 +12,62 @@ type Props = {
   width: number
   height: number
   onExpand: (track: Track, rect: ExpandRect) => void
-  /**
-   * Lite tier: the parent has determined this device should run a stripped-
-   * down render (phone, or user opted into reduced-motion). Currently only
-   * affects the bottom-bar `backdrop-filter: blur()` radius, which is one of
-   * the priciest things in this component on weak GPUs.
-   */
+  /** Lite tier (phone / reduced-motion): drop the inset gloss highlight. */
   lite?: boolean
-  /**
-   * Android-only perf tier: on top of `lite`, Android shrinks the card shadow
-   * (the 60px-blur shadow is costly to over-draw / re-rasterize on weak Android
-   * GPUs while the wall is dragged in 3D). iOS / desktop keep the full shadow.
-   */
+  /** Android: smaller drop shadow (cheaper to over-draw while the wall drags). */
   android?: boolean
 }
 
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
+
 /**
- * Single music card. The container is a fixed-size box; the visual chrome
- * (image, glass overlay, controls) fills it. Per-frame fisheye transforms
- * are written by the parent canvas via the forwarded ref, NOT through React
- * state, so this component only re-renders when track/playing changes.
+ * Single music card — frosted glass: the card is (almost) COLOURLESS and
+ * translucent with a hairline rim, and a real `backdrop-filter` frosts the clear
+ * backdrop behind it. (Works only because the canvas no longer writes a fisheye
+ * `filter` on cards — an element's own filter voids its backdrop-filter; see
+ * MusicCanvas.) Content is the slimmed-down player: artwork + title/artist + one
+ * transport row (prev / play / next / favourite) — no progress or volume bar.
  *
- * pointer-events-auto re-enables hit-testing on the card itself; the Stage
- * wrapper sets pointer-events:none so its flat z=0 plane doesn't intercept
- * hits meant for the (z<0) cards behind it in the preserve-3d space.
+ * prev / play / next / favourite are live; full controls live in the expanded
+ * card + bottom player. pointer-events-auto re-enables hit-testing; per-frame 3D
+ * transforms are written by the canvas via the ref, not React state, so this
+ * only re-renders on track / playing / favourite change.
  */
 function MusicCardBase(
   { track, width, height, onExpand, lite = false, android = false }: Props,
   ref: React.ForwardedRef<HTMLDivElement>,
 ) {
-  // 墙专用低频上下文：音量拖动 / history / playMode 等高频变化不会再让
-  // 每张可见卡片跟着重渲染（usePlayback 的 value 一变就是全墙 reconcile）。
   const { currentTrack, isPlaying: globalPlaying, togglePlay, prev, next, isFavorite, toggleFavorite } = usePlaybackWall()
   const isCurrent = currentTrack?.id === track.id
   const isPlaying = isCurrent && globalPlaying
   const fav = isFavorite(track.id)
-  // Track pointerdown info so click can decide: tap (expand) vs drag (swallow).
-  // We DON'T stopPropagation on pointerdown so the canvas can start a pan from
-  // anywhere on the card; we then ignore the click if the pointer travelled.
   const downRef = useRef<{ x: number; y: number; t: number } | null>(null)
+
+  // 卡片宽度驱动的等比尺寸：瀑布流卡片宽度 ~126(手机) ~165(桌面单) ~345(桌面双)。
+  const pad = clamp(Math.round(width * 0.055), 8, 14)
+  const coverRadius = clamp(pad + 2, 9, 14)
+  const titleSize = clamp(Math.round(width * 0.092), 12, 16)
+  const artistSize = clamp(Math.round(width * 0.072), 10, 13)
+  const playSize = clamp(Math.round(width * 0.2), 30, 44)
+  const playIcon = Math.round(playSize * 0.44)
+  const sideIcon = clamp(Math.round(width * 0.092), 14, 19)
+
+  // 几乎无色的中性玻璃 + 真 backdrop-filter（糊身后那块清晰背景）。
+  const glassBg = "rgba(18,20,26,0.22)"
+  // 边框恒为中性白细线 —— 正在播放也不染色（用户要求），保持原样；当前曲改由中间
+  // 圆形主键变白底来指示，不靠边框。
+  const rim = "0 0 0 1px rgba(255,255,255,0.45)"
+  const gloss = lite ? "" : ", inset 0 1px 0 rgba(255,255,255,0.28)"
+  const boxShadow = android
+    ? `0 8px 22px -10px rgba(0,0,0,0.5), ${rim}${gloss}`
+    : `0 18px 44px -16px rgba(0,0,0,0.55), ${rim}${gloss}`
+  const textShadow = "0 1px 3px rgba(0,0,0,0.7)"
+  const ctrlShadow = "drop-shadow(0 1px 2px rgba(0,0,0,0.6))"
+
   return (
     <div
       ref={ref}
       data-card
-      // A2：初始 "0"（保留毛玻璃）。canvas 的 rAF 循环按鱼眼模糊量逐帧把外围卡
-      // 切到 "1"，CSS 据此关掉看不见的 backdrop-blur。首帧给 0 避免任何闪烁。
       data-far="0"
       onPointerDown={(e) => {
         downRef.current = { x: e.clientX, y: e.clientY, t: performance.now() }
@@ -65,90 +76,55 @@ function MusicCardBase(
         const d = downRef.current
         downRef.current = null
         if (!d) return
-        const dx = e.clientX - d.x
-        const dy = e.clientY - d.y
-        const dt = performance.now() - d.t
-        // Only treat as a tap if it was small AND quick — otherwise it's a drag
-        // and the click is collateral; swallow it.
-        if (Math.hypot(dx, dy) > 5 || dt > 500) return
-        // 点卡片即播：在「点击手势的同步栈内」就发起 play()，让首播的解析/缓冲与面板
-        // 飞入动画重叠，把 iOS 那 3-4s 网络等待藏进动画里。iOS 只认手势栈内同步触发的
-        // play()，故必须在此处发起，不能等面板挂载后再播（那时已脱离手势栈、会被拒）。
-        // 已在播放的当前曲不重复触发（否则 togglePlay 会把正放的歌切成暂停）。
+        if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 5 || performance.now() - d.t > 500) return
         if (!isPlaying) togglePlay(track.id)
         onExpand(track, (e.currentTarget as HTMLDivElement).getBoundingClientRect())
       }}
-      // 初始 opacity-0：新卡挂载瞬间先隐身。canvas 的 rAF 循环首帧会写入内联 opacity
-      //（真实鱼眼值）并永久覆盖此类，卡片随即在正确位置显形 —— 规避低端机上「新卡先在
-      // (0,0) 角落按默认 opacity:1 画一帧、下一帧才被 rAF 摆正」造成的「消失再出现」闪烁。
-      // 必须用 class 而非 style.opacity：MusicCard 订阅播放状态会 re-render，若把 opacity:0
-      // 写进 style prop，每次 re-render 都会被 React 重置回 0 → 反而新增闪烁；class 不会被
-      // re-render 触碰，且内联 opacity 优先级恒高于 class，一经 rAF 写入此类即永久失效。
-      className="absolute top-0 left-0 cursor-pointer will-change-transform pointer-events-auto opacity-0"
+      className="absolute top-0 left-0 flex flex-col cursor-pointer overflow-hidden pointer-events-auto opacity-0 will-change-transform"
       style={{
         width,
         height,
-        // Initial transform — replaced every frame by the canvas rAF loop.
         transform: "translate3d(0,0,0)",
-        // Card hue tint backdrop; the cover image sits on top. Fully opaque
-        // so the cover-backdrop layer behind doesn't bleed through corners.
-        background: `linear-gradient(160deg, hsl(${track.hue} 70% 18%), hsl(${
-          (track.hue + 40) % 360
-        } 65% 10%))`,
-        borderRadius: 18,
-        // 安卓：缩小阴影模糊半径(60→22px)，减少大阴影的 overdraw 与栅格化面积
-        //（低端 GPU 拖动 3D 墙时的零碎成本）。保留 1px 边框 + 一点投影维持立体感。
-        boxShadow: android
-          ? "0 8px 22px -10px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.06)"
-          : "0 20px 60px -20px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.06)",
-        overflow: "hidden",
+        background: glassBg,
+        // 真毛玻璃：卡片自己磨砂、糊它身后那块清晰背景（卡片自身无 filter 才生效，
+        // 鱼眼景深已在 canvas 移除）。
+        backdropFilter: "blur(18px) saturate(1.5)",
+        WebkitBackdropFilter: "blur(18px) saturate(1.5)",
+        borderRadius: 20,
+        boxShadow,
       }}
     >
-      {/* Cover image fills the entire card */}
-      <div className="absolute inset-0">
-        <TrackCover track={track} sizes="240px" />
-        {/* Bottom fade so text underneath is readable */}
-        <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/90 to-transparent" />
-      </div>
-
-      {/* Bottom info + controls.
-          backdrop-blur is one of the heaviest filters: each card forces the
-          GPU to re-rasterize whatever is behind it, and with 10+ cards visible
-          on a phone the cost multiplies. On lite tier we drop it entirely and
-          compensate with a denser solid fill (65% → 80%) so the text stays
-          readable without any sampling work. */}
-      <div
-        className={`music-card-info absolute inset-x-0 bottom-0 p-3 ${
-          lite ? "bg-black/80" : "bg-black/65 backdrop-blur-md"
-        }`}
-      >
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0 flex-1">
-            <div className="text-[13px] font-semibold text-white truncate">
-              {track.title}
-            </div>
-            <div className="text-[11px] text-white/60 truncate">
-              {track.artist}
-            </div>
-          </div>
-          <button
-            type="button"
-            className="text-white/50 hover:text-white shrink-0"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation()
-            }}
-            aria-label="more"
-          >
-            <MoreHorizontal size={16} />
-          </button>
+      <div className="relative flex min-h-0 flex-1 flex-col" style={{ padding: pad, gap: pad - 2 }}>
+        {/* Crisp artwork tile */}
+        <div
+          className="relative min-h-0 flex-1 overflow-hidden"
+          style={{ borderRadius: coverRadius, boxShadow: "0 6px 16px -6px rgba(0,0,0,0.5)" }}
+        >
+          <TrackCover track={track} sizes="240px" />
         </div>
 
-        {/* Transport row */}
-        <div className="mt-2.5 flex items-center justify-between text-white/80">
+        {/* Title / artist */}
+        <div className="text-center">
+          <div
+            className="truncate font-semibold leading-tight text-white"
+            style={{ fontSize: titleSize, textShadow }}
+          >
+            {track.title}
+          </div>
+          <div
+            className="truncate leading-tight text-white/75"
+            style={{ fontSize: artistSize, marginTop: 1, textShadow }}
+          >
+            {track.artist}
+          </div>
+        </div>
+
+        {/* Transport — prev / play / next / favourite */}
+        <div className="flex items-center justify-between text-white/85">
           <button
             type="button"
-            className="hover:text-white"
+            className="shrink-0 transition-colors hover:text-white"
+            style={{ filter: ctrlShadow }}
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation()
@@ -156,13 +132,14 @@ function MusicCardBase(
             }}
             aria-label="prev"
           >
-            <SkipBack size={14} />
+            <SkipBack size={sideIcon} />
           </button>
           <button
             type="button"
-            className={`grid place-items-center h-7 w-7 rounded-full ${
-              isCurrent ? "bg-white text-black" : "bg-white/15 hover:bg-white/25"
+            className={`grid shrink-0 place-items-center rounded-full transition-transform active:scale-95 ${
+              isCurrent ? "bg-white text-black" : "bg-white/20 text-white hover:bg-white/30"
             }`}
+            style={{ width: playSize, height: playSize, filter: lite ? undefined : ctrlShadow }}
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation()
@@ -170,11 +147,16 @@ function MusicCardBase(
             }}
             aria-label={isPlaying ? "pause" : "play"}
           >
-            {isPlaying ? <Pause size={14} /> : <Play size={14} className="translate-x-[1px]" />}
+            {isPlaying ? (
+              <Pause size={playIcon} />
+            ) : (
+              <Play size={playIcon} className="translate-x-[1px]" />
+            )}
           </button>
           <button
             type="button"
-            className="hover:text-white"
+            className="shrink-0 transition-colors hover:text-white"
+            style={{ filter: ctrlShadow }}
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation()
@@ -182,11 +164,12 @@ function MusicCardBase(
             }}
             aria-label="next"
           >
-            <SkipForward size={14} />
+            <SkipForward size={sideIcon} />
           </button>
           <button
             type="button"
-            className={fav ? "text-rose-400" : "hover:text-white"}
+            className={`shrink-0 transition-colors ${fav ? "text-rose-400" : "hover:text-white"}`}
+            style={{ filter: ctrlShadow }}
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation()
@@ -194,7 +177,7 @@ function MusicCardBase(
             }}
             aria-label={fav ? "unlike" : "like"}
           >
-            <Heart size={14} fill={fav ? "currentColor" : "none"} />
+            <Heart size={sideIcon} fill={fav ? "currentColor" : "none"} />
           </button>
         </div>
       </div>

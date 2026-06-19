@@ -1,5 +1,12 @@
 import type { Track } from "../_data/tracks"
 
+/**
+ * 卡片墙统一竖比例（高/宽）。卡片是「精简 iOS 播放器卡」（封面 + 标题/艺术家 + 一行
+ * prev/play/next/♡），统一用此值、忽略各曲自带的随机 ratio（userTracks 里 0.85–1.35）。
+ * 代价：瀑布流从错落变规整等高网格（等高更适合对齐）；想更方的封面就调小、更竖就调大。
+ */
+const MUSIC_CARD_RATIO = 1.3
+
 export type PackedCard = {
   track: Track
   col: number          // leftmost column index (0..cols-1)
@@ -51,7 +58,7 @@ export function packTracks(
         }
       }
       const w = unitWidth - gap
-      const h = Math.round(w * track.ratio)
+      const h = Math.round(w * MUSIC_CARD_RATIO)
       cards.push({
         track,
         col: bestCol,
@@ -74,7 +81,7 @@ export function packTracks(
         }
       }
       const w = unitWidth * 2 - gap
-      const h = Math.round(w * track.ratio)
+      const h = Math.round(w * MUSIC_CARD_RATIO)
       cards.push({
         track,
         col: bestStart,
