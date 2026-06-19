@@ -6,8 +6,7 @@ import type React from "react"
 import { useState } from "react"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { DotMatrixInput } from "@/components/auth/dot-matrix-input"
 
 export function RegisterForm() {
   const [email, setEmail] = useState("")
@@ -52,40 +51,34 @@ export function RegisterForm() {
       <form onSubmit={handleSubmit} className="space-y-4">
         {error && <div className="p-3 rounded-md bg-red-900/30 text-red-400 text-sm">{error}</div>}
 
-        <div className="space-y-2">
-          <Label htmlFor="username">用户名</Label>
-          <Input
-            id="username"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            required
-            className="bg-black/30 border-gray-800 focus:border-lime-500/50 text-white"
-          />
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="email">邮箱</Label>
-          <Input
-            id="email"
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            className="bg-black/30 border-gray-800 focus:border-lime-500/50 text-white"
-          />
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="password">密码</Label>
-          <Input
-            id="password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            className="bg-black/30 border-gray-800 focus:border-lime-500/50 text-white"
-          />
-        </div>
+        <DotMatrixInput
+          label="用户名"
+          value={username}
+          onChange={setUsername}
+          type="text"
+          placeholderWord="USER"
+          autoComplete="username"
+          showCaption
+          autoFocus
+        />
+        <DotMatrixInput
+          label="邮箱"
+          value={email}
+          onChange={setEmail}
+          type="email"
+          placeholderWord="MAIL"
+          inputMode="email"
+          autoComplete="email"
+          showCaption
+        />
+        <DotMatrixInput
+          label="密码"
+          value={password}
+          onChange={setPassword}
+          type="password"
+          placeholderWord="PASS"
+          autoComplete="new-password"
+        />
 
         <Button type="submit" disabled={loading} className="w-full bg-lime-500 hover:bg-lime-600 text-black">
           {loading ? "注册中..." : "注册"}
