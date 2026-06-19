@@ -119,6 +119,19 @@ export default function DeleteConfirmDialog({
     if (loading && maxX > 0) x.set(maxX)
   }, [loading, maxX, x])
 
+  // 删除失败兜底：有的调用方（如评论删除）在 onConfirm 失败后保持弹窗打开，
+  // loading 会 true→false 而 open 仍为 true。此时滑块卡在终点、confirmedRef 已置，无法重试，
+  // 故复位滑块并清确认标记，允许再次滑动删除。（帖子删除失败会关弹窗，open 转 false，不触发此分支。）
+  const prevLoadingRef = useRef(false)
+  useEffect(() => {
+    if (prevLoadingRef.current && !loading && open && confirmedRef.current) {
+      confirmedRef.current = false
+      setNear(false)
+      animate(x, 0, { type: "spring", stiffness: 600, damping: 38 })
+    }
+    prevLoadingRef.current = loading
+  }, [loading, open, x])
+
   // 到达最右端时切换「松手即删」态（与确认判定同一条件，保证提示与行为一致；
   // 值不变时 React 自动 bail，不会逐帧重渲染）
   useMotionValueEvent(x, "change", (v) => {

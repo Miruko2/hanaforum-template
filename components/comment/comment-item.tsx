@@ -15,16 +15,7 @@ import { supabase } from "@/lib/supabaseClient"
 import { useRouter } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
 import { useMengmegziCommand } from "@/hooks/use-mengmegzi-command"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
+import DeleteConfirmDialog from "@/components/delete-confirm-dialog"
 
 // 取评论作者展示名（用于 @提及与回复行署名）
 function authorNameOf(comment: Comment): string {
@@ -247,27 +238,13 @@ function ReplyRow({
         </div>
       </div>
 
-      <AlertDialog open={showDeleteAlert} onOpenChange={setShowDeleteAlert}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>确认删除</AlertDialogTitle>
-            <AlertDialogDescription>确定要删除这条回复吗？此操作不可撤销。</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeleting}>取消</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(e) => {
-                e.preventDefault()
-                handleDelete()
-              }}
-              disabled={isDeleting}
-              className="bg-red-500 hover:bg-red-600 text-white"
-            >
-              {isDeleting ? "删除中..." : "确认删除"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <DeleteConfirmDialog
+        open={showDeleteAlert}
+        onClose={() => setShowDeleteAlert(false)}
+        onConfirm={handleDelete}
+        loading={isDeleting}
+        title={reply.content || "这条回复"}
+      />
     </div>
   )
 }
@@ -577,31 +554,13 @@ export default function CommentItem({
         </div>
       </div>
 
-      <AlertDialog open={showDeleteAlert} onOpenChange={setShowDeleteAlert}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>确认删除</AlertDialogTitle>
-            <AlertDialogDescription>
-              {comment.replies && comment.replies.length > 0
-                ? "删除这条评论会同时删除它下面的所有回复，此操作不可撤销。"
-                : "确定要删除这条评论吗？此操作不可撤销。"}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeleting}>取消</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(e) => {
-                e.preventDefault()
-                handleDelete()
-              }}
-              disabled={isDeleting}
-              className="bg-red-500 hover:bg-red-600 text-white"
-            >
-              {isDeleting ? "删除中..." : "确认删除"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <DeleteConfirmDialog
+        open={showDeleteAlert}
+        onClose={() => setShowDeleteAlert(false)}
+        onConfirm={handleDelete}
+        loading={isDeleting}
+        title={comment.content || "这条评论"}
+      />
     </div>
   )
 }
