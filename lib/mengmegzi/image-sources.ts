@@ -253,17 +253,9 @@ async function fetchFromDanbooru(tag: string, opts: BooruFetchOpts): Promise<Ima
 
 const YANDERE_TIMEOUT = 8000
 
-// 安全分类用 yande.re rating:s（safe）；s 仍比 danbooru g 宽（含轻微性感），额外屏蔽性感向 tag，
-// 把 general/game/life 压得更干净。色图分类不套这个（性感 tag 正是它要的）、改套 SUGGESTIVE_EXTRA_BLOCK。
-const YANDERE_SAFE_EXTRA_BLOCK = [
-  "swimsuit",
-  "bikini",
-  "lingerie",
-  "underwear",
-  "cleavage",
-  "no_bra",
-  "see-through",
-]
+// 安全分类（general/game/life）用 yande.re rating:s（safe）。曾额外屏蔽泳装/比基尼等性感向 tag
+// 把这几个分类压更干净，但用户 2026-06-19 决定放开——普通分类也允许泳装/比基尼（仍 rating g/s、
+// 偏清纯不露骨）。红线（loli/shota/露点）仍由 BOORU_TAG_BLOCKLIST 在 fetchFromYandere 内兜底、任何分类都拦。
 
 /**
  * 调 yande.re（moebooru）：tags = `<tag> rating:<r> order:score`。
@@ -337,7 +329,7 @@ async function fetchFromYandere(tag: string, opts: BooruFetchOpts): Promise<Imag
 async function fetchFromSafeBooruSources(tag: string): Promise<ImageResult | null> {
   return mergeBooruSources([
     fetchFromDanbooru(tag, { rating: "g" }).catch(() => null),
-    fetchFromYandere(tag, { rating: "s", extraBlock: YANDERE_SAFE_EXTRA_BLOCK }).catch(() => null),
+    fetchFromYandere(tag, { rating: "s" }).catch(() => null),
   ])
 }
 

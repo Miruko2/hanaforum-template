@@ -140,16 +140,20 @@ describe("image-sources", () => {
     expect(r!.imageUrl).toContain("img.jpg")
   })
 
-  test("yande.re: 过滤性感 tag(swimsuit) 与 rating 非 s", async () => {
+  test("安全路径: 泳装黑名单已放开(swimsuit 现允许)，但 rating 非 s / 红线仍拦", async () => {
     mockSources({
       danbooru: [],
       yandere: [
+        // rating 非 s（安全分类只要 s）→ 拦
+        yanderePost({ rating: "q", tags: "1girl scenery", sample_url: "https://files.yande.re/sample/wrongrating.jpg" }),
+        // 红线 nude（BOORU_TAG_BLOCKLIST，任何分类都拦）→ 拦
+        yanderePost({ tags: "1girl nude", sample_url: "https://files.yande.re/sample/red.jpg" }),
+        // 泳装：原来安全分类会拦，现已放开 → 允许
         yanderePost({ tags: "1girl swimsuit", sample_url: "https://files.yande.re/sample/sw.jpg" }),
-        yanderePost({ tags: "scenery", sample_url: "https://files.yande.re/sample/sc.jpg" }),
       ],
     })
     const r = await fetchImageForCategory({ provider: "danbooru", query: "scenery" }, "y")
-    expect(r!.imageUrl).toContain("sc.jpg")
+    expect(r!.imageUrl).toContain("sw.jpg")
   })
 
   test("tag 降级: pink_game_controller → controller(多源)", async () => {
