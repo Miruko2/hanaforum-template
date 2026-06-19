@@ -138,7 +138,7 @@ export default function PostGrid() {
   }, [error, posts.length]);
 
   return (
-    <div className="post-grid-container w-full max-w-7xl mx-auto pb-20">
+    <div className="post-grid-container w-full max-w-[2200px] mx-auto pb-20">
       {/* 加载中状态 */}
       {isLoading && posts.length === 0 && (
         <div className="flex justify-center items-center h-32">

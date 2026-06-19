@@ -108,7 +108,7 @@ function HomeContent() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.35 }}
-            className="container mx-auto px-4 pt-24 pb-8 max-w-7xl z-10 relative"
+            className="container mx-auto px-4 pt-24 pb-8 max-w-[2200px] z-10 relative"
           >
             {/* 当前分类提示（仅过滤时显示） */}
             {activeCategory && (
@@ -131,7 +131,7 @@ function HomeContent() {
 
             {/* 排序切换：默认（按时间）/ 热度（按权重）/ 关注（仅登录，只看关注者的帖） */}
             <motion.div
-              className="mb-5 flex items-center gap-1 px-4 max-w-7xl mx-auto"
+              className="mb-5 flex items-center gap-1 px-4 max-w-[2200px] mx-auto"
               initial={firstEnter.current ? { opacity: 0, y: -8 } : false}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.4, ease: "easeOut" }}
