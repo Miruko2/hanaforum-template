@@ -53,15 +53,16 @@ export async function fetchImageForCategory(
   const ai = (aiQuery || "").trim()
 
   if (config.provider === "danbooru") {
+    // provider 仍叫 danbooru（DB 配置兼容），实际是 danbooru + yande.re 多源聚合
     const aiTag = toBooruTag(ai)
     if (aiTag) {
       // tag 逐级降级：复合词搜不到就去前缀修饰词重试，命中即用（减少回退到泛分类 tag）
       for (const cand of tagDescentCandidates(aiTag)) {
-        const r = await fetchFromDanbooru(cand)
+        const r = await fetchFromBooruSources(cand)
         if (r) return { ...r, viaFallback: false }
       }
     }
-    const fb = await fetchFromDanbooru(toBooruTag(config.query || ""))
+    const fb = await fetchFromBooruSources(toBooruTag(config.query || ""))
     return fb ? { ...fb, viaFallback: true } : null
   }
 
@@ -190,6 +191,101 @@ async function fetchFromDanbooru(tag: string): Promise<ImageResult | null> {
     console.warn("[mengmegzi] danbooru 异常:", e?.message || e)
     return null
   }
+}
+
+// ── yande.re（壁纸级高画质动漫图；多源之一） ──
+
+const YANDERE_TIMEOUT = 8000
+
+// yande.re 的 rating:s（safe）比 danbooru rating:g 宽（含轻微性感），额外屏蔽性感向 tag
+const YANDERE_EXTRA_BLOCK = [
+  "swimsuit",
+  "bikini",
+  "lingerie",
+  "underwear",
+  "cleavage",
+  "no_bra",
+  "see-through",
+]
+
+/**
+ * 调 yande.re（moebooru）：tags = `<tag> rating:s order:score`。
+ * yande.re 只有 s/q/e、s 最干净；额外性感黑名单兜底。取 top12 高分随机一张。
+ */
+async function fetchFromYandere(tag: string): Promise<ImageResult | null> {
+  const t = (tag || "").trim()
+  if (!t) return null
+  const url = new URL("https://yande.re/post.json")
+  url.searchParams.set("tags", `${t} rating:s order:score`)
+  url.searchParams.set("limit", "50")
+  try {
+    const res = await fetch(url.toString(), {
+      headers: { "User-Agent": "HanakosForumBot/1.0 (mengmegzi agent)", Accept: "application/json" },
+      signal: AbortSignal.timeout(YANDERE_TIMEOUT),
+    })
+    if (!res.ok) {
+      console.warn("[mengmegzi] yandere 失败:", res.status)
+      return null
+    }
+    const posts = (await res.json()) as Array<{
+      sample_url?: string
+      jpeg_url?: string
+      file_url?: string
+      sample_width?: number
+      sample_height?: number
+      width?: number
+      height?: number
+      rating?: string
+      tags?: string
+      score?: number
+    }>
+    if (!Array.isArray(posts) || posts.length === 0) return null
+    const block = [...BOORU_TAG_BLOCKLIST, ...YANDERE_EXTRA_BLOCK]
+    const clean = posts.filter((p) => {
+      const tags = new Set((p.tags || "").toLowerCase().split(/\s+/))
+      return (
+        p.rating === "s" &&
+        Boolean(p.sample_url || p.jpeg_url || p.file_url) &&
+        !block.some((b) => tags.has(b))
+      )
+    })
+    if (clean.length === 0) return null
+    const pool = clean.slice(0, 12)
+    const pick = pool[Math.floor(Math.random() * pool.length)]
+    const imageUrl = (pick.sample_url || pick.jpeg_url || pick.file_url)! // sample(~1500px)优先
+    const ext = guessExt(imageUrl)
+    return {
+      imageUrl,
+      thumbUrl: null,
+      ext,
+      contentType: extToContentType(ext),
+      width: pick.sample_width || pick.width || 0,
+      height: pick.sample_height || pick.height || 0,
+      source: "yandere",
+      query: t,
+      score: typeof pick.score === "number" ? pick.score : undefined,
+    }
+  } catch (e: any) {
+    console.warn("[mengmegzi] yandere 异常:", e?.message || e)
+    return null
+  }
+}
+
+/**
+ * 多源聚合：并行搜 danbooru + yande.re，各取一张精品，合并随机选一张。
+ * 单源挂掉（超时/空/报错）不影响另一源（容错）——尤其 yande.re 在 Vercel 的可达性未知，
+ * 挂了就只走 danbooru，不阻断配图。
+ */
+async function fetchFromBooruSources(tag: string): Promise<ImageResult | null> {
+  const t = (tag || "").trim()
+  if (!t) return null
+  const settled = await Promise.all([
+    fetchFromDanbooru(t).catch(() => null),
+    fetchFromYandere(t).catch(() => null),
+  ])
+  const ok = settled.filter((r): r is ImageResult => r !== null)
+  if (ok.length === 0) return null
+  return ok[Math.floor(Math.random() * ok.length)]
 }
 
 // ── unsplash（真实照片，imgix；保留兼容） ──

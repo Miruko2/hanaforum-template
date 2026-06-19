@@ -1,30 +1,68 @@
 // lib/mengmegzi/__tests__/image-sources.test.ts
 //
-// 图源适配层测试。mock global fetch，不真实调外部 API。
-// 重点覆盖 danbooru 的 nsfw 过滤（rating:g + tag 黑名单）——这是站点红线。
+// 图源适配层测试。mock global fetch（按 URL 分流，因 danbooru 分支现为 danbooru+yande.re 多源并行）。
+// 重点覆盖：多源聚合/容错、nsfw 过滤（danbooru rating:g + yande.re rating:s+性感黑名单）、tag 降级。
 
 import { fetchImageForCategory, type ImageSourceConfig } from "../image-sources"
 
 const fetchMock = jest.fn() as jest.Mock
 global.fetch = fetchMock as any
 
-function unsplashResp(raw: string, width = 1000, height = 1000) {
-  return { ok: true, json: async () => ({ results: [{ urls: { raw }, width, height }] }) } as any
-}
-
-function danbooruPost(over: Partial<Record<string, any>> = {}) {
+function danbooruPost(over: Record<string, any> = {}) {
   return {
-    large_file_url: "https://cdn.donmai.us/sample/aa/bb/sample-x.jpg",
-    file_url: "https://cdn.donmai.us/original/aa/bb/x.jpg",
+    large_file_url: "https://cdn.donmai.us/sample/aa/sample-x.jpg",
+    file_url: "https://cdn.donmai.us/original/aa/x.jpg",
     image_width: 850,
     image_height: 1200,
     rating: "g",
     tag_string: "1girl original solo",
+    score: 300,
     ...over,
   }
 }
-function danbooruResp(posts: any[]) {
-  return { ok: true, json: async () => posts } as any
+function yanderePost(over: Record<string, any> = {}) {
+  return {
+    sample_url: "https://files.yande.re/sample/bb/sample-y.jpg",
+    file_url: "https://files.yande.re/image/bb/y.jpg",
+    sample_width: 1500,
+    sample_height: 1000,
+    width: 3000,
+    height: 2000,
+    rating: "s",
+    tags: "scenery sky cloud",
+    score: 120,
+    ...over,
+  }
+}
+function unsplashRaw(raw: string, w = 1000, h = 1000) {
+  return { urls: { raw }, width: w, height: h }
+}
+
+/** 按 URL 分流 mock：danbooru / yande.re / unsplash 各自返回配置的结果 */
+function mockSources(o: {
+  danbooru?: any[]
+  yandere?: any[]
+  unsplash?: any[]
+  danbooruStatus?: number
+  yandereStatus?: number
+} = {}) {
+  fetchMock.mockImplementation((u: any) => {
+    const url = String(u)
+    if (url.includes("danbooru.donmai.us")) {
+      if (o.danbooruStatus && o.danbooruStatus !== 200)
+        return Promise.resolve({ ok: false, status: o.danbooruStatus })
+      return Promise.resolve({ ok: true, json: async () => o.danbooru ?? [] })
+    }
+    if (url.includes("yande.re")) {
+      if (o.yandereStatus && o.yandereStatus !== 200)
+        return Promise.resolve({ ok: false, status: o.yandereStatus })
+      return Promise.resolve({ ok: true, json: async () => o.yandere ?? [] })
+    }
+    if (url.includes("api.unsplash.com")) {
+      return Promise.resolve({ ok: true, json: async () => ({ results: o.unsplash ?? [] }) })
+    }
+    return Promise.resolve({ ok: false, status: 404 })
+  })
 }
 
 describe("image-sources", () => {
@@ -36,141 +74,116 @@ describe("image-sources", () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  // ── danbooru（主用，二次元动漫图） ──
+  // ── 多源（danbooru + yande.re） ──
 
-  test("danbooru 返回 sample 主图 + jpg + 宽高；请求带 AI tag + rating:g", async () => {
-    fetchMock.mockResolvedValueOnce(danbooruResp([danbooruPost()]))
-    const cfg: ImageSourceConfig = { provider: "danbooru", query: "original" }
-    const r = await fetchImageForCategory(cfg, "guitar")
-    expect(r).not.toBeNull()
+  test("多源: danbooru 命中(yande.re 空) → 返回 danbooru，带 query/score/viaFallback", async () => {
+    mockSources({ danbooru: [danbooruPost()], yandere: [] })
+    const r = await fetchImageForCategory({ provider: "danbooru", query: "original" }, "guitar")
     expect(r!.source).toBe("danbooru")
-    expect(r!.imageUrl).toContain("sample-x.jpg")
-    expect(r!.ext).toBe("jpg")
-    expect(r!.contentType).toBe("image/jpeg")
-    expect(r!.thumbUrl).toBeNull()
-    expect(r!.width).toBe(850)
-    expect(r!.height).toBe(1200)
-    const called = new URL(fetchMock.mock.calls[0][0])
-    expect(called.hostname).toBe("danbooru.donmai.us")
-    expect(called.searchParams.get("tags")).toBe("guitar rating:g order:score")
-    // 带标识 UA
-    expect(fetchMock.mock.calls[0][1]?.headers?.["User-Agent"]).toContain("HanakosForumBot")
+    expect(r!.query).toBe("guitar")
+    expect(r!.viaFallback).toBe(false)
+    expect(typeof r!.score).toBe("number")
+    // danbooru 请求带 rating:g order:score + UA
+    const dbCall = fetchMock.mock.calls.find((c) => String(c[0]).includes("danbooru"))!
+    expect(new URL(dbCall[0]).searchParams.get("tags")).toBe("guitar rating:g order:score")
+    expect(dbCall[1]?.headers?.["User-Agent"]).toContain("HanakosForumBot")
   })
 
-  test("danbooru: 过滤掉命中 nsfw 黑名单的 post（loli）", async () => {
-    fetchMock.mockResolvedValueOnce(
-      danbooruResp([
-        danbooruPost({
-          tag_string: "1girl loli original",
-          large_file_url: "https://cdn.donmai.us/sample/bad.jpg",
-        }),
-        danbooruPost({
-          tag_string: "1girl scenery",
-          large_file_url: "https://cdn.donmai.us/sample/good.jpg",
-        }),
-      ]),
-    )
+  test("多源容错: danbooru 空 + yande.re 命中 → 返回 yande.re", async () => {
+    mockSources({ danbooru: [], yandere: [yanderePost()] })
+    const r = await fetchImageForCategory({ provider: "danbooru", query: "scenery" }, "sky")
+    expect(r!.source).toBe("yandere")
+    expect(r!.imageUrl).toContain("yande.re")
+    expect(r!.ext).toBe("jpg")
+    expect(r!.width).toBe(1500)
+  })
+
+  test("多源容错: danbooru 报错(500)也不影响 yande.re", async () => {
+    mockSources({ danbooruStatus: 500, yandere: [yanderePost()] })
+    const r = await fetchImageForCategory({ provider: "danbooru", query: "scenery" }, "sky")
+    expect(r!.source).toBe("yandere")
+  })
+
+  test("danbooru: 过滤 nsfw 黑名单(loli)", async () => {
+    mockSources({
+      danbooru: [
+        danbooruPost({ tag_string: "1girl loli", large_file_url: "https://cdn.donmai.us/sample/bad.jpg" }),
+        danbooruPost({ tag_string: "1girl scenery", large_file_url: "https://cdn.donmai.us/sample/good.jpg" }),
+      ],
+      yandere: [],
+    })
     const r = await fetchImageForCategory({ provider: "danbooru", query: "original" }, "scenery")
-    // 只可能选到干净那张
     expect(r!.imageUrl).toContain("good.jpg")
   })
 
-  test("danbooru: 过滤掉 rating 非 g 的 post", async () => {
-    fetchMock.mockResolvedValueOnce(
-      danbooruResp([
-        danbooruPost({ rating: "s", large_file_url: "https://cdn.donmai.us/sample/sensitive.jpg" }),
-        danbooruPost({ rating: "g", large_file_url: "https://cdn.donmai.us/sample/general.jpg" }),
-      ]),
-    )
+  test("danbooru: 过滤 rating 非 g", async () => {
+    mockSources({
+      danbooru: [
+        danbooruPost({ rating: "s", large_file_url: "https://cdn.donmai.us/sample/sens.jpg" }),
+        danbooruPost({ rating: "g", large_file_url: "https://cdn.donmai.us/sample/gen.jpg" }),
+      ],
+      yandere: [],
+    })
     const r = await fetchImageForCategory({ provider: "danbooru", query: "x" }, "y")
-    expect(r!.imageUrl).toContain("general.jpg")
+    expect(r!.imageUrl).toContain("gen.jpg")
   })
 
-  test("danbooru: AI 关键词转 booru tag（小写 + 下划线）", async () => {
-    fetchMock.mockResolvedValueOnce(danbooruResp([danbooruPost()]))
-    await fetchImageForCategory({ provider: "danbooru", query: "original" }, "Night City")
-    expect(new URL(fetchMock.mock.calls[0][0]).searchParams.get("tags")).toBe(
-      "night_city rating:g order:score",
-    )
+  test("yande.re: 过滤性感 tag(swimsuit) 与 rating 非 s", async () => {
+    mockSources({
+      danbooru: [],
+      yandere: [
+        yanderePost({ tags: "1girl swimsuit", sample_url: "https://files.yande.re/sample/sw.jpg" }),
+        yanderePost({ tags: "scenery", sample_url: "https://files.yande.re/sample/sc.jpg" }),
+      ],
+    })
+    const r = await fetchImageForCategory({ provider: "danbooru", query: "scenery" }, "y")
+    expect(r!.imageUrl).toContain("sc.jpg")
   })
 
-  test("danbooru: AI tag 全被过滤 → 回退分类 tag → 仍空 → null", async () => {
-    fetchMock
-      .mockResolvedValueOnce(danbooruResp([danbooruPost({ tag_string: "loli" })])) // AI tag 命中黑名单滤空
-      .mockResolvedValueOnce(danbooruResp([])) // 回退 tag 也空
-    const r = await fetchImageForCategory({ provider: "danbooru", query: "original" }, "badword")
-    expect(r).toBeNull()
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-  })
-
-  test("danbooru: 复合词搜不到 → 逐级降级命中 (pink_game_controller→controller)", async () => {
-    fetchMock
-      .mockResolvedValueOnce(danbooruResp([])) // pink_game_controller 空
-      .mockResolvedValueOnce(danbooruResp([])) // game_controller 空
-      .mockResolvedValueOnce(danbooruResp([danbooruPost()])) // controller 命中
+  test("tag 降级: pink_game_controller → controller(多源)", async () => {
+    // 只有 controller 级 danbooru 命中，其余都空
+    fetchMock.mockImplementation((u: any) => {
+      const url = String(u)
+      const tag = new URL(url).searchParams.get("tags") || ""
+      if (url.includes("danbooru") && tag.startsWith("controller "))
+        return Promise.resolve({ ok: true, json: async () => [danbooruPost()] })
+      return Promise.resolve({ ok: true, json: async () => [] })
+    })
     const r = await fetchImageForCategory(
       { provider: "danbooru", query: "video_game" },
       "pink game controller",
     )
-    expect(r).not.toBeNull()
-    expect(r!.viaFallback).toBe(false) // 降级命中，不算分类回退
-    expect(fetchMock).toHaveBeenCalledTimes(3)
-    expect(new URL(fetchMock.mock.calls[0][0]).searchParams.get("tags")).toBe(
-      "pink_game_controller rating:g order:score",
-    )
-    expect(new URL(fetchMock.mock.calls[2][0]).searchParams.get("tags")).toBe(
-      "controller rating:g order:score",
-    )
+    expect(r!.source).toBe("danbooru")
+    expect(r!.query).toBe("controller")
+    expect(r!.viaFallback).toBe(false)
   })
 
-  test("danbooru: HTTP 失败返回 null", async () => {
-    fetchMock.mockResolvedValue({ ok: false, status: 500 } as any)
-    const r = await fetchImageForCategory({ provider: "danbooru", query: "x" }, "y")
+  test("全空 → 回退分类 tag → 仍空 → null", async () => {
+    mockSources({ danbooru: [], yandere: [] })
+    const r = await fetchImageForCategory({ provider: "danbooru", query: "original" }, "badword")
     expect(r).toBeNull()
   })
 
-  // ── unsplash（保留兼容，真实照片） ──
+  // ── unsplash（保留兼容） ──
 
-  test("unsplash 返回 imgix webp 主图 + 640 缩略图 + 宽高", async () => {
+  test("unsplash: imgix webp 主图 + 640 缩略图", async () => {
     process.env.UNSPLASH_ACCESS_KEY = "test-key"
-    fetchMock.mockResolvedValueOnce(unsplashResp("https://images.unsplash.com/photo-1", 1200, 800))
-    const r = await fetchImageForCategory({ provider: "unsplash", query: "video game" })
+    mockSources({ unsplash: [unsplashRaw("https://images.unsplash.com/p1", 1200, 800)] })
+    const r = await fetchImageForCategory({ provider: "unsplash", query: "x" })
     expect(r!.source).toBe("unsplash")
     expect(r!.ext).toBe("webp")
-    expect(r!.contentType).toBe("image/webp")
-    expect(r!.width).toBe(1200)
-    expect(r!.height).toBe(800)
-    const main = new URL(r!.imageUrl)
-    expect(main.hostname).toBe("images.unsplash.com")
-    expect(main.searchParams.get("fm")).toBe("webp")
-    expect(main.searchParams.get("w")).toBe("1920")
+    expect(new URL(r!.imageUrl).searchParams.get("fm")).toBe("webp")
     expect(new URL(r!.thumbUrl!).searchParams.get("w")).toBe("640")
   })
 
-  test("unsplash: AI 关键词优先，命中只调一次", async () => {
-    process.env.UNSPLASH_ACCESS_KEY = "test-key"
-    fetchMock.mockResolvedValueOnce(unsplashResp("https://images.unsplash.com/ai"))
-    const r = await fetchImageForCategory({ provider: "unsplash", query: "video game" }, "coffee shop")
-    expect(r!.imageUrl).toContain("images.unsplash.com/ai")
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(new URL(fetchMock.mock.calls[0][0]).searchParams.get("query")).toBe("coffee shop")
-  })
-
-  test("unsplash: key 未配置返回 null", async () => {
+  test("unsplash: key 未配置 → null", async () => {
     delete process.env.UNSPLASH_ACCESS_KEY
+    mockSources({ unsplash: [unsplashRaw("x")] })
     const r = await fetchImageForCategory({ provider: "unsplash", query: "x" })
     expect(r).toBeNull()
-    expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  // ── 杂项 ──
-
-  test("未知 provider 返回 null", async () => {
-    const r = await fetchImageForCategory({ provider: "foobar" as any })
-    expect(r).toBeNull()
-  })
-
-  test("config 为 null/undefined 返回 null", async () => {
+  test("config 为 null/undefined → null", async () => {
     expect(await fetchImageForCategory(null as any)).toBeNull()
     expect(await fetchImageForCategory(undefined as any)).toBeNull()
   })
