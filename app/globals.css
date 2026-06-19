@@ -1754,6 +1754,31 @@ body.modal-open {
 
 
 /* ============================================
+ * 音乐卡片墙（/music）—— 毛玻璃
+ * 卡片本体是无色半透明磨砂面板，真 backdrop-filter 糊它身后那块清晰的站点底图
+ * （ImageBackdrop）。收进 CSS 类（而非写 inline）与代码库其他玻璃类一致、便于统一调。
+ * 分两档、按 lite 在 MusicCard 上二选一：.mw-glass = 桌面满磨砂 blur(18)、全程不降级
+ * （曾试「拖动摘磨砂」省性能被否决：视觉跳变明显）；.mw-glass-lite = 手机/降低动效层
+ * 全程浅模糊 blur(6)（见下方注释）。backdrop-filter 拖动时每帧逐卡重模糊是已知 GPU 成本。
+ * ============================================ */
+.mw-glass {
+  background: rgba(18, 20, 26, 0.22);
+  backdrop-filter: blur(18px) saturate(1.5);
+  -webkit-backdrop-filter: blur(18px) saturate(1.5);
+}
+/* 手机 / 降低动效层(lite)：全程用浅模糊 blur(6) 替代满磨砂 —— 用户要求手机端统一用「移动
+   时那个模糊」。重要：这仍是 backdrop-filter、仍每帧实时采样背景，只是模糊半径小，省的是
+   高斯核那部分（中等档），「复制背景+合成」的大头还在；若手机真机拖动仍卡，把下面这条改成
+   `backdrop-filter: none` + 提高 background 不透明度（纯色底，才是数量级省法）。桌面仍用上面
+   的 .mw-glass 满磨砂。按 lite 在 MusicCard 上二选一，无需运行时切换。 */
+.mw-glass-lite {
+  background: rgba(18, 20, 26, 0.26);
+  backdrop-filter: blur(6px) saturate(1.4);
+  -webkit-backdrop-filter: blur(6px) saturate(1.4);
+}
+
+
+/* ============================================
  * 瀑布流布局（react-masonry-css）
  * .masonry-grid 是外层 flex 容器
  * .masonry-grid-column 是每一列

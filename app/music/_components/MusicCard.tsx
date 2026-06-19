@@ -52,8 +52,9 @@ function MusicCardBase(
   const playIcon = Math.round(playSize * 0.44)
   const sideIcon = clamp(Math.round(width * 0.092), 14, 19)
 
-  // 几乎无色的中性玻璃 + 真 backdrop-filter（糊身后那块清晰背景）。
-  const glassBg = "rgba(18,20,26,0.22)"
+  // 玻璃底色 + backdrop-filter 由 CSS 类提供（不写 inline）：桌面用 .mw-glass 满磨砂
+  // blur(18)，手机/降低动效层(lite)用 .mw-glass-lite 全程浅模糊 blur(6)（用户要手机端
+  // 统一用「移动时那个模糊」；仍是实时采样毛玻璃、只省模糊核，详见 globals.css）。
   // 边框恒为中性白细线 —— 正在播放也不染色（用户要求），保持原样；当前曲改由中间
   // 圆形主键变白底来指示，不靠边框。
   const rim = "0 0 0 1px rgba(255,255,255,0.45)"
@@ -80,16 +81,11 @@ function MusicCardBase(
         if (!isPlaying) togglePlay(track.id)
         onExpand(track, (e.currentTarget as HTMLDivElement).getBoundingClientRect())
       }}
-      className="absolute top-0 left-0 flex flex-col cursor-pointer overflow-hidden pointer-events-auto opacity-0 will-change-transform"
+      className={`${lite ? "mw-glass-lite" : "mw-glass"} absolute top-0 left-0 flex flex-col cursor-pointer overflow-hidden pointer-events-auto opacity-0 will-change-transform`}
       style={{
         width,
         height,
         transform: "translate3d(0,0,0)",
-        background: glassBg,
-        // 真毛玻璃：卡片自己磨砂、糊它身后那块清晰背景（卡片自身无 filter 才生效，
-        // 鱼眼景深已在 canvas 移除）。
-        backdropFilter: "blur(18px) saturate(1.5)",
-        WebkitBackdropFilter: "blur(18px) saturate(1.5)",
         borderRadius: 20,
         boxShadow,
       }}
