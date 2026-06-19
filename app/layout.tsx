@@ -104,6 +104,8 @@ export default function RootLayout({
             width: "100%",
             height: "100%",
             zIndex: -1,
+            // 站点默认底图作基底固定层（resilient、SSR 即出）；登录用户的自定义首页背景由
+            // <AppBackground/> 渲染成动画层叠在它之上（见 components/app-background.tsx）。
             backgroundImage: `url('${BG_IMAGE}')`,
             backgroundSize: "cover",
             backgroundPosition: "center center",

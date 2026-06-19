@@ -125,9 +125,45 @@ async function uploadToAvatars(
   return supabase.storage.from("avatars").getPublicUrl(path).data.publicUrl
 }
 
+// ───────── 删旧图：换头像/背景或还原时清理 avatars 桶里的旧文件（孤儿） ─────────
+//
+// 上传用带时间戳的唯一文件名（每次换图都是新文件、不覆盖旧的），故需显式删旧文件、否则越换
+// 越多。删之安全的前提：头像/背景在站内都按 profiles「当前列」实时读（avatarMap/actorMap 读取
+// 时 JOIN），列一更新即全站指向新图、旧 URL 无人引用。全程 best-effort：删失败只告警、绝不抛、
+// 绝不挡上传/还原主流程（旧文件最坏只是残留为孤儿，零 egress 影响）。
+
+// 从存储公开 URL 解析出 avatars 桶内对象路径；非本桶 / 外链 / 解析不出 → null（绝不乱删）。
+function avatarsObjectPath(publicUrl: string | null | undefined): string | null {
+  if (!publicUrl) return null
+  const marker = "/storage/v1/object/public/avatars/"
+  const idx = publicUrl.indexOf(marker)
+  if (idx === -1) return null
+  const rel = publicUrl.slice(idx + marker.length).split("?")[0]
+  try {
+    return decodeURIComponent(rel) || null
+  } catch {
+    return rel || null
+  }
+}
+
+// 删一个旧文件（best-effort）。给 keepUrl 时，旧路径与新文件相同则跳过——防御 Date.now()
+// 同毫秒撞名把刚传上去的新图误删。
+async function removeOldAvatarObject(oldUrl: string | null, keepUrl?: string): Promise<void> {
+  const oldPath = avatarsObjectPath(oldUrl)
+  if (!oldPath) return
+  if (keepUrl && oldPath === avatarsObjectPath(keepUrl)) return
+  try {
+    const { error } = await supabase.storage.from("avatars").remove([oldPath])
+    if (error) console.warn("删除旧图失败（忽略，保留为孤儿）:", error.message)
+  } catch (e) {
+    console.warn("删除旧图异常（忽略）:", e)
+  }
+}
+
 // 头像上传：压缩到 256px webp/0.8（显示仅 40-112px，256 足够清晰）→ 传桶 → 写回
 // profiles.avatar_url → 返回 publicUrl。失败 message 区分「上传失败」「更新记录失败」。
 export async function uploadAvatar(userId: string, file: File): Promise<string> {
+  const prev = (await getOwnProfile(userId))?.avatar_url ?? null
   let publicUrl: string
   try {
     publicUrl = await uploadToAvatars(`${userId}/${Date.now()}`, file, 256, 0.8)
@@ -139,6 +175,7 @@ export async function uploadAvatar(userId: string, file: File): Promise<string> 
     .update({ avatar_url: publicUrl })
     .eq("id", userId)
   if (updateError) throw new Error("头像上传成功但更新记录失败")
+  await removeOldAvatarObject(prev, publicUrl) // 删旧头像（best-effort）
   return publicUrl
 }
 
@@ -146,6 +183,7 @@ export async function uploadAvatar(userId: string, file: File): Promise<string> 
 // 从源头压住 Cached Egress（背景图最易成为流量大头）→ 传桶 {userId}/bg_xxx → 写回
 // profiles.background_url → 返回 publicUrl。
 export async function uploadBackground(userId: string, file: File): Promise<string> {
+  const prev = (await getOwnProfile(userId))?.background_url ?? null
   let publicUrl: string
   try {
     publicUrl = await uploadToAvatars(`${userId}/bg_${Date.now()}`, file, 1280, 0.8)
@@ -157,5 +195,59 @@ export async function uploadBackground(userId: string, file: File): Promise<stri
     .update({ background_url: publicUrl })
     .eq("id", userId)
   if (updateError) throw new Error("背景图上传成功但更新记录失败")
+  await removeOldAvatarObject(prev, publicUrl) // 删旧 banner（best-effort）
   return publicUrl
+}
+
+// ───────── 写/读：首页背景（home_background_url，与 banner 的 background_url 完全独立） ─────────
+//
+// 这张图作为首页/全站底图（AppBackground 渲染层叠在 layout 默认底图上、切换高斯模糊渐入）+ music 页底图；
+// banner 的 background_url 只管个人卡片，二者互不影响、各自上传/还原。
+// 单独成列、单独查询：即便加列迁移（scripts/2026-06-20-profiles-home-background.sql）尚未跑，
+// 也只让本功能静默失效（读返回 null / 写报错提示重试），绝不波及主资料(getOwnProfile)读取。
+
+// 读首页背景；任何错误（含列不存在）→ null，本功能静默降级。
+export async function getHomeBackground(userId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("home_background_url")
+    .eq("id", userId)
+    .maybeSingle()
+  if (error || !data) return null
+  return (data as { home_background_url: string | null }).home_background_url
+}
+
+// 上传首页背景：压缩到最大边 2560 / webp / 0.85（视觉接近无损、体积更省的平衡档）。首页背景是「全屏」底图（区别于只占小条幅的
+// banner——故不沿用 banner 的 1280），2560 能覆盖到 1440p 桌面仍清晰、4K 也仅轻微放大；
+// 显示侧用 background-size:cover / object-cover 随屏自适应（compressImage 只缩不放，
+// 原图更小则保持原样、绝不上采样发虚）。egress 可控：首页背景是「私人」底图（只本人加载、
+// CDN 边缘缓存 1 年），不像 banner 会被公开页大量他人下载。
+// → 传桶 {userId}/homebg_xxx → 写回 home_background_url → 返回 publicUrl。
+export async function uploadHomeBackground(userId: string, file: File): Promise<string> {
+  const prev = await getHomeBackground(userId)
+  let publicUrl: string
+  try {
+    publicUrl = await uploadToAvatars(`${userId}/homebg_${Date.now()}`, file, 2560, 0.85)
+  } catch (e) {
+    throw new Error("首页背景上传失败: " + ((e as { message?: string })?.message ?? ""))
+  }
+  const { error: updateError } = await supabase
+    .from("profiles")
+    .update({ home_background_url: publicUrl })
+    .eq("id", userId)
+  if (updateError) throw new Error("首页背景上传成功但更新记录失败")
+  await removeOldAvatarObject(prev, publicUrl) // 删旧首页背景（best-effort）
+  return publicUrl
+}
+
+// 还原默认首页背景：置空 home_background_url（首页/全站底图回落站点默认）+ best-effort 删掉
+// 原自定义图（避免还原后旧文件残留为孤儿）。删失败不影响还原本身（已置空、显示已回默认）。
+export async function clearHomeBackground(userId: string): Promise<void> {
+  const prev = await getHomeBackground(userId)
+  const { error } = await supabase
+    .from("profiles")
+    .update({ home_background_url: null })
+    .eq("id", userId)
+  if (error) throw error
+  await removeOldAvatarObject(prev)
 }

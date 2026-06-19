@@ -2,9 +2,15 @@
 
 import { useEffect, useRef } from "react"
 import { usePlaybackWall } from "../_context/PlaybackContext"
+import { useMyBackgroundUrl } from "@/hooks/use-my-background"
+import { CrossfadeBackground } from "@/components/crossfade-background"
+
+// 站点默认底图（深色霓虹夜景）。用户未在个人页设置自定义背景时回落到它。
+const DEFAULT_BACKDROP = "/mos-background.webp"
 
 /**
- * 站点同款底图（/mos-background.webp，深色霓虹夜景）作为卡片墙背景，保持清晰 ——
+ * 卡片墙背景：用户设置过首页背景则用它、否则站点默认底图（/mos-background.webp）。切换背景时
+ * 高斯模糊渐入交叉淡入（CrossfadeBackground，与首页同款）。背景保持清晰 ——
  * 毛玻璃由卡片自己的 backdrop-filter 完成（糊它身后那块），背景本身不模糊。
  *
  * 播放时的「呼吸」律动：一层黑色遮罩的 opacity 由 rAF 随音频强度改（intensity 高→更透、
@@ -15,6 +21,9 @@ import { usePlaybackWall } from "../_context/PlaybackContext"
 export function ImageBackdrop() {
   // 墙专用低频上下文：只取 getAudioIntensity（稳定引用，不随高频 value 重建）。
   const { getAudioIntensity } = usePlaybackWall()
+  // 个人页设置的首页背景 → 同步作为 music 页底图（与首页/全站底图共用 useMyBackgroundUrl）；
+  // null 时由 CrossfadeBackground 的 baseUrl 默认底图垫底。切路由重挂载会重取、无需 realtime。
+  const custom = useMyBackgroundUrl()
   const dimRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -42,18 +51,9 @@ export function ImageBackdrop() {
 
   return (
     <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src="/mos-background.webp"
-        alt=""
-        className="absolute inset-0 h-full w-full object-cover"
-        style={{
-          // 背景保持清晰（毛玻璃由卡片 backdrop-filter 完成），只轻微提饱和。
-          filter: "saturate(1.08)",
-          transform: "scale(1.04)",
-        }}
-        draggable={false}
-      />
+      {/* 默认底图垫底 + 自定义首页背景高斯模糊渐入叠上（与首页同款 CrossfadeBackground）；
+          saturate 轻提饱和、与原来一致。背景本身不模糊，毛玻璃由卡片 backdrop-filter 完成。 */}
+      <CrossfadeBackground url={custom} baseUrl={DEFAULT_BACKDROP} extraFilter="saturate(1.08)" />
       {/* 律动暗化遮罩：opacity 由上面 rAF 随音频强度脉动；初始 0.3（接近暂停态）。 */}
       <div
         ref={dimRef}

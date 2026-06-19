@@ -4,6 +4,7 @@ import { useState, useEffect, type ReactNode } from "react"
 import { ThemeProvider } from "@/components/theme-provider"
 import { SimpleAuthProvider } from "@/contexts/auth-context-simple"
 import BannedGate from "@/components/banned-gate"
+import AppBackground from "@/components/app-background"
 import { PostsProvider } from "@/contexts/posts-context"
 import { CinemaModeProvider } from "@/contexts/cinema-mode-context"
 import PageTransition from "@/components/page-transition"
@@ -67,6 +68,9 @@ export function Providers({ children }: { children: ReactNode }) {
       disableTransitionOnChange
     >
       <SimpleAuthProvider>
+        {/* 全站自定义底图层：登录用户设置的首页背景，切换时高斯模糊渐入交叉淡入（见组件）。
+            放在 SimpleAuthProvider 内、PageTransition 外，避免被切页动画的 opacity 波及。 */}
+        <AppBackground />
         <BannedGate>
         <PostsProvider>
           <Script id="page-refresh-detection" strategy="beforeInteractive">

@@ -6,10 +6,14 @@ import { useEffect, useState, useRef } from "react"
 import Navbar from "@/components/navbar"
 import BackgroundEffects from "@/components/background-effects"
 import { useToast } from "@/hooks/use-toast"
+import { ImagePlus, RotateCcw } from "lucide-react"
 import {
   getOwnProfile,
   uploadAvatar,
   uploadBackground,
+  getHomeBackground,
+  uploadHomeBackground,
+  clearHomeBackground,
   updateUsername,
   syncAuthUsername,
   updateBio,
@@ -22,6 +26,7 @@ import FollowStats from "./_components/follow-stats"
 import MyPosts from "./_components/my-posts"
 import { getUserPosts } from "@/lib/supabase-optimized"
 import type { Post } from "@/lib/types"
+import { emitHomeBackgroundChanged } from "@/hooks/use-my-background"
 
 // 「我的」页 = 编排层：持有页面级状态，handler 薄封装调用 lib/profiles 数据层，
 // 再把状态/回调下发给 Banner 头部与设置菜单。头像、背景图各有一个隐藏文件 input
@@ -33,6 +38,8 @@ export default function ProfilePage() {
   const [username, setUsername] = useState("")
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
   const [backgroundUrl, setBackgroundUrl] = useState<string | null>(null)
+  // 首页背景：与上面 banner 的 backgroundUrl 完全独立的另一张图（home_background_url）
+  const [homeBackgroundUrl, setHomeBackgroundUrl] = useState<string | null>(null)
   const [bio, setBio] = useState("")
   const [loading, setLoading] = useState(true)
 
@@ -43,8 +50,11 @@ export default function ProfilePage() {
   // 上传态
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
   const [uploadingBackground, setUploadingBackground] = useState(false)
+  const [uploadingHomeBackground, setUploadingHomeBackground] = useState(false)
+  const [removingHomeBackground, setRemovingHomeBackground] = useState(false)
   const avatarInputRef = useRef<HTMLInputElement>(null)
   const bgInputRef = useRef<HTMLInputElement>(null)
+  const homeBgInputRef = useRef<HTMLInputElement>(null)
 
   // 用户名编辑态
   const [editingUsername, setEditingUsername] = useState(false)
@@ -71,6 +81,8 @@ export default function ProfilePage() {
           setBackgroundUrl(profile.background_url || null)
           setBio(profile.bio || "")
         }
+        // 首页背景：独立字段、独立查询（迁移未跑则静默 null，不影响上面主资料）
+        setHomeBackgroundUrl(await getHomeBackground(user.id))
         setLoading(false)
       }
       fetchProfile()
@@ -152,6 +164,54 @@ export default function ProfilePage() {
     } finally {
       setUploadingBackground(false)
       if (bgInputRef.current) bgInputRef.current.value = ""
+    }
+  }
+
+  // ───────── 首页背景（独立字段 home_background_url，与 banner 的 background_url 互不影响） ─────────
+  const handleHomeBgClick = () => homeBgInputRef.current?.click()
+
+  const handleHomeBgFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file || !user) return
+    if (!file.type.startsWith("image/")) {
+      alert("请选择图片文件")
+      return
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      alert("图片大小不能超过 10MB")
+      return
+    }
+    setUploadingHomeBackground(true)
+    try {
+      const url = await uploadHomeBackground(user.id, file)
+      setHomeBackgroundUrl(url)
+      emitHomeBackgroundChanged(url) // 即时刷新全站/ music 底图，无需刷新页面
+      toast({ title: "首页背景已更新" })
+    } catch (err) {
+      console.error("首页背景上传异常:", err)
+      const e = err as { message?: string }
+      alert(e?.message || "上传出错，请重试")
+    } finally {
+      setUploadingHomeBackground(false)
+      if (homeBgInputRef.current) homeBgInputRef.current.value = ""
+    }
+  }
+
+  // 还原默认首页背景：置空 home_background_url（首页/全站底图回落站点默认）。可逆，无需二次确认。
+  const handleHomeBgRemove = async () => {
+    if (!user || removingHomeBackground) return
+    setRemovingHomeBackground(true)
+    try {
+      await clearHomeBackground(user.id)
+      setHomeBackgroundUrl(null)
+      emitHomeBackgroundChanged(null) // 即时回落默认，无需刷新页面
+      toast({ title: "已还原默认首页背景" })
+    } catch (err) {
+      const e = err as { message?: string }
+      console.error("还原首页背景异常:", e)
+      toast({ title: "还原失败", description: e?.message || "请稍后再试", variant: "destructive" })
+    } finally {
+      setRemovingHomeBackground(false)
     }
   }
 
@@ -290,6 +350,13 @@ export default function ProfilePage() {
         className="hidden"
         onChange={handleBgFileChange}
       />
+      <input
+        ref={homeBgInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleHomeBgFileChange}
+      />
 
       <div className="container mx-auto max-w-6xl px-4 pt-20 pb-10">
         <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
@@ -323,6 +390,42 @@ export default function ProfilePage() {
               },
             }}
           />
+
+          {/* 首页背景：与个人卡片 banner 完全独立的另一张图（独立字段 home_background_url、
+              独立隐藏 input + 独立上传/还原，与 banner 互不影响）。点击上传 → uploadHomeBackground
+              压缩(2560/webp/0.85) → 由 AppBackground 渲染为首页/全站底图（切换有高斯模糊渐入）。右侧「还原默认」仅在
+              已设时出现。 */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleHomeBgClick}
+              disabled={uploadingHomeBackground || removingHomeBackground}
+              className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-medium text-white/85 backdrop-blur-xl transition-colors hover:bg-white/20 hover:text-white disabled:opacity-50"
+            >
+              {uploadingHomeBackground ? (
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+              ) : (
+                <ImagePlus className="h-4 w-4" />
+              )}
+              {homeBackgroundUrl ? "更换首页背景" : "设置首页背景"}
+            </button>
+            {homeBackgroundUrl && (
+              <button
+                type="button"
+                onClick={handleHomeBgRemove}
+                disabled={removingHomeBackground || uploadingHomeBackground}
+                aria-label="还原默认首页背景"
+                title="还原默认首页背景"
+                className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-3.5 py-3 text-white/60 backdrop-blur-xl transition-colors hover:bg-white/10 hover:text-white/85 disabled:opacity-50"
+              >
+                {removingHomeBackground ? (
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/60 border-t-transparent" />
+                ) : (
+                  <RotateCcw className="h-4 w-4" />
+                )}
+              </button>
+            )}
+          </div>
 
           {user && <FollowStats userId={user.id} />}
           </div>
