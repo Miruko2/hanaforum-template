@@ -4,20 +4,28 @@
 // AI 只生成文字 + 一个英文配图关键词(image_query)；选哪个源、拉哪张全由代码决定。
 // 返回 null = 不配图或拉图失败，调用方降级纯文字帖。
 //
-// 两类源：
-//   · danbooru —— 二次元动漫图（契合站点）。AI 关键词转 tag 搜 + rating:g（最严）+ order:score
-//     （只取高赞精品）+ tag 黑名单二次过滤；用 large_file_url（sample ~850px）当主图、直传不另压。
-//   · unsplash —— 真实照片（保留兼容）。imgix 参数返回压好的 webp 主图 + 缩略图。
+// 三种 provider：
+//   · danbooru   —— 安全二次元图。danbooru rating:g + yande.re rating:s 双源聚合，order:score
+//     取高赞精品 + tag 黑名单二次过滤。用于 general/game/life。
+//   · suggestive —— 色图(nsfw)「软色情·不露点」。danbooru rating:s（sensitive=性感不露点）+
+//     yande.re rating:q（更辣）双源，放行 swimsuit/lingerie 等性感 tag，但用 SUGGESTIVE_EXTRA_BLOCK
+//     拦掉一切露点/性行为 tag。loli/shota/guro 等红线词在 BOORU_TAG_BLOCKLIST，任何分类都拦。
+//   · unsplash   —— 真实照片（保留兼容）。imgix 参数返回压好的 webp 主图 + 缩略图。
 //
-// 返回的 ImageResult 带 query/viaFallback/score 等可观测字段，executor 写进行动日志，
-// 方便在 admin 面板看到「AI 词命中 / 回退默认 tag」与图的质量分。
+// 返回的 ImageResult 带 query/viaFallback/score/rating 等可观测字段，executor 写进行动日志，
+// 方便在 admin 面板看到「AI 词命中 / 回退默认 tag」「质量分」「rating 级别」（色图分类便于人工抽查）。
 
-import { BOORU_TAG_BLOCKLIST, IMAGE_MAX_EDGE, IMAGE_QUALITY } from "./constants"
+import {
+  BOORU_TAG_BLOCKLIST,
+  SUGGESTIVE_EXTRA_BLOCK,
+  IMAGE_MAX_EDGE,
+  IMAGE_QUALITY,
+} from "./constants"
 import { POST_THUMB_EDGE } from "@/lib/post-image-thumb"
 
 export interface ImageSourceConfig {
-  provider: "none" | "unsplash" | "danbooru"
-  /** unsplash: 回退搜索词 / danbooru: 回退 tag（AI 关键词搜不到时用） */
+  provider: "none" | "unsplash" | "danbooru" | "suggestive"
+  /** unsplash: 回退搜索词 / danbooru·suggestive: 回退 tag（AI 关键词搜不到时用） */
   query?: string
 }
 
@@ -35,14 +43,16 @@ export interface ImageResult {
   query?: string
   /** 是否用了分类回退 tag（true = AI 的 image_query 没命中、退回默认 tag） */
   viaFallback?: boolean
-  /** danbooru 图的 score（点赞分，质量参考） */
+  /** booru 图的 score（点赞分，质量参考） */
   score?: number
+  /** 实际 rating 级别（g/s/q）；色图分类便于人工抽查「是不是越了不露点线」 */
+  rating?: string
 }
 
 /**
  * 按分类配置 + AI 关键词拉一张图。
  * - none → null
- * - danbooru/unsplash → 先用 AI 关键词，搜不到回退 config.query（标 viaFallback）
+ * - danbooru/suggestive/unsplash → 先用 AI 关键词，搜不到回退 config.query（标 viaFallback）
  * - 任何失败 → null（调用方降级纯文字帖）
  */
 export async function fetchImageForCategory(
@@ -53,17 +63,13 @@ export async function fetchImageForCategory(
   const ai = (aiQuery || "").trim()
 
   if (config.provider === "danbooru") {
-    // provider 仍叫 danbooru（DB 配置兼容），实际是 danbooru + yande.re 多源聚合
-    const aiTag = toBooruTag(ai)
-    if (aiTag) {
-      // tag 逐级降级：复合词搜不到就去前缀修饰词重试，命中即用（减少回退到泛分类 tag）
-      for (const cand of tagDescentCandidates(aiTag)) {
-        const r = await fetchFromBooruSources(cand)
-        if (r) return { ...r, viaFallback: false }
-      }
-    }
-    const fb = await fetchFromBooruSources(toBooruTag(config.query || ""))
-    return fb ? { ...fb, viaFallback: true } : null
+    // provider 仍叫 danbooru（DB 配置兼容），实际是 danbooru(g) + yande.re(s) 安全双源聚合
+    return runBooruPipeline(fetchFromSafeBooruSources, ai, config.query || "")
+  }
+
+  if (config.provider === "suggestive") {
+    // 色图：danbooru(s) + yande.re(q) 软色情双源；回退 tag 缺省 swimsuit（必出性感不露点图）
+    return runBooruPipeline(fetchFromSuggestiveBooruSources, ai, config.query || "swimsuit")
   }
 
   if (config.provider === "unsplash") {
@@ -78,9 +84,28 @@ export async function fetchImageForCategory(
   return null
 }
 
-// ── danbooru（二次元动漫图，主用） ──
+/**
+ * booru 通用拉图流程：AI 词 → tag 逐级降级搜，命中即用；都没命中再回退分类 tag。
+ * sourcesFn 决定走「安全双源」还是「软色情双源」。
+ */
+async function runBooruPipeline(
+  sourcesFn: (tag: string) => Promise<ImageResult | null>,
+  ai: string,
+  fallbackQuery: string,
+): Promise<ImageResult | null> {
+  const aiTag = toBooruTag(ai)
+  if (aiTag) {
+    // tag 逐级降级：复合词搜不到就去前缀修饰词重试，命中即用（减少回退到泛分类 tag）
+    for (const cand of tagDescentCandidates(aiTag)) {
+      const r = await sourcesFn(cand)
+      if (r) return { ...r, viaFallback: false }
+    }
+  }
+  const fb = await sourcesFn(toBooruTag(fallbackQuery))
+  return fb ? { ...fb, viaFallback: true } : null
+}
 
-const DANBOORU_TIMEOUT = 8000
+// ── tag 处理 + 黑名单匹配 ──
 
 /** AI 自然语言关键词 → booru 友好的单 tag（小写、空格→下划线、去杂质、限长） */
 function toBooruTag(s: string): string {
@@ -107,10 +132,22 @@ function tagDescentCandidates(tag: string): string[] {
   return [...new Set(cands)]
 }
 
-/** post 是否命中 nsfw 黑名单（tag_string 含任一黑名单词，整词匹配） */
-function hitsBlocklist(tagString: string): boolean {
-  const tags = new Set((tagString || "").toLowerCase().split(/\s+/))
-  return BOORU_TAG_BLOCKLIST.some((bad) => tags.has(bad))
+/**
+ * tag_string 是否命中黑名单：整词 **或下划线词边界** 匹配。
+ * booru 的露点/性行为常是复合 tag（cum_on_body / group_sex / anal_sex），纯整词匹配会漏，
+ * 故边界匹配：bad 命中 `bad` 本身、`bad_*`、`*_bad`、`*_bad_*`，但不误伤 "cumulus"/"sexy"。
+ */
+function tagHitsAny(tagString: string, blocklist: readonly string[]): boolean {
+  const tags = (tagString || "").toLowerCase().split(/\s+/).filter(Boolean)
+  return tags.some((tag) =>
+    blocklist.some(
+      (bad) =>
+        tag === bad ||
+        tag.startsWith(bad + "_") ||
+        tag.endsWith("_" + bad) ||
+        tag.includes("_" + bad + "_"),
+    ),
+  )
 }
 
 function guessExt(u: string): string {
@@ -126,20 +163,29 @@ function extToContentType(ext: string): string {
   return "image/jpeg"
 }
 
+// ── danbooru（二次元动漫图） ──
+
+const DANBOORU_TIMEOUT = 8000
+
+interface BooruFetchOpts {
+  /** danbooru: "g"(安全)|"s"(性感不露点)；决定 rating metatag + rating 过滤 */
+  rating: string
+  /** 在 BOORU_TAG_BLOCKLIST 之外额外屏蔽的 tag（词边界匹配） */
+  extraBlock?: readonly string[]
+}
+
 /**
- * 调 Danbooru：tags = `<tag> rating:g order:score`（匿名限 2 个普通 tag；rating:/order: 是
+ * 调 Danbooru：tags = `<tag> rating:<r> order:score`（匿名限 2 个普通 tag；rating:/order: 是
  * metatag、不占限制，故只用了 1 个普通 tag）。order:score 只取高赞精品（默认顺序全是 0 赞冷门图）。
- * 取 top 50 → 过滤(rating g、有 sample URL、不命中黑名单) → 随机选一张干净的。
- * 失败/无干净结果返回 null。
+ * rating g=安全 / s=sensitive(性感不露点)。取 top 50 → 过滤(rating 匹配、有 URL、不命中黑名单)
+ * → 高分前 12 随机选。失败/无干净结果返回 null。
  */
-async function fetchFromDanbooru(tag: string): Promise<ImageResult | null> {
+async function fetchFromDanbooru(tag: string, opts: BooruFetchOpts): Promise<ImageResult | null> {
   const t = (tag || "").trim()
   if (!t) return null
+  const block = [...BOORU_TAG_BLOCKLIST, ...(opts.extraBlock || [])]
   const url = new URL("https://danbooru.donmai.us/posts.json")
-  // rating:g 排除 sensitive/questionable/explicit；order:score 只取高赞精品
-  //（默认顺序全是 0 赞冷门图 → 难看的多）。rating:/order: 是 metatag、不占匿名 2 个普通
-  // tag 限制，所以 `<tag> rating:g order:score` 只用了 1 个普通 tag、可行。
-  url.searchParams.set("tags", `${t} rating:g order:score`)
+  url.searchParams.set("tags", `${t} rating:${opts.rating} order:score`)
   url.searchParams.set("limit", "50") // top 50 高赞里随机选：质量高 + 保留多样性
   try {
     const res = await fetch(url.toString(), {
@@ -163,12 +209,12 @@ async function fetchFromDanbooru(tag: string): Promise<ImageResult | null> {
       score?: number
     }>
     if (!Array.isArray(posts) || posts.length === 0) return null
-    // 三重防线：必须 rating g、有可下载 sample URL、tag 不命中黑名单
+    // 三重防线：rating 必须等于请求级别、有可下载 sample URL、tag 不命中黑名单
     const clean = posts.filter(
       (p) =>
-        p.rating === "g" &&
+        p.rating === opts.rating &&
         Boolean(p.large_file_url || p.file_url) &&
-        !hitsBlocklist(p.tag_string || ""),
+        !tagHitsAny(p.tag_string || "", block),
     )
     if (clean.length === 0) return null
     // order:score 已按分降序；只从高分前 12 张里随机选，避免随机到 top50 尾部的低分图
@@ -186,6 +232,7 @@ async function fetchFromDanbooru(tag: string): Promise<ImageResult | null> {
       source: "danbooru",
       query: t,
       score: typeof pick.score === "number" ? pick.score : undefined,
+      rating: opts.rating,
     }
   } catch (e: any) {
     console.warn("[mengmegzi] danbooru 异常:", e?.message || e)
@@ -197,8 +244,9 @@ async function fetchFromDanbooru(tag: string): Promise<ImageResult | null> {
 
 const YANDERE_TIMEOUT = 8000
 
-// yande.re 的 rating:s（safe）比 danbooru rating:g 宽（含轻微性感），额外屏蔽性感向 tag
-const YANDERE_EXTRA_BLOCK = [
+// 安全分类用 yande.re rating:s（safe）；s 仍比 danbooru g 宽（含轻微性感），额外屏蔽性感向 tag，
+// 把 general/game/life 压得更干净。色图分类不套这个（性感 tag 正是它要的）、改套 SUGGESTIVE_EXTRA_BLOCK。
+const YANDERE_SAFE_EXTRA_BLOCK = [
   "swimsuit",
   "bikini",
   "lingerie",
@@ -209,14 +257,16 @@ const YANDERE_EXTRA_BLOCK = [
 ]
 
 /**
- * 调 yande.re（moebooru）：tags = `<tag> rating:s order:score`。
- * yande.re 只有 s/q/e、s 最干净；额外性感黑名单兜底。取 top12 高分随机一张。
+ * 调 yande.re（moebooru）：tags = `<tag> rating:<r> order:score`。
+ * yande.re 只有 s/q/e。s=safe、q=questionable(软色情/可能含露点，靠黑名单兜不露点)。
+ * 取 top12 高分随机一张。
  */
-async function fetchFromYandere(tag: string): Promise<ImageResult | null> {
+async function fetchFromYandere(tag: string, opts: BooruFetchOpts): Promise<ImageResult | null> {
   const t = (tag || "").trim()
   if (!t) return null
+  const block = [...BOORU_TAG_BLOCKLIST, ...(opts.extraBlock || [])]
   const url = new URL("https://yande.re/post.json")
-  url.searchParams.set("tags", `${t} rating:s order:score`)
+  url.searchParams.set("tags", `${t} rating:${opts.rating} order:score`)
   url.searchParams.set("limit", "50")
   try {
     const res = await fetch(url.toString(), {
@@ -240,15 +290,12 @@ async function fetchFromYandere(tag: string): Promise<ImageResult | null> {
       score?: number
     }>
     if (!Array.isArray(posts) || posts.length === 0) return null
-    const block = [...BOORU_TAG_BLOCKLIST, ...YANDERE_EXTRA_BLOCK]
-    const clean = posts.filter((p) => {
-      const tags = new Set((p.tags || "").toLowerCase().split(/\s+/))
-      return (
-        p.rating === "s" &&
+    const clean = posts.filter(
+      (p) =>
+        p.rating === opts.rating &&
         Boolean(p.sample_url || p.jpeg_url || p.file_url) &&
-        !block.some((b) => tags.has(b))
-      )
-    })
+        !tagHitsAny(p.tags || "", block),
+    )
     if (clean.length === 0) return null
     const pool = clean.slice(0, 12)
     const pick = pool[Math.floor(Math.random() * pool.length)]
@@ -264,6 +311,7 @@ async function fetchFromYandere(tag: string): Promise<ImageResult | null> {
       source: "yandere",
       query: t,
       score: typeof pick.score === "number" ? pick.score : undefined,
+      rating: opts.rating,
     }
   } catch (e: any) {
     console.warn("[mengmegzi] yandere 异常:", e?.message || e)
@@ -272,17 +320,33 @@ async function fetchFromYandere(tag: string): Promise<ImageResult | null> {
 }
 
 /**
- * 多源聚合：并行搜 danbooru + yande.re，各取一张精品，合并随机选一张。
- * 单源挂掉（超时/空/报错）不影响另一源（容错）——尤其 yande.re 在 Vercel 的可达性未知，
- * 挂了就只走 danbooru，不阻断配图。
+ * 安全双源聚合（general/game/life）：danbooru rating:g + yande.re rating:s，
+ * 并行各取一张精品，合并随机选一张。单源挂掉不影响另一源（容错）。
  */
-async function fetchFromBooruSources(tag: string): Promise<ImageResult | null> {
-  const t = (tag || "").trim()
-  if (!t) return null
-  const settled = await Promise.all([
-    fetchFromDanbooru(t).catch(() => null),
-    fetchFromYandere(t).catch(() => null),
+async function fetchFromSafeBooruSources(tag: string): Promise<ImageResult | null> {
+  return mergeBooruSources([
+    fetchFromDanbooru(tag, { rating: "g" }).catch(() => null),
+    fetchFromYandere(tag, { rating: "s", extraBlock: YANDERE_SAFE_EXTRA_BLOCK }).catch(() => null),
   ])
+}
+
+/**
+ * 软色情双源聚合（色图 nsfw）：danbooru rating:s（性感不露点·安全锚）+ yande.re rating:q（更辣），
+ * 两源都套 SUGGESTIVE_EXTRA_BLOCK（拦露点/性行为）+ BOORU_TAG_BLOCKLIST（loli/shota 等红线）。
+ * danbooru s 定义上即不露点，作安全底；yande.re q 提供辣度、靠黑名单兜「不露点」。
+ */
+async function fetchFromSuggestiveBooruSources(tag: string): Promise<ImageResult | null> {
+  return mergeBooruSources([
+    fetchFromDanbooru(tag, { rating: "s", extraBlock: SUGGESTIVE_EXTRA_BLOCK }).catch(() => null),
+    fetchFromYandere(tag, { rating: "q", extraBlock: SUGGESTIVE_EXTRA_BLOCK }).catch(() => null),
+  ])
+}
+
+/** 合并多源结果：过滤 null，剩余里随机选一张（容错——单源挂掉只要另一源有就出图）。 */
+async function mergeBooruSources(
+  fetches: Array<Promise<ImageResult | null>>,
+): Promise<ImageResult | null> {
+  const settled = await Promise.all(fetches)
   const ok = settled.filter((r): r is ImageResult => r !== null)
   if (ok.length === 0) return null
   return ok[Math.floor(Math.random() * ok.length)]

@@ -91,7 +91,8 @@ export async function executePost(forcedCategory?: CategoryValue): Promise<strin
         imgLog =
           `配图✓ ${img.source}「${img.query || "?"}」` +
           (img.viaFallback ? `(回退·AI词「${aiQ}」没命中)` : "(AI词命中)") +
-          (img.score != null ? ` score=${img.score}` : "")
+          (img.score != null ? ` score=${img.score}` : "") +
+          (img.rating ? ` rating=${img.rating}` : "")
       } else {
         imgLog = "配图✗ 下载/上传失败→纯文字"
       }

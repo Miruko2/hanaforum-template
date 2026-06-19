@@ -32,21 +32,43 @@ export const POSTS_BUCKET = "post-images"
  */
 export const MENGMEGZI_STORAGE_PREFIX = "mengmegzi"
 
-/** booru 配图 nsfw 二次过滤黑名单：post 的 tag_string 命中任一即丢弃。
- *  `rating:g` 已排除露点/性感，但 loli/shota 等年龄向 tag 即使 g 级也可能经匿名 API 返回
- *  （danbooru issue #2096），必须事后过滤。见 image-sources.fetchFromDanbooru。 */
+/** booru 配图通用黑名单（所有分类都拦，绝对红线）：post 的 tag_string 命中任一即丢弃。
+ *  loli/shota/guro 等是任何分类（含色图软色情）都不可逾越的红线；nude/nipples/pussy 等是
+ *  基础露点词。下划线词边界匹配（见 image-sources.tagHitsAny），故 "cum" 命中 "cum_on_body"、
+ *  "sex" 命中 "group_sex"，但不误伤 "cumulus"/"sexy"。 */
 export const BOORU_TAG_BLOCKLIST = [
   "loli", "lolicon", "shota", "shotacon", "toddlercon",
   "nude", "nipples", "pussy", "penis", "sex", "cum", "anus",
   "guro", "gore",
 ] as const
 
+/**
+ * 色图(nsfw)分类「软色情·不露点」额外黑名单：在 BOORU_TAG_BLOCKLIST 之外，再屏蔽一切
+ * 露点/性行为 tag，确保只出「性感但不露点」（swimsuit/bikini/lingerie/cleavage 放行）。
+ * 配 yande.re rating:q（较宽、可能含露点）时尤其关键。词边界匹配，故 "anal" 命中 "anal_sex"。
+ * 注意：绝不包含 "breasts"（几乎每张女性图都有、会清空结果），只拦真正暴露的 breasts_out 等。
+ */
+export const SUGGESTIVE_EXTRA_BLOCK = [
+  // 露点（暴露乳头/生殖器）
+  "nipple", "areola", "areolae", "topless", "bottomless", "naked",
+  "completely_nude", "partially_nude", "breast_out", "breasts_out",
+  "nipple_slip", "uncensored", "pubic", "vagina", "vaginal", "clitoris",
+  // 性行为
+  "anal", "oral", "fellatio", "cunnilingus", "paizuri", "handjob",
+  "masturbation", "cumshot", "creampie", "ejaculation", "penetration",
+  "dildo", "vibrator", "bondage", "rape", "bestiality",
+  // 其他越界
+  "futanari",
+] as const
+
 /** 默认 image_sources（代码里用于回退；DB 里以 mengmegzi_config.image_sources 为准）。
- *  二次元论坛改用 danbooru 动漫图：query 字段 = AI 关键词搜不到时的「回退 booru tag」。
- *  nsfw/code/help 走 none（不配图）。 */
+ *  二次元论坛用 danbooru/yande.re 动漫图：query 字段 = AI 关键词搜不到时的「回退 booru tag」。
+ *  · 安全分类(general/game/life)：provider "danbooru"（danbooru g + yande.re s 双源）。
+ *  · 色图(nsfw)：provider "suggestive"（danbooru s + yande.re q 双源·软色情不露点）。
+ *  · code/help 走 none（不配图）。 */
 export const DEFAULT_IMAGE_SOURCES = {
   general: { provider: "danbooru", query: "original" },
-  nsfw: { provider: "none" },
+  nsfw: { provider: "suggestive", query: "swimsuit" },
   game: { provider: "danbooru", query: "video_game" },
   code: { provider: "none" },
   life: { provider: "danbooru", query: "scenery" },

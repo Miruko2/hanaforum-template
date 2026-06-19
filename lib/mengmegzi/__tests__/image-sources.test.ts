@@ -164,6 +164,84 @@ describe("image-sources", () => {
     expect(r).toBeNull()
   })
 
+  // ── suggestive（色图·软色情不露点：danbooru s + yande.re q） ──
+
+  test("suggestive: danbooru 用 rating:s、yande.re 用 rating:q（双源）", async () => {
+    mockSources({
+      danbooru: [danbooruPost({ rating: "s" })],
+      yandere: [yanderePost({ rating: "q" })],
+    })
+    const r = await fetchImageForCategory({ provider: "suggestive", query: "swimsuit" }, "thighhighs")
+    expect(r).not.toBeNull()
+    expect(["danbooru", "yandere"]).toContain(r!.source)
+    expect(["s", "q"]).toContain(r!.rating)
+    const dbCall = fetchMock.mock.calls.find((c) => String(c[0]).includes("danbooru.donmai.us"))!
+    expect(new URL(dbCall[0]).searchParams.get("tags")).toBe("thighhighs rating:s order:score")
+    const yCall = fetchMock.mock.calls.find((c) => String(c[0]).includes("yande.re"))!
+    expect(new URL(yCall[0]).searchParams.get("tags")).toBe("thighhighs rating:q order:score")
+  })
+
+  test("suggestive: 放行 swimsuit/bikini（性感不露点，安全路径反而会拦）", async () => {
+    mockSources({
+      danbooru: [],
+      yandere: [yanderePost({ rating: "q", tags: "1girl swimsuit", sample_url: "https://files.yande.re/sample/sw.jpg" })],
+    })
+    const r = await fetchImageForCategory({ provider: "suggestive", query: "swimsuit" }, "ocean")
+    expect(r!.source).toBe("yandere")
+    expect(r!.imageUrl).toContain("sw.jpg")
+  })
+
+  test("suggestive: 仍拦露点 nipples，只留不露点", async () => {
+    mockSources({
+      danbooru: [],
+      yandere: [
+        yanderePost({ rating: "q", tags: "1girl nipples", sample_url: "https://files.yande.re/sample/nsfw.jpg" }),
+        yanderePost({ rating: "q", tags: "1girl bikini", sample_url: "https://files.yande.re/sample/ok.jpg" }),
+      ],
+    })
+    const r = await fetchImageForCategory({ provider: "suggestive", query: "swimsuit" }, "beach")
+    expect(r!.imageUrl).toContain("ok.jpg")
+  })
+
+  test("suggestive: 词边界拦复合露点 tag（group_sex / cum_on_body）", async () => {
+    mockSources({
+      danbooru: [],
+      yandere: [
+        yanderePost({ rating: "q", tags: "1girl group_sex", sample_url: "https://files.yande.re/sample/a.jpg" }),
+        yanderePost({ rating: "q", tags: "2girls cum_on_body", sample_url: "https://files.yande.re/sample/b.jpg" }),
+        yanderePost({ rating: "q", tags: "1girl lingerie", sample_url: "https://files.yande.re/sample/c.jpg" }),
+      ],
+    })
+    const r = await fetchImageForCategory({ provider: "suggestive", query: "swimsuit" }, "x")
+    expect(r!.imageUrl).toContain("c.jpg")
+  })
+
+  test("suggestive: loli 红线仍拦（色图分类也绝不破）", async () => {
+    mockSources({
+      danbooru: [],
+      yandere: [
+        yanderePost({ rating: "q", tags: "1girl loli swimsuit", sample_url: "https://files.yande.re/sample/loli.jpg" }),
+      ],
+    })
+    const r = await fetchImageForCategory({ provider: "suggestive", query: "swimsuit" }, "x")
+    expect(r).toBeNull()
+  })
+
+  test("suggestive: 容错——yande.re 挂(500) 仍走 danbooru s", async () => {
+    mockSources({ danbooru: [danbooruPost({ rating: "s" })], yandereStatus: 500 })
+    const r = await fetchImageForCategory({ provider: "suggestive", query: "swimsuit" }, "thighhighs")
+    expect(r!.source).toBe("danbooru")
+    expect(r!.rating).toBe("s")
+  })
+
+  test("suggestive: AI 词空 → 回退默认 swimsuit", async () => {
+    mockSources({ danbooru: [], yandere: [yanderePost({ rating: "q" })] })
+    const r = await fetchImageForCategory({ provider: "suggestive" }, "")
+    expect(r!.viaFallback).toBe(true)
+    const yCall = fetchMock.mock.calls.find((c) => String(c[0]).includes("yande.re"))!
+    expect(new URL(yCall[0]).searchParams.get("tags")).toBe("swimsuit rating:q order:score")
+  })
+
   // ── unsplash（保留兼容） ──
 
   test("unsplash: imgix webp 主图 + 640 缩略图", async () => {
