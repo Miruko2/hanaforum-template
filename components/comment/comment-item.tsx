@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { cdnUrl } from "@/lib/cdn-url"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
@@ -32,7 +32,12 @@ function flattenReplies(
 ): Array<{ reply: Comment; mentionName?: string }> {
   if (!replies || replies.length === 0) return []
   const result: Array<{ reply: Comment; mentionName?: string }> = []
-  for (const reply of replies) {
+  // 按时间正序（最早在前）：对话从上到下自然阅读。
+  // 统一收口后端倒序、历史多层嵌套、乐观 prepend 等多来源造成的顺序不一致。
+  const ordered = [...replies].sort(
+    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+  )
+  for (const reply of ordered) {
     result.push({ reply, mentionName: parentAuthorName })
     if (reply.replies && reply.replies.length > 0) {
       result.push(...flattenReplies(reply.replies, authorNameOf(reply)))
@@ -45,6 +50,7 @@ function flattenReplies(
 function ReplyRow({
   reply,
   mentionName,
+  floor,
   postId,
   rootId,
   isAdmin,
@@ -53,6 +59,7 @@ function ReplyRow({
 }: {
   reply: Comment
   mentionName?: string
+  floor?: number
   postId: string
   rootId: string
   isAdmin?: boolean
@@ -160,64 +167,73 @@ function ReplyRow({
   }
 
   return (
-    <div className="py-1.5">
+    <div>
       <div className="flex gap-2 items-start">
         <button type="button" onClick={goToProfile} className="shrink-0" aria-label={`查看 ${displayName} 的主页`}>
-          <Avatar className="h-6 w-6 cursor-pointer">
+          <Avatar className="h-6 w-6 avatar-hover-effect cursor-pointer">
             <AvatarImage src={cdnUrl(avatarUrl) || "/logo.png"} />
             <AvatarFallback>{getInitial(displayName)}</AvatarFallback>
           </Avatar>
         </button>
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <span
-              className="text-xs font-medium text-gray-200 cursor-pointer hover:text-lime-400"
-              onClick={goToProfile}
-            >
-              {displayName}
-            </span>
-            {mentionName && <span className="text-xs text-gray-500">回复 @{mentionName}</span>}
-            <span className="text-[10px] text-gray-600">{formatDate(reply.created_at)}</span>
-          </div>
-          <p className="mt-0.5 text-xs text-gray-300 break-all whitespace-pre-wrap">
-            <StickerText text={reply.content} />
-          </p>
-          <div className="mt-1 flex items-center gap-3">
-            <button
-              className={`flex items-center gap-1 text-[11px] ${isLiked ? "text-lime-500" : "text-gray-500 hover:text-lime-500"}`}
-              onClick={handleLikeToggle}
-              disabled={isLiking || !user}
-            >
-              <ThumbsUp className="h-3 w-3" />
-              <span>{likesCount}</span>
-            </button>
-            <button
-              onClick={() => setShowReplyForm((v) => !v)}
-              className="flex items-center gap-1 text-[11px] text-gray-500 hover:text-lime-500"
-            >
-              <Reply className="h-3 w-3" />
-            </button>
-            {isAdmin && (
-              <button
-                onClick={handleMmReply}
-                disabled={mmSending}
-                className="flex items-center gap-1 text-[11px] text-gray-500 hover:text-purple-400 disabled:opacity-50"
-                aria-label="让萌萌子回复"
-                title="派萌萌子来回复这条"
+          {/* 楼中楼回复做成聊天气泡：淡填充 + 描边，靠边线（而非亮度）让轮廓清晰、不刺眼；
+              不叠 backdrop-filter（安卓/动画安全）。回退气泡观感只改这一行的 className。 */}
+          <div className="rounded-xl bg-white/5 border border-white/10 px-3 py-2">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span
+                className="text-xs font-medium text-gray-200 cursor-pointer hover:text-lime-400"
+                onClick={goToProfile}
               >
-                <Bot className="h-3 w-3" />
-              </button>
-            )}
-            {canDelete && (
+                {displayName}
+              </span>
+              {mentionName && <span className="text-xs text-gray-500">回复 @{mentionName}</span>}
+              <span className="text-[10px] text-gray-600">{formatDate(reply.created_at)}</span>
+              {floor != null && (
+                <span className="ml-auto shrink-0 font-mono text-[11px] tracking-widest text-white/40">
+                  Nº{floor}
+                </span>
+              )}
+            </div>
+            <p className="mt-0.5 text-xs text-gray-300 break-all whitespace-pre-wrap">
+              <StickerText text={reply.content} />
+            </p>
+            <div className="mt-1.5 flex items-center gap-3">
               <button
-                onClick={() => setShowDeleteAlert(true)}
-                disabled={isDeleting}
-                className="flex items-center text-[11px] text-gray-500 hover:text-red-400 disabled:opacity-50"
-                aria-label="删除回复"
+                className={`flex items-center gap-1 text-[11px] ${isLiked ? "text-lime-500" : "text-gray-500 hover:text-lime-500"}`}
+                onClick={handleLikeToggle}
+                disabled={isLiking || !user}
               >
-                <Trash2 className="h-3 w-3" />
+                <ThumbsUp className="h-3 w-3" />
+                <span>{likesCount}</span>
               </button>
-            )}
+              <button
+                onClick={() => setShowReplyForm((v) => !v)}
+                className="flex items-center gap-1 text-[11px] text-gray-500 hover:text-lime-500"
+              >
+                <Reply className="h-3 w-3" />
+              </button>
+              {isAdmin && (
+                <button
+                  onClick={handleMmReply}
+                  disabled={mmSending}
+                  className="flex items-center gap-1 text-[11px] text-gray-500 hover:text-purple-400 disabled:opacity-50"
+                  aria-label="让萌萌子回复"
+                  title="派萌萌子来回复这条"
+                >
+                  <Bot className="h-3 w-3" />
+                </button>
+              )}
+              {canDelete && (
+                <button
+                  onClick={() => setShowDeleteAlert(true)}
+                  disabled={isDeleting}
+                  className="flex items-center text-[11px] text-gray-500 hover:text-red-400 disabled:opacity-50"
+                  aria-label="删除回复"
+                >
+                  <Trash2 className="h-3 w-3" />
+                </button>
+              )}
+            </div>
           </div>
           {showReplyForm && (
             <div className="mt-2">
@@ -278,6 +294,17 @@ export default function CommentItem({
   const { sending: mmSending, send: mmSend } = useMengmegziCommand()
   const router = useRouter()
   const goToProfile = () => router.push(`/user?id=${comment.user_id}`)
+
+  // 本楼（主评论或任意回复行）发出新回复后：自动展开该楼。
+  // 配合「回复按时间正序」——用户刚发的回复排在末尾，realtime 刷回后默认会被
+  // slice(0,2) 折进「展开 N 条」里看不到；这里置真，确保自己发的回复立即可见。
+  const handleThreadReplyAdded = useCallback(
+    (newReply: Comment | null) => {
+      setShowAllReplies(true)
+      onCommentAdded?.(newReply)
+    },
+    [onCommentAdded],
+  )
 
   // 管理员一键派萌萌子回复本条评论
   const handleMmReply = async () => {
@@ -502,7 +529,7 @@ export default function CommentItem({
                 replyingTo={displayName}
                 onCommentAdded={(newReply) => {
                   setShowReplyForm(false)
-                  if (onCommentAdded) onCommentAdded(newReply)
+                  handleThreadReplyAdded(newReply)
                 }}
                 onCancel={() => setShowReplyForm(false)}
               />
@@ -517,16 +544,17 @@ export default function CommentItem({
             const visibleReplies = showAllReplies ? flatReplies : flatReplies.slice(0, 2)
             const hiddenCount = flatReplies.length - 2
             return (
-              <div className="mt-3 border-l border-gray-700/50 pl-3">
-                {visibleReplies.map(({ reply, mentionName }) => (
+              <div className="mt-3 space-y-2">
+                {visibleReplies.map(({ reply, mentionName }, i) => (
                   <ReplyRow
                     key={reply.id}
                     reply={reply}
                     mentionName={mentionName}
+                    floor={i + 1}
                     postId={postId}
                     rootId={comment.id /* 回复行的回复一律挂到顶层主评论 */}
                     isAdmin={isAdmin}
-                    onCommentAdded={onCommentAdded}
+                    onCommentAdded={handleThreadReplyAdded}
                     onCommentDeleted={onCommentDeleted}
                   />
                 ))}
