@@ -63,7 +63,7 @@ export async function fetchImageForCategory(
   const ai = (aiQuery || "").trim()
 
   if (config.provider === "danbooru") {
-    // provider 仍叫 danbooru（DB 配置兼容），实际是 danbooru(g) + yande.re(s) 安全双源聚合
+    // provider 仍叫 danbooru（DB 配置兼容），安全分类只走 danbooru rating:g（yande.re 只给色图）
     return runBooruPipeline(fetchFromSafeBooruSources, ai, config.query || "")
   }
 
@@ -323,9 +323,9 @@ async function fetchFromYandere(tag: string, opts: BooruFetchOpts): Promise<Imag
 }
 
 /**
- * booru 双源聚合：**yande.re 优先、danbooru 兜底**。两源并行发（不增延迟）；yande.re 命中就用它
- * （画质更高 ~1500px 精选板），只有 yande.re 没命中该 tag 或在 Vercel 挂了，才回退 danbooru。
- * danbooru 是安全网——任何分类都不会因 yande.re 抽风而没图。
+ * booru 双源聚合（仅色图用）：**yande.re 优先、danbooru 兜底**。两源并行发（不增延迟）；yande.re
+ * 命中就用它（画质更高 ~1500px 精选板），只有 yande.re 没命中该 tag 或在 Vercel 挂了，才回退 danbooru
+ * （色图永不会因 yande.re 抽风没图）。安全分类不走这里——只走 danbooru（见 fetchFromSafeBooruSources）。
  */
 async function fetchFromBooruSources(
   tag: string,
@@ -341,9 +341,9 @@ async function fetchFromBooruSources(
   return yandere || danbooru || null
 }
 
-/** 安全分类（general/game/life）：yande.re rating:s 优先、danbooru rating:g 兜底。 */
+/** 安全分类（general/game/life）：只走 danbooru rating:g。yande.re 只留给色图用。 */
 function fetchFromSafeBooruSources(tag: string): Promise<ImageResult | null> {
-  return fetchFromBooruSources(tag, { rating: "g" }, { rating: "s" })
+  return fetchFromDanbooru(tag, { rating: "g" })
 }
 
 /**

@@ -39,7 +39,7 @@ image_query 会拿去二次元图站按 tag 搜图，请遵守：
  * → 回退默认图 → 出现「配文聊数学、配图却是泳装」的精分组合。
  */
 const CATEGORY_POST_BRIEF: Record<string, string> = {
-  general: "随便聊点二次元日常/感想，配一张好看的动漫图。image_query 用图里能画出来的具体名词。",
+  general: "像普通网友发条日常杂谈——心情、生活小事、吐槽、有趣见闻、随想都行，话题随意、别都聊动漫。image_query 用图里能画出来的具体名词，配一张好看的图点缀即可。",
   nsfw: "你在分享一张性感可爱的二次元美图（不露点的软色情福利图）。配文要围绕「这张图本身」——颜值、身材、服装、害羞心动那种感觉，像个爱发福利图的群友。image_query 必须是能搜到性感图的英文 booru tag，例如 swimsuit、bikini、thighhighs、school_swimsuit、leotard、maid、bunny_girl、cleavage、garter_belt。绝对别写学习、数学、文具、工作之类跟性感图无关的话题。",
   game: "聊一款游戏或某个游戏角色/场景，配一张相关动漫图。image_query 用游戏/角色相关的 tag。",
   code: "聊点编程/技术话题或踩坑心得（这个分类不配图）。",

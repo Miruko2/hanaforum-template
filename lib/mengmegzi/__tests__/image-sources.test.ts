@@ -74,9 +74,9 @@ describe("image-sources", () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  // ── 多源（danbooru + yande.re） ──
+  // ── 安全分类（provider danbooru → 只走 danbooru rating:g，不碰 yande.re） ──
 
-  test("多源: danbooru 命中(yande.re 空) → 返回 danbooru，带 query/score/viaFallback", async () => {
+  test("安全分类: danbooru rating:g 命中，带 query/score/viaFallback + UA", async () => {
     mockSources({ danbooru: [danbooruPost()], yandere: [] })
     const r = await fetchImageForCategory({ provider: "danbooru", query: "original" }, "guitar")
     expect(r!.source).toBe("danbooru")
@@ -89,19 +89,16 @@ describe("image-sources", () => {
     expect(dbCall[1]?.headers?.["User-Agent"]).toContain("HanakosForumBot")
   })
 
-  test("多源容错: danbooru 空 + yande.re 命中 → 返回 yande.re", async () => {
-    mockSources({ danbooru: [], yandere: [yanderePost()] })
-    const r = await fetchImageForCategory({ provider: "danbooru", query: "scenery" }, "sky")
-    expect(r!.source).toBe("yandere")
-    expect(r!.imageUrl).toContain("yande.re")
-    expect(r!.ext).toBe("jpg")
-    expect(r!.width).toBe(1500)
-  })
-
-  test("多源容错: danbooru 报错(500)也不影响 yande.re", async () => {
-    mockSources({ danbooruStatus: 500, yandere: [yanderePost()] })
-    const r = await fetchImageForCategory({ provider: "danbooru", query: "scenery" }, "sky")
-    expect(r!.source).toBe("yandere")
+  test("安全分类: 只走 danbooru，完全不请求 yande.re", async () => {
+    mockSources({
+      danbooru: [danbooruPost({ large_file_url: "https://cdn.donmai.us/sample/db.jpg" })],
+      yandere: [yanderePost({ sample_url: "https://files.yande.re/sample/ya.jpg" })],
+    })
+    const r = await fetchImageForCategory({ provider: "danbooru", query: "original" }, "guitar")
+    expect(r!.source).toBe("danbooru")
+    expect(r!.imageUrl).toContain("db.jpg")
+    // 安全分类不应请求 yande.re
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes("yande.re"))).toBe(false)
   })
 
   test("danbooru: 过滤 nsfw 黑名单(loli)", async () => {
@@ -140,33 +137,7 @@ describe("image-sources", () => {
     expect(r!.imageUrl).toContain("img.jpg")
   })
 
-  test("安全路径: 泳装黑名单已放开(swimsuit 现允许)，但 rating 非 s / 红线仍拦", async () => {
-    mockSources({
-      danbooru: [],
-      yandere: [
-        // rating 非 s（安全分类只要 s）→ 拦
-        yanderePost({ rating: "q", tags: "1girl scenery", sample_url: "https://files.yande.re/sample/wrongrating.jpg" }),
-        // 红线 nude（BOORU_TAG_BLOCKLIST，任何分类都拦）→ 拦
-        yanderePost({ tags: "1girl nude", sample_url: "https://files.yande.re/sample/red.jpg" }),
-        // 泳装：原来安全分类会拦，现已放开 → 允许
-        yanderePost({ tags: "1girl swimsuit", sample_url: "https://files.yande.re/sample/sw.jpg" }),
-      ],
-    })
-    const r = await fetchImageForCategory({ provider: "danbooru", query: "scenery" }, "y")
-    expect(r!.imageUrl).toContain("sw.jpg")
-  })
-
-  test("安全路径: 两源都命中时也优先 yande.re（画质）", async () => {
-    mockSources({
-      danbooru: [danbooruPost({ rating: "g", large_file_url: "https://cdn.donmai.us/sample/db.jpg" })],
-      yandere: [yanderePost({ rating: "s", sample_url: "https://files.yande.re/sample/ya.jpg" })],
-    })
-    const r = await fetchImageForCategory({ provider: "danbooru", query: "scenery" }, "ocean")
-    expect(r!.source).toBe("yandere")
-    expect(r!.imageUrl).toContain("ya.jpg")
-  })
-
-  test("tag 降级: pink_game_controller → controller(多源)", async () => {
+  test("tag 降级: pink_game_controller → controller", async () => {
     // 只有 controller 级 danbooru 命中，其余都空
     fetchMock.mockImplementation((u: any) => {
       const url = String(u)
@@ -217,7 +188,7 @@ describe("image-sources", () => {
     expect(r!.imageUrl).toContain("ya.jpg")
   })
 
-  test("suggestive: 放行 swimsuit/bikini（性感不露点，安全路径反而会拦）", async () => {
+  test("suggestive: 放行 swimsuit/bikini（性感不露点）", async () => {
     mockSources({
       danbooru: [],
       yandere: [yanderePost({ rating: "q", tags: "1girl swimsuit", sample_url: "https://files.yande.re/sample/sw.jpg" })],
