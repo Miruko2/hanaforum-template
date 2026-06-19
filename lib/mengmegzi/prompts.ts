@@ -21,7 +21,14 @@ export function buildPostSystemPrompt(persona: string): string {
 你现在要像普通用户一样发一个新帖子。
 
 输出严格 JSON，不要任何多余文字：
-{"title": "<标题，10~30字>", "content": "<正文，50~300字>", "description": "<一句话摘要，20字内>", "image_query": "<1~2 个英文名词，描述配图主题（用于搜动漫图），如 guitar、night city、cat；想不到给空字符串>"}
+{"title": "<标题，10~30字>", "content": "<正文，50~300字>", "description": "<一句话摘要，20字内>", "image_query": "<英文配图关键词>"}
+
+image_query 会拿去二次元图站按 tag 搜图，请遵守：
+- 用具体、能画出来的名词（物体/场景/角色特征），别用抽象概念
+- 单数、小写；复合词用下划线连接
+- 好例子：cat、guitar、cityscape、cherry_blossoms、school_uniform、ocean、night_sky
+- 坏例子：happy_moment、daily_life、good_vibes（这类抽象词搜不到，会退回默认图）
+- 实在想不到就给空字符串
 
 禁止：代码块包裹、JSON 前后加说明、content 为空。`
 }

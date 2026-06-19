@@ -5,13 +5,12 @@
 // 返回 null = 不配图或拉图失败，调用方降级纯文字帖。
 //
 // 两类源：
-//   · danbooru —— 二次元动漫图（契合站点）。AI 关键词转 tag 搜 + rating:g（最严级别）+ tag
-//     黑名单二次过滤；用 large_file_url（sample ~850px）当主图，原格式直传、不另压（不依赖 sharp）。
-//   · unsplash —— 真实照片（保留兼容）。图床是 imgix，URL 拼 &w=&fm=webp&q= 即压好，
-//     本层直接返回拼好的主图/缩略图 webp URL。
+//   · danbooru —— 二次元动漫图（契合站点）。AI 关键词转 tag 搜 + rating:g（最严）+ order:score
+//     （只取高赞精品）+ tag 黑名单二次过滤；用 large_file_url（sample ~850px）当主图、直传不另压。
+//   · unsplash —— 真实照片（保留兼容）。imgix 参数返回压好的 webp 主图 + 缩略图。
 //
-// 本层统一返回「可直接下载的主图 URL + 可选缩略图 URL + 格式 + 宽高」，
-// image-pipeline 只管下载上传，不关心压缩。
+// 返回的 ImageResult 带 query/viaFallback/score 等可观测字段，executor 写进行动日志，
+// 方便在 admin 面板看到「AI 词命中 / 回退默认 tag」与图的质量分。
 
 import { BOORU_TAG_BLOCKLIST, IMAGE_MAX_EDGE, IMAGE_QUALITY } from "./constants"
 import { POST_THUMB_EDGE } from "@/lib/post-image-thumb"
@@ -32,12 +31,18 @@ export interface ImageResult {
   width: number
   height: number
   source: string
+  /** 实际命中的搜索词/tag（写进行动日志，便于观察 AI 词命中情况） */
+  query?: string
+  /** 是否用了分类回退 tag（true = AI 的 image_query 没命中、退回默认 tag） */
+  viaFallback?: boolean
+  /** danbooru 图的 score（点赞分，质量参考） */
+  score?: number
 }
 
 /**
  * 按分类配置 + AI 关键词拉一张图。
  * - none → null
- * - danbooru/unsplash → 先用 AI 关键词，搜不到回退 config.query
+ * - danbooru/unsplash → 先用 AI 关键词，搜不到回退 config.query（标 viaFallback）
  * - 任何失败 → null（调用方降级纯文字帖）
  */
 export async function fetchImageForCategory(
@@ -51,17 +56,19 @@ export async function fetchImageForCategory(
     const aiTag = toBooruTag(ai)
     if (aiTag) {
       const r = await fetchFromDanbooru(aiTag)
-      if (r) return r
+      if (r) return { ...r, viaFallback: false }
     }
-    return await fetchFromDanbooru(toBooruTag(config.query || ""))
+    const fb = await fetchFromDanbooru(toBooruTag(config.query || ""))
+    return fb ? { ...fb, viaFallback: true } : null
   }
 
   if (config.provider === "unsplash") {
     if (ai) {
       const r = await fetchFromUnsplash(ai)
-      if (r) return r
+      if (r) return { ...r, viaFallback: false }
     }
-    return await fetchFromUnsplash(config.query || "")
+    const fb = await fetchFromUnsplash(config.query || "")
+    return fb ? { ...fb, viaFallback: true } : null
   }
 
   return null
@@ -102,8 +109,9 @@ function extToContentType(ext: string): string {
 }
 
 /**
- * 调 Danbooru：tags = `<tag> rating:g`（匿名限 2 tag，rating:g + 内容 tag 正好占满）。
- * 取一批 → 过滤(必须 rating g、有 sample URL、不命中黑名单) → 随机选一张干净的。
+ * 调 Danbooru：tags = `<tag> rating:g order:score`（匿名限 2 个普通 tag；rating:/order: 是
+ * metatag、不占限制，故只用了 1 个普通 tag）。order:score 只取高赞精品（默认顺序全是 0 赞冷门图）。
+ * 取 top 50 → 过滤(rating g、有 sample URL、不命中黑名单) → 随机选一张干净的。
  * 失败/无干净结果返回 null。
  */
 async function fetchFromDanbooru(tag: string): Promise<ImageResult | null> {
@@ -134,6 +142,7 @@ async function fetchFromDanbooru(tag: string): Promise<ImageResult | null> {
       image_height?: number
       rating?: string
       tag_string?: string
+      score?: number
     }>
     if (!Array.isArray(posts) || posts.length === 0) return null
     // 三重防线：必须 rating g、有可下载 sample URL、tag 不命中黑名单
@@ -155,6 +164,8 @@ async function fetchFromDanbooru(tag: string): Promise<ImageResult | null> {
       width: pick.image_width || 0,
       height: pick.image_height || 0,
       source: "danbooru",
+      query: t,
+      score: typeof pick.score === "number" ? pick.score : undefined,
     }
   } catch (e: any) {
     console.warn("[mengmegzi] danbooru 异常:", e?.message || e)
@@ -189,7 +200,7 @@ async function fetchFromUnsplash(query: string): Promise<ImageResult | null> {
   url.searchParams.set("query", query)
   url.searchParams.set("per_page", "10")
   url.searchParams.set("orientation", "squarish")
-  url.searchParams.set("content_filter", "high")
+  url.searchParams.set("content_filter", "high") // 过滤不适内容（萌萌子帖更安全）
   try {
     const res = await fetch(url.toString(), {
       headers: { Authorization: `Client-ID ${key}` },
@@ -215,6 +226,7 @@ async function fetchFromUnsplash(query: string): Promise<ImageResult | null> {
       width: pick.width || 0,
       height: pick.height || 0,
       source: "unsplash",
+      query,
     }
   } catch (e: any) {
     console.warn("[mengmegzi] unsplash 异常:", e?.message || e)

@@ -70,19 +70,33 @@ export async function executePost(forcedCategory?: CategoryValue): Promise<strin
     throw new Error("AI 输出缺 title/content")
   }
 
-  // 2. 配图（失败降级纯文字，不抛错）
+  // 2. 配图（失败降级纯文字，不抛错）。imgLog 记录配图详情，写进行动日志供面板观察。
   let imageUrl: string | null = null
   let imageRatio: number | null = null
+  let imgLog = ""
   const srcCfg = (agentCfg?.image_sources?.[category] as ImageSourceConfig) || { provider: "none" }
-  // AI 顺手吐的 image_query 优先（贴合正文、每帖不同），搜不到回退分类固定词
-  const img = await fetchImageForCategory(srcCfg, gen.image_query)
-  if (img) {
-    // 用临时 uuid 作 Storage 文件名（post_id 此时还没生成）
-    const fileId = crypto.randomUUID()
-    const processed = await downloadCompressUpload(img, fileId)
-    if (processed) {
-      imageUrl = processed.publicUrl
-      imageRatio = processed.ratio
+  const aiQ = gen.image_query || ""
+  if (srcCfg.provider === "none") {
+    imgLog = `无配图(${category}=none)`
+  } else {
+    // AI 顺手吐的 image_query 优先（贴合正文、每帖不同），搜不到回退分类固定词
+    const img = await fetchImageForCategory(srcCfg, aiQ)
+    if (img) {
+      // 用临时 uuid 作 Storage 文件名（post_id 此时还没生成）
+      const fileId = crypto.randomUUID()
+      const processed = await downloadCompressUpload(img, fileId)
+      if (processed) {
+        imageUrl = processed.publicUrl
+        imageRatio = processed.ratio
+        imgLog =
+          `配图✓ ${img.source}「${img.query || "?"}」` +
+          (img.viaFallback ? `(回退·AI词「${aiQ}」没命中)` : "(AI词命中)") +
+          (img.score != null ? ` score=${img.score}` : "")
+      } else {
+        imgLog = "配图✗ 下载/上传失败→纯文字"
+      }
+    } else {
+      imgLog = `配图✗ AI词「${aiQ}」+回退「${srcCfg.query || ""}」都搜不到→纯文字`
     }
   }
 
@@ -107,7 +121,7 @@ export async function executePost(forcedCategory?: CategoryValue): Promise<strin
     .single()
   if (error) throw new Error(`写 posts 失败: ${error.message}`)
 
-  await logAction("post", null, "success", data.id)
+  await logAction("post", null, "success", `${data.id} | ${imgLog}`)
   return data.id
 }
 
