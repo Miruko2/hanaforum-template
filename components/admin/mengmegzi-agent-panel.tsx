@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { RefreshCw, Send, MessageSquare, Reply, Power } from "lucide-react"
+import { useToast } from "@/hooks/use-toast"
 
 type Status = "idle" | "busy" | "dead"
 
@@ -75,6 +76,7 @@ export default function MengmegziAgentPanel() {
   const [postId, setPostId] = useState("")
   const [commentId, setCommentId] = useState("")
   const [sending, setSending] = useState(false)
+  const { toast } = useToast()
 
   const refreshAll = useCallback(async () => {
     const h = await authHeaders()
@@ -105,8 +107,9 @@ export default function MengmegziAgentPanel() {
         body: JSON.stringify(body),
       })
       const data = await res.json()
-      if (!res.ok) alert(data.error || "指令失败")
-      else alert("已受理，等待 tick 执行")
+      if (!res.ok)
+        toast({ title: "指令失败", description: data.error || "请重试", variant: "destructive" })
+      else toast({ title: "已受理", description: "等待 tick 执行" })
       await refreshAll()
     } finally {
       setSending(false)
@@ -124,12 +127,13 @@ export default function MengmegziAgentPanel() {
 
   async function saveConfig() {
     if (!config) return
-    await fetch(apiUrl("/api/admin/mengmegzi-agent/config"), {
+    const res = await fetch(apiUrl("/api/admin/mengmegzi-agent/config"), {
       method: "PATCH",
       headers: { "Content-Type": "application/json", ...(await authHeaders()) },
       body: JSON.stringify(config),
     })
-    alert("配置已保存")
+    if (res.ok) toast({ title: "配置已保存" })
+    else toast({ title: "保存失败", description: "请重试", variant: "destructive" })
   }
 
   /** 即时存一项配置（开关类用，免点保存） */
