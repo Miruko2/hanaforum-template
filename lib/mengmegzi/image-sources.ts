@@ -170,7 +170,9 @@ async function fetchFromDanbooru(tag: string): Promise<ImageResult | null> {
         !hitsBlocklist(p.tag_string || ""),
     )
     if (clean.length === 0) return null
-    const pick = clean[Math.floor(Math.random() * clean.length)]
+    // order:score 已按分降序；只从高分前 12 张里随机选，避免随机到 top50 尾部的低分图
+    const pool = clean.slice(0, 12)
+    const pick = pool[Math.floor(Math.random() * pool.length)]
     const imageUrl = (pick.large_file_url || pick.file_url)! // 850px sample 优先
     const ext = guessExt(imageUrl)
     return {
