@@ -2,12 +2,15 @@
 
 import { createContext, useReducer, useContext, ReactNode, useEffect, useState } from 'react'
 import type { Post } from '@/lib/types'
-import { getPostsPaginated, getHotPostsPaginated } from '@/lib/supabase-optimized'
+import { getPostsPaginated, getHotPostsPaginated, getFollowingPostsPaginated } from '@/lib/supabase-optimized'
 import { supabase } from '@/lib/supabaseClient'
 import { useSimpleAuth } from '@/contexts/auth-context-simple'
 
-// 排序方式：default=按时间（getPostsPaginated），hot=按赞/评论权重（hot_posts RPC）
-export type PostSortMode = 'default' | 'hot'
+// 排序方式：
+//   default   = 按时间（getPostsPaginated）
+//   hot       = 按赞/评论权重（hot_posts RPC）
+//   following = 只看关注者的帖，按时间（following_posts RPC，需登录）
+export type PostSortMode = 'default' | 'hot' | 'following'
 
 // 添加帖子缓存（按 排序+分类）
 // key: `${sort}:${category}`，category 为 null 对应 "__all__"
@@ -205,12 +208,21 @@ export function PostsProvider({ children }: { children: ReactNode }) {
       }
       
       // 获取新数据（按分类过滤，按排序方式选取数函数）
-      const fetchedPosts = currentSort === 'hot'
-        ? await getHotPostsPaginated(0, PAGE_SIZE, currentCategory)
-        : await getPostsPaginated(0, PAGE_SIZE, currentCategory);
+      // following 需登录：未登录（无 user.id）时回退到默认时间流，避免空查询。
+      let fetchedPosts: Post[];
+      if (currentSort === 'hot') {
+        fetchedPosts = await getHotPostsPaginated(0, PAGE_SIZE, currentCategory);
+      } else if (currentSort === 'following' && user?.id) {
+        fetchedPosts = await getFollowingPostsPaginated(user.id, 0, PAGE_SIZE, currentCategory);
+      } else {
+        fetchedPosts = await getPostsPaginated(0, PAGE_SIZE, currentCategory);
+      }
       
       // 检查是否获取到了帖子
-      if (fetchedPosts.length === 0 && !loadingFailed && retryCount < MAX_RETRIES) {
+      // 注意：following 模式下返回空是正常状态（用户没关注任何人 / 关注者没发帖），
+      // 不应触发重试，否则会卡在「正在重新加载」循环。仅对 default/hot 的空结果重试。
+      const emptyIsFailure = currentSort !== 'following';
+      if (emptyIsFailure && fetchedPosts.length === 0 && !loadingFailed && retryCount < MAX_RETRIES) {
         // 增加重试计数
         retryCount++;
         loadingFailed = true;
@@ -316,9 +328,15 @@ export function PostsProvider({ children }: { children: ReactNode }) {
       const cacheKey = catKey(currentCategory, currentSort);
 
       console.debug(`📄 加载第${pageToLoad}页帖子，每页${pageSize}条，分类=${currentCategory ?? '全部'}，排序=${currentSort}`);
-      const morePosts = currentSort === 'hot'
-        ? await getHotPostsPaginated(pageToLoad, pageSize, currentCategory)
-        : await getPostsPaginated(pageToLoad, pageSize, currentCategory);
+      // following 需登录：未登录回退默认时间流（与 loadPosts 一致）。
+      let morePosts: Post[];
+      if (currentSort === 'hot') {
+        morePosts = await getHotPostsPaginated(pageToLoad, pageSize, currentCategory);
+      } else if (currentSort === 'following' && user?.id) {
+        morePosts = await getFollowingPostsPaginated(user.id, pageToLoad, pageSize, currentCategory);
+      } else {
+        morePosts = await getPostsPaginated(pageToLoad, pageSize, currentCategory);
+      }
       if (morePosts.length === 0) {
         dispatch({ type: 'SET_HAS_MORE', payload: false });
         return;
@@ -458,10 +476,20 @@ export function PostsProvider({ children }: { children: ReactNode }) {
   }
 
   // 切换排序：清当前列表，触发重新加载（与切分类同款流程）
+  // following 需登录：未登录直接忽略（UI 已隐藏按钮，此为双保险）。
   const setSort = (sort: PostSortMode) => {
     if (sort === state.sort) return;
+    if (sort === 'following' && !user?.id) return;
     dispatch({ type: 'SET_SORT', payload: sort });
   }
+
+  // 登出回退：用户登出后若仍停在 following 模式，自动切回 default。
+  // 否则 pill 高亮「关注」但取数回退成默认流，体验割裂。
+  useEffect(() => {
+    if (!user?.id && state.sort === 'following') {
+      dispatch({ type: 'SET_SORT', payload: 'default' });
+    }
+  }, [user?.id, state.sort]);
   
   // 初始加载
   useEffect(() => {

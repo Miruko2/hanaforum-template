@@ -8,8 +8,10 @@ import CinemaMode from "@/components/cinema-mode"
 import FloatingActionButton from "@/components/floating-action-button"
 import { usePosts, type PostSortMode } from "@/contexts/posts-context"
 import { useCinemaMode } from "@/contexts/cinema-mode-context"
+import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { isValidCategory, CATEGORY_LABELS } from "@/lib/categories"
 import { motion } from "framer-motion"
+import { UserCheck } from "lucide-react"
 
 // 首页是否已进入过一次（模块级，跨路由往返保留）。
 // 帖子数据由全局 PostsProvider 缓存，从 music 等页返回首页时内容其实是「现成的」，
@@ -41,6 +43,12 @@ const SORT_OPTIONS: { value: PostSortMode; label: string }[] = [
   { value: "hot", label: "热度" },
 ]
 
+// 「关注」仅登录用户可见：未登录没关注列表，显示也无意义。
+// 用 getSortOptions(isLoggedIn) 在登录时追加第三项，pill 滑块 / 切换逻辑零改动复用。
+const FOLLOWING_OPTION = { value: "following" as PostSortMode, label: "关注" }
+const getSortOptions = (isLoggedIn: boolean) =>
+  isLoggedIn ? [...SORT_OPTIONS, FOLLOWING_OPTION] : SORT_OPTIONS
+
 // HomePage 内部使用了 useSearchParams()，在 Next.js `output:'export'`
 // 静态构建（Capacitor APK）模式下必须包 Suspense，否则 build 阶段 prerender 失败。
 function HomeContent() {
@@ -48,9 +56,14 @@ function HomeContent() {
   const searchParams = useSearchParams()
   // 影院模式状态由 CinemaModeProvider 统一管理（localStorage / URL ?cinema=1 也在那里）
   const { cinemaMode } = useCinemaMode()
+  // 登录态决定「关注」选项是否出现
+  const { user } = useSimpleAuth()
+  const isLoggedIn = !!user
 
-  // 帖子排序方式由 PostsContext 管理：default=按时间，hot=按赞/评论权重（数据库端排序）
+  // 帖子排序方式由 PostsContext 管理：default=按时间，hot=按赞/评论权重（数据库端排序），
+  // following=只看关注者的帖（需登录，数据库端 JOIN follows+posts）
   const sortMode = state.sort
+  const sortOptions = getSortOptions(isLoggedIn)
 
   // 从 URL 读 ?category=xxx，useSearchParams 在 URL 变化时自动重渲
   const activeCategory = useMemo(() => {
@@ -116,20 +129,20 @@ function HomeContent() {
               </motion.div>
             )}
 
-            {/* 排序切换：默认（按时间）/ 热度（按点赞评论权重） */}
+            {/* 排序切换：默认（按时间）/ 热度（按权重）/ 关注（仅登录，只看关注者的帖） */}
             <motion.div
               className="mb-5 flex items-center gap-1 px-4 max-w-7xl mx-auto"
               initial={firstEnter.current ? { opacity: 0, y: -8 } : false}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.4, ease: "easeOut" }}
             >
-              {SORT_OPTIONS.map(({ value, label }) => {
+              {sortOptions.map(({ value, label }) => {
                 const active = sortMode === value
                 return (
                   <button
                     key={value}
                     onClick={() => setSort(value)}
-                    className={`relative px-4 py-1.5 text-sm rounded-full transition-colors duration-200 ${
+                    className={`relative px-4 py-1.5 text-sm rounded-full transition-colors duration-200 inline-flex items-center gap-1.5 ${
                       active ? "text-black font-semibold" : "text-white/50 hover:text-white/80"
                     }`}
                   >
@@ -140,6 +153,9 @@ function HomeContent() {
                         style={{ boxShadow: "0 0 16px rgba(132,204,22,0.45)" }}
                         transition={{ type: "spring", stiffness: 500, damping: 35 }}
                       />
+                    )}
+                    {value === "following" && (
+                      <UserCheck className="relative z-10 h-3.5 w-3.5" />
                     )}
                     <span className="relative z-10">{label}</span>
                   </button>

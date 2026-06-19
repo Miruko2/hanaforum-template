@@ -20,7 +20,7 @@ export default function PostGrid() {
   const { state, loadMorePosts, updatePost, deletePost, retryLoading } = usePosts()
   
   // 从context中获取状态（排序已由 PostsContext 在取数层处理）
-  const { posts, isLoading, hasMore, error } = state
+  const { posts, isLoading, hasMore, error, sort } = state
   
   // 添加用于追踪上次用户ID的引用
   const lastUserIdRef = useRef<string | null>(null);
@@ -191,8 +191,17 @@ export default function PostGrid() {
       {/* 无内容状态 */}
       {!isLoading && !error && posts.length === 0 && (
         <div className="flex flex-col items-center justify-center h-64 text-gray-500">
-          <p className="text-xl mb-4">暂无帖子</p>
-          <p className="text-sm">成为第一个发帖的人吧</p>
+          {sort === 'following' ? (
+            <>
+              <p className="text-xl mb-4">还没有关注的人发帖</p>
+              <p className="text-sm">去关注更多有趣的人吧</p>
+            </>
+          ) : (
+            <>
+              <p className="text-xl mb-4">暂无帖子</p>
+              <p className="text-sm">成为第一个发帖的人吧</p>
+            </>
+          )}
         </div>
       )}
     </div>

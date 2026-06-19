@@ -680,6 +680,44 @@ export const getHotPostsPaginated = withCache(
   30
 );
 
+// 关注者帖子分页：走 following_posts RPC（scripts/2026-06-19-following-posts-rpc.sql），
+// 数据库端 JOIN follows+posts，只返回 followerId 关注的人发的帖，按时间倒序。
+// 可选 category 过滤 → 「关注 + 分类」天然生效。RPC 返回 SETOF posts，
+// 同样 .select(POST_SELECT) 嵌套计数、processPostsData 映射，链路与上面两个一致。
+//
+// 安全：p_follower 由前端传当前 user.id。follows / posts 均走自身 RLS，
+// 且「谁关注谁」本就公开读，故即便传入他人 id 也只会查到其关注者的公开帖，无越权。
+export const getFollowingPostsPaginated = withCache(
+  async (
+    followerId: string,
+    page: number = 0,
+    limit: number = 30,
+    category: string | null = null,
+  ): Promise<Post[]> => {
+    if (!followerId) return [];
+    try {
+      const { data, error } = await supabase
+        .rpc("following_posts", {
+          p_follower: followerId,
+          p_offset: page * limit,
+          p_limit: limit,
+          p_category: category,
+        })
+        .select(postSelect(await postsHaveImageUrls()));
+      if (error) {
+        console.error("❌ 获取关注帖子失败:", error);
+        return [];
+      }
+      return await processPostsData(data as any[]);
+    } catch (error) {
+      console.error("❌ 获取关注帖子失败:", error);
+      return [];
+    }
+  },
+  "posts-following-paginated",
+  30,
+);
+
 // 获取某用户的全部帖子（社交个人页 /user 用）。复用 POST_SELECT + processPostsData；
 // 用户帖子量通常不大，一次拉到上限即可（无需分页）。
 export const getUserPosts = withCache(
