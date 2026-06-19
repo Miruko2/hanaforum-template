@@ -8,6 +8,7 @@
 import { useEffect, useState, useCallback } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { apiUrl } from "@/lib/api-base"
+import { CATEGORIES, CATEGORY_LABELS } from "@/lib/categories"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
@@ -46,6 +47,15 @@ async function authHeaders(): Promise<Record<string, string>> {
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
+/** 分类选择 chip 样式（选中=lime 实心，未选=毛玻璃描边） */
+function chipCls(active: boolean): string {
+  return `px-2.5 py-1 rounded-full text-xs border transition-colors ${
+    active
+      ? "bg-lime-500/90 text-black border-lime-400"
+      : "bg-white/5 text-white/80 border-white/15 hover:bg-white/10"
+  }`
+}
+
 const STATUS_LABEL: Record<Status, string> = { idle: "休息中", busy: "行动中", dead: "死机" }
 const STATUS_DOT: Record<Status, string> = {
   idle: "bg-gray-400",
@@ -57,6 +67,7 @@ export default function MengmegziAgentPanel() {
   const [state, setState] = useState<StateData | null>(null)
   const [config, setConfig] = useState<ConfigData | null>(null)
   const [logs, setLogs] = useState<LogRow[]>([])
+  const [postCategory, setPostCategory] = useState<string>("") // "" = 随机
   const [postId, setPostId] = useState("")
   const [commentId, setCommentId] = useState("")
   const [sending, setSending] = useState(false)
@@ -172,14 +183,41 @@ export default function MengmegziAgentPanel() {
       <section className="profile-glass rounded-2xl p-5 text-white">
         <h3 className="text-base font-semibold tracking-wide mb-4">指令</h3>
         <div className="space-y-3">
-          <div className="flex items-center gap-2">
+          {/* 发帖：先选分类（不选=随机），再发。后端 post_now 收到 category 就用、否则随机。 */}
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-sm text-white/60 mr-1">分类：</span>
+              <button
+                type="button"
+                onClick={() => setPostCategory("")}
+                className={chipCls(postCategory === "")}
+              >
+                随机
+              </button>
+              {CATEGORIES.map((c) => (
+                <button
+                  key={c.value}
+                  type="button"
+                  onClick={() => setPostCategory(c.value)}
+                  className={chipCls(postCategory === c.value)}
+                >
+                  <span className="opacity-70 mr-0.5">{c.glyph}</span>
+                  {c.label}
+                </button>
+              ))}
+            </div>
             <Button
               disabled={disabled || sending}
-              onClick={() => sendCommand({ action: "post_now" })}
+              onClick={() =>
+                sendCommand({
+                  action: "post_now",
+                  ...(postCategory ? { category: postCategory } : {}),
+                })
+              }
               className="bg-lime-500/90 text-black hover:bg-lime-400"
             >
               <Send className="h-4 w-4 mr-1" />
-              发一帖
+              发一帖（{postCategory ? CATEGORY_LABELS[postCategory] : "随机"}）
             </Button>
           </div>
           <div className="flex items-center gap-2">
