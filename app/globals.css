@@ -4377,6 +4377,20 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
   font-size: 16px; letter-spacing: 0.05em; cursor: text;
 }
 .dmx-input.has-eye { padding-right: 42px; }
+/* 浏览器自动填充（Chrome/Edge/Safari）：必须保持与手动输入一致——真实文字透明、
+   只显示下层点阵/头像。否则 autofill 用 -webkit-text-fill-color 强行画出文字、再叠
+   黄/蓝底，与头像层重叠（bug：自动填充后框内同时出现邮箱文字 + 头像）。
+   · -webkit-text-fill-color: transparent —— 压住 autofill 文字（color:transparent 对它无效）
+   · transition: background-color 99999s —— 经典 hack：拖住 autofill 背景着色，让 .dmx-box
+     的毛玻璃底始终透出，不显黄底（autofill 背景无法用普通 background 覆盖） */
+.dmx-input:-webkit-autofill,
+.dmx-input:-webkit-autofill:hover,
+.dmx-input:-webkit-autofill:focus,
+.dmx-input:-webkit-autofill:active {
+  -webkit-text-fill-color: transparent !important;
+  caret-color: transparent !important;
+  transition: background-color 99999s ease-in-out 0s !important;
+}
 /* 尾部对齐：超出窗口裁掉最旧字符（左侧），输入尾部与光标格恒可见（终端式） */
 .dmx-dm { flex: 1; min-width: 0; overflow: hidden; display: flex; align-items: center; justify-content: flex-end; pointer-events: none; }
 .dmx-track { display: flex; gap: 5px; align-items: center; }
