@@ -110,8 +110,11 @@ async function fetchFromDanbooru(tag: string): Promise<ImageResult | null> {
   const t = (tag || "").trim()
   if (!t) return null
   const url = new URL("https://danbooru.donmai.us/posts.json")
-  url.searchParams.set("tags", `${t} rating:g`) // rating:g 排除 sensitive/questionable/explicit
-  url.searchParams.set("limit", "30")
+  // rating:g 排除 sensitive/questionable/explicit；order:score 只取高赞精品
+  //（默认顺序全是 0 赞冷门图 → 难看的多）。rating:/order: 是 metatag、不占匿名 2 个普通
+  // tag 限制，所以 `<tag> rating:g order:score` 只用了 1 个普通 tag、可行。
+  url.searchParams.set("tags", `${t} rating:g order:score`)
+  url.searchParams.set("limit", "50") // top 50 高赞里随机选：质量高 + 保留多样性
   try {
     const res = await fetch(url.toString(), {
       headers: {

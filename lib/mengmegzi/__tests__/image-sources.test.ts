@@ -52,7 +52,7 @@ describe("image-sources", () => {
     expect(r!.height).toBe(1200)
     const called = new URL(fetchMock.mock.calls[0][0])
     expect(called.hostname).toBe("danbooru.donmai.us")
-    expect(called.searchParams.get("tags")).toBe("guitar rating:g")
+    expect(called.searchParams.get("tags")).toBe("guitar rating:g order:score")
     // 带标识 UA
     expect(fetchMock.mock.calls[0][1]?.headers?.["User-Agent"]).toContain("HanakosForumBot")
   })
@@ -89,7 +89,9 @@ describe("image-sources", () => {
   test("danbooru: AI 关键词转 booru tag（小写 + 下划线）", async () => {
     fetchMock.mockResolvedValueOnce(danbooruResp([danbooruPost()]))
     await fetchImageForCategory({ provider: "danbooru", query: "original" }, "Night City")
-    expect(new URL(fetchMock.mock.calls[0][0]).searchParams.get("tags")).toBe("night_city rating:g")
+    expect(new URL(fetchMock.mock.calls[0][0]).searchParams.get("tags")).toBe(
+      "night_city rating:g order:score",
+    )
   })
 
   test("danbooru: AI tag 全被过滤 → 回退分类 tag → 仍空 → null", async () => {
