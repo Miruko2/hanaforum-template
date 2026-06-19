@@ -156,6 +156,16 @@ describe("image-sources", () => {
     expect(r!.imageUrl).toContain("sw.jpg")
   })
 
+  test("安全路径: 两源都命中时也优先 yande.re（画质）", async () => {
+    mockSources({
+      danbooru: [danbooruPost({ rating: "g", large_file_url: "https://cdn.donmai.us/sample/db.jpg" })],
+      yandere: [yanderePost({ rating: "s", sample_url: "https://files.yande.re/sample/ya.jpg" })],
+    })
+    const r = await fetchImageForCategory({ provider: "danbooru", query: "scenery" }, "ocean")
+    expect(r!.source).toBe("yandere")
+    expect(r!.imageUrl).toContain("ya.jpg")
+  })
+
   test("tag 降级: pink_game_controller → controller(多源)", async () => {
     // 只有 controller 级 danbooru 命中，其余都空
     fetchMock.mockImplementation((u: any) => {

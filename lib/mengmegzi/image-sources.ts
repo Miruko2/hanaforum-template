@@ -323,39 +323,39 @@ async function fetchFromYandere(tag: string, opts: BooruFetchOpts): Promise<Imag
 }
 
 /**
- * 安全双源聚合（general/game/life）：danbooru rating:g + yande.re rating:s，
- * 并行各取一张精品，合并随机选一张。单源挂掉不影响另一源（容错）。
+ * booru 双源聚合：**yande.re 优先、danbooru 兜底**。两源并行发（不增延迟）；yande.re 命中就用它
+ * （画质更高 ~1500px 精选板），只有 yande.re 没命中该 tag 或在 Vercel 挂了，才回退 danbooru。
+ * danbooru 是安全网——任何分类都不会因 yande.re 抽风而没图。
  */
-async function fetchFromSafeBooruSources(tag: string): Promise<ImageResult | null> {
-  return mergeBooruSources([
-    fetchFromDanbooru(tag, { rating: "g" }).catch(() => null),
-    fetchFromYandere(tag, { rating: "s" }).catch(() => null),
-  ])
-}
-
-/**
- * 软色情双源聚合（色图 nsfw）：danbooru rating:s（性感不露点）+ yande.re rating:q（更辣），
- * 两源都套 SUGGESTIVE_EXTRA_BLOCK（拦露点/性行为）+ BOORU_TAG_BLOCKLIST（loli/shota 等红线）。
- * **yande.re 优先**：它画质更高（~1500px 精选板），命中就用它；只有 yande.re 没命中该 tag
- * 或在 Vercel 挂了，才回退 danbooru s（安全网，定义上即不露点，色图永不会因 yande.re 抽风没图）。
- * 两源仍并行发，不增延迟——danbooru 只是顺手拿着兜底，「选」时偏向 yande.re。
- */
-async function fetchFromSuggestiveBooruSources(tag: string): Promise<ImageResult | null> {
+async function fetchFromBooruSources(
+  tag: string,
+  danbooruOpts: BooruFetchOpts,
+  yandereOpts: BooruFetchOpts,
+): Promise<ImageResult | null> {
+  const t = (tag || "").trim()
+  if (!t) return null
   const [danbooru, yandere] = await Promise.all([
-    fetchFromDanbooru(tag, { rating: "s", extraBlock: SUGGESTIVE_EXTRA_BLOCK }).catch(() => null),
-    fetchFromYandere(tag, { rating: "q", extraBlock: SUGGESTIVE_EXTRA_BLOCK }).catch(() => null),
+    fetchFromDanbooru(t, danbooruOpts).catch(() => null),
+    fetchFromYandere(t, yandereOpts).catch(() => null),
   ])
   return yandere || danbooru || null
 }
 
-/** 合并多源结果：过滤 null，剩余里随机选一张（容错——单源挂掉只要另一源有就出图）。 */
-async function mergeBooruSources(
-  fetches: Array<Promise<ImageResult | null>>,
-): Promise<ImageResult | null> {
-  const settled = await Promise.all(fetches)
-  const ok = settled.filter((r): r is ImageResult => r !== null)
-  if (ok.length === 0) return null
-  return ok[Math.floor(Math.random() * ok.length)]
+/** 安全分类（general/game/life）：yande.re rating:s 优先、danbooru rating:g 兜底。 */
+function fetchFromSafeBooruSources(tag: string): Promise<ImageResult | null> {
+  return fetchFromBooruSources(tag, { rating: "g" }, { rating: "s" })
+}
+
+/**
+ * 色图（nsfw）软色情：yande.re rating:q（更辣）优先、danbooru rating:s（性感不露点·安全网）兜底。
+ * 两源都套 SUGGESTIVE_EXTRA_BLOCK（拦露点/性行为）+ BOORU_TAG_BLOCKLIST（loli/shota 等红线）。
+ */
+function fetchFromSuggestiveBooruSources(tag: string): Promise<ImageResult | null> {
+  return fetchFromBooruSources(
+    tag,
+    { rating: "s", extraBlock: SUGGESTIVE_EXTRA_BLOCK },
+    { rating: "q", extraBlock: SUGGESTIVE_EXTRA_BLOCK },
+  )
 }
 
 // ── unsplash（真实照片，imgix；保留兼容） ──
