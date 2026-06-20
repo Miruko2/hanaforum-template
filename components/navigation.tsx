@@ -337,19 +337,19 @@ function NavigationContent() {
                 <Music className="h-4 w-4" />
               </Link>
 
-              {/* 友情链接 */}
+              {/* 友情链接：PC 端用「友链」文字按钮（比图标更醒目），与「管理/个人中心」文字按钮同款 */}
               <Link
                 href="/links"
                 title="友情链接"
                 onClick={(e) => handleFlipLink(e, "/links")}
                 className={cn(
-                  "flex items-center justify-center h-9 w-9 rounded-xl transition-all duration-200",
+                  "px-4 py-2 text-sm font-medium rounded-xl transition-all duration-200",
                   pathname === "/links"
                     ? "bg-lime-400/20 text-lime-400 shadow-lg"
                     : "text-gray-300 hover:text-lime-400 hover:bg-white/10",
                 )}
               >
-                <Link2 className="h-4 w-4" />
+                友链
               </Link>
 
               {isAdmin && (
