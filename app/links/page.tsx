@@ -58,7 +58,7 @@ export default function LinksPage() {
     <main className="min-h-screen text-white">
       <div className="container mx-auto max-w-4xl px-4 pt-24 pb-16 space-y-8">
         {/* 标题区 */}
-        <div className="text-center space-y-3">
+        <div className="links-enter text-center space-y-3">
           <div className="mb-2 inline-flex h-16 w-16 items-center justify-center rounded-2xl border border-lime-500/30 bg-lime-500/15">
             <Link2 className="h-8 w-8 text-lime-400" />
           </div>
@@ -69,7 +69,10 @@ export default function LinksPage() {
         </div>
 
         {/* 本站信息：方便对方复制 */}
-        <section className="space-y-4 rounded-2xl border border-lime-500/30 bg-black/30 p-6 shadow-xl shadow-lime-500/5 backdrop-blur-xl sm:p-8">
+        <section
+          className="links-enter space-y-4 rounded-2xl border border-lime-500/30 bg-black/30 p-6 shadow-xl shadow-lime-500/5 backdrop-blur-xl sm:p-8"
+          style={{ animationDelay: "80ms" }}
+        >
           <div className="flex items-center gap-3">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/icons/icon-512.png" alt={SITE_NAME} className="h-10 w-10 rounded-xl" />
@@ -90,18 +93,19 @@ export default function LinksPage() {
 
         {/* 朋友的小站 —— 真朋友的个人站，平等互链，刻意和导航站分开、放在更显眼的位置 */}
         <section className="space-y-4">
-          <div className="flex items-baseline justify-between">
+          <div className="links-enter flex items-baseline justify-between" style={{ animationDelay: "150ms" }}>
             <h2 className="text-xl font-bold">朋友的小站</h2>
             <span className="text-xs text-white/30">私交友链</span>
           </div>
           <div className="friend-grid grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {FRIEND_SITES.map((link) => (
+            {FRIEND_SITES.map((link, i) => (
               <div key={link.url} className="friend-card-wrap h-full">
                 <a
                   href={link.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="friend-card group flex h-full items-center gap-4 rounded-2xl border border-lime-400/20 bg-black/30 p-4 backdrop-blur-xl transition-[border-color,background-color,box-shadow] duration-300 hover:border-lime-400/50 hover:bg-black/40 hover:shadow-[0_16px_40px_rgba(0,0,0,0.45),0_0_24px_rgba(163,230,53,0.18)]"
+                  style={{ animationDelay: `${190 + i * 70}ms` }}
+                  className="friend-card links-enter group flex h-full items-center gap-4 rounded-2xl border border-lime-400/20 bg-black/30 p-4 backdrop-blur-xl transition-[border-color,background-color,box-shadow] duration-300 hover:border-lime-400/50 hover:bg-black/40 hover:shadow-[0_16px_40px_rgba(0,0,0,0.45),0_0_24px_rgba(163,230,53,0.18)]"
                 >
                   <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-xl border border-lime-400/30 bg-lime-400/10 text-lime-400">
                     <Heart className="h-5 w-5" />
@@ -129,18 +133,19 @@ export default function LinksPage() {
 
         {/* 友链网格 */}
         <section className="space-y-4">
-          <div className="flex items-baseline justify-between">
+          <div className="links-enter flex items-baseline justify-between" style={{ animationDelay: "320ms" }}>
             <h2 className="text-xl font-bold">二次元 · ACG 导航</h2>
             <span className="text-xs text-white/30">{ACG_NAV_SITES.length} 个站点</span>
           </div>
           <div className="friend-grid grid grid-cols-2 gap-3 sm:grid-cols-3">
-            {ACG_NAV_SITES.map((link) => (
+            {ACG_NAV_SITES.map((link, i) => (
               <div key={link.url} className="friend-card-wrap h-full">
                 <a
                   href={link.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="friend-card group flex h-full flex-col rounded-2xl border border-white/10 bg-black/30 p-4 backdrop-blur-xl transition-[border-color,background-color,box-shadow] duration-300 hover:border-lime-400/40 hover:bg-black/40 hover:shadow-[0_16px_40px_rgba(0,0,0,0.45),0_0_24px_rgba(163,230,53,0.14)]"
+                  style={{ animationDelay: `${360 + Math.min(i, 6) * 40}ms` }}
+                  className="friend-card links-enter group flex h-full flex-col rounded-2xl border border-white/10 bg-black/30 p-4 backdrop-blur-xl transition-[border-color,background-color,box-shadow] duration-300 hover:border-lime-400/40 hover:bg-black/40 hover:shadow-[0_16px_40px_rgba(0,0,0,0.45),0_0_24px_rgba(163,230,53,0.14)]"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="truncate font-semibold text-white/90 transition-colors group-hover:text-lime-400">
@@ -159,7 +164,7 @@ export default function LinksPage() {
         </section>
 
         {/* 说明 */}
-        <p className="text-center text-xs leading-relaxed text-white/30">
+        <p className="links-enter text-center text-xs leading-relaxed text-white/30" style={{ animationDelay: "640ms" }}>
           想和我们换友链？先把上面「本站信息」加到你的网站，再到对应导航站提交本页地址即可。
         </p>
       </div>

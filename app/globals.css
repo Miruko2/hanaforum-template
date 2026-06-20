@@ -461,6 +461,30 @@ body {
   }
 }
 
+/* ============================================================
+ * 友链页入场动画（2026-06-21）—— 切到 /links 时页面元素「高斯模糊渐入」，
+ * 与帖子卡 .post-enter / 管理面板 .admin-tab-enter 同一观感，复用既有 blurFadeIn
+ * 关键帧（opacity 0→1 + translateY 20px→0 + blur 24px→0）。
+ *
+ * 关键约束（同「祖先 filter 废掉子级 backdrop-filter」那条坑）：blurFadeIn 会给元素加
+ * filter，而「祖先有 filter（哪怕停在 blur(0)）会废掉子级 backdrop-filter 的背景采样」。
+ * 故本类只挂在「非毛玻璃块」(标题 / 小标题 / 说明) 或「毛玻璃块本体」(本站信息 section、
+ * 各 .friend-card)，绝不挂在 .friend-card 的祖先（.friend-card-wrap / <section> 网格容器）上。
+ * 同元素上 backdrop-filter 先采样、filter 再作用于结果，二者可共存（与 .admin-tab-enter 同理）。
+ *
+ * 友链页是服务端组件（须保持 SSR、友链能被收录爬虫读到），无法做平台判定，故纯 CSS：
+ * 逐元素 animation-delay 由 page.tsx 内联给出，营造自上而下「雾中浮现」的错落入场。
+ * 缓动沿用帖子卡同一条 cubic-bezier；prefers-reduced-motion 直接关闭。
+ * ============================================================ */
+.links-enter {
+  animation: blurFadeIn 1s cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .links-enter {
+    animation: none;
+  }
+}
+
 /* 激活状态的卡片 */
 .glass-card.active {
   background: linear-gradient(
