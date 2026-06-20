@@ -1840,6 +1840,19 @@ body.modal-open {
   -webkit-backdrop-filter: blur(20px) saturate(140%);
 }
 
+/* 安卓/鸿蒙首页帖子卡：backdrop-filter 从 blur(20) 降到 blur(6)，省 GPU。
+   .cv-auto 仅安卓/鸿蒙由 virtual-post-list 打在 .post-card-container 上（cheapEnter，UA 探测）；
+   后代选择器特异性 (0,2,0) 盖过 .glass-card/.post-card(0,1,0) 的基础态，也盖过触屏区把
+   .glass-card:hover 锁回 blur(20) 的那条（本规则源码更靠后）。桌面/iOS 无 .cv-auto、完全不受
+   影响，仍 blur(20) 满磨砂。
+   注意：这仍是实时采样的 backdrop-filter、只把高斯核从 20px 缩到 6px（中等省、约省一半），
+   每帧「复制背景+合成」的大头还在；若安卓滚动仍卡，把下面改成 backdrop-filter:none + 提高
+   background 不透明度（纯色底=数量级省。首页帖子是不透明内容卡，纯色底视觉损失远小于音乐卡）。 */
+.cv-auto .glass-card {
+  backdrop-filter: blur(6px) saturate(1.4);
+  -webkit-backdrop-filter: blur(6px) saturate(1.4);
+}
+
 
 /* ============================================
  * 音乐卡片墙（/music）—— 毛玻璃
