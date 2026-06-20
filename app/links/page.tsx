@@ -7,6 +7,7 @@
 import type { Metadata } from "next"
 import { Link2, ExternalLink, Heart } from "lucide-react"
 import { SITE_NAME, SITE_URL, SITE_DESCRIPTION } from "@/lib/site-url"
+import FriendLinkApplyForm from "./_components/friend-link-apply-form"
 
 export const metadata: Metadata = {
   title: "友情链接",
@@ -91,6 +92,9 @@ export default function LinksPage() {
             ))}
           </dl>
         </section>
+
+        {/* 申请友链表单（客户端小岛；页面其余仍是 SSR，友链 <a> 可被收录爬虫读到） */}
+        <FriendLinkApplyForm className="links-enter" style={{ animationDelay: "110ms" }} />
 
         {/* 朋友的小站 —— 真朋友的个人站，平等互链，刻意和导航站分开、放在更显眼的位置 */}
         <section className="space-y-4">

@@ -1,6 +1,6 @@
 "use client"
 
-import { Heart, MessageCircle, Reply, ShieldAlert, Megaphone, UserPlus, AtSign, Loader2 } from "lucide-react"
+import { Heart, MessageCircle, Reply, ShieldAlert, Megaphone, UserPlus, AtSign, Link2, Loader2 } from "lucide-react"
 import { cdnUrl } from "@/lib/cdn-url"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { formatDate, cn } from "@/lib/utils"
@@ -49,6 +49,12 @@ const TYPE_META: Record<
   // 聊天大厅被 @ 或被引用
   chat_mention: {
     icon: AtSign,
+    color: "text-lime-400",
+    bg: "bg-lime-500/15 border-lime-500/25",
+  },
+  // 收到新的友链申请（系统通知给管理员，无触发者；点击只标记已读，详情在 message 里）
+  friend_link_apply: {
+    icon: Link2,
     color: "text-lime-400",
     bg: "bg-lime-500/15 border-lime-500/25",
   },
