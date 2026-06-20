@@ -5,12 +5,15 @@ import { createPortal } from "react-dom"
 import { AnimatePresence, motion } from "framer-motion"
 import { X, Loader2 } from "lucide-react"
 import { formatDate } from "@/lib/utils"
+import { cdnUrl } from "@/lib/cdn-url"
 
 interface AnnouncementModalProps {
   isOpen: boolean
   onClose: () => void
   title: string | null
   content: string | null
+  /** 公告配图（可选）：管理员发公告时上传的单张压缩图，走 CDN 缓存层展示 */
+  imageUrl?: string | null
   createdAt?: string | null
   loading?: boolean
 }
@@ -24,6 +27,7 @@ export default function AnnouncementModal({
   onClose,
   title,
   content,
+  imageUrl,
   createdAt,
   loading = false,
 }: AnnouncementModalProps) {
@@ -134,6 +138,13 @@ export default function AnnouncementModal({
                 </div>
               ) : (
                 <>
+                  {imageUrl && (
+                    <img
+                      src={cdnUrl(imageUrl) || imageUrl}
+                      alt={title || "公告配图"}
+                      className="mb-4 w-full max-h-[50vh] rounded-xl border border-white/10 object-contain bg-black/20"
+                    />
+                  )}
                   <p className="text-sm text-white/85 leading-relaxed whitespace-pre-wrap break-words">
                     {content || "（无内容）"}
                   </p>

@@ -773,7 +773,7 @@ export async function createNotification({
 // 由数据库给所有用户各插一条 announcement 类型通知（服务端用 is_admin 鉴权）。
 // 取 token 方式与 createNotification 一致：优先 localStorage，getSession 兜底
 //（本项目 getSession 偶发返回失效/匿名 token）。
-export async function broadcastAnnouncement(title: string, content: string): Promise<string> {
+export async function broadcastAnnouncement(title: string, content: string, imageUrl?: string | null): Promise<string> {
   let accessToken: string | undefined;
   try {
     if (typeof window !== 'undefined') {
@@ -805,7 +805,7 @@ export async function broadcastAnnouncement(title: string, content: string): Pro
       apikey: anonKey,
       Authorization: `Bearer ${accessToken}`,
     },
-    body: JSON.stringify({ p_title: title, p_content: content }),
+    body: JSON.stringify({ p_title: title, p_content: content, p_image_url: imageUrl ?? null }),
   });
 
   if (!resp.ok) {
@@ -825,11 +825,11 @@ export async function broadcastAnnouncement(title: string, content: string): Pro
 // 按 id 读取公告全文（公告弹窗用）。announcements 的 SELECT 策略对所有人开放。
 export async function getAnnouncement(
   id: string,
-): Promise<{ id: string; title: string; content: string; created_at: string } | null> {
+): Promise<{ id: string; title: string; content: string; image_url: string | null; created_at: string } | null> {
   try {
     const { data, error } = await supabase
       .from('announcements')
-      .select('id, title, content, created_at')
+      .select('id, title, content, image_url, created_at')
       .eq('id', id)
       .single();
     if (error) throw error;

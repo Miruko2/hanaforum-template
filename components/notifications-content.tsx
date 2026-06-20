@@ -36,7 +36,7 @@ export default function NotificationsContent() {
   const [loadingPostId, setLoadingPostId] = useState<string | null>(null)
   // 公告弹窗状态
   const [activeAnnouncement, setActiveAnnouncement] = useState<
-    { title: string; content: string; created_at: string } | null
+    { title: string; content: string; image_url?: string | null; created_at: string } | null
   >(null)
   const [modalLiked, setModalLiked] = useState(false)
   const [modalLikeCount, setModalLikeCount] = useState(0)
@@ -276,6 +276,7 @@ export default function NotificationsContent() {
         onClose={() => setActiveAnnouncement(null)}
         title={activeAnnouncement?.title ?? null}
         content={activeAnnouncement?.content ?? null}
+        imageUrl={activeAnnouncement?.image_url ?? null}
         createdAt={activeAnnouncement?.created_at}
       />
     </Container>

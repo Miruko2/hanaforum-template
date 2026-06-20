@@ -210,6 +210,7 @@ export default function AnnouncementPopup() {
   const [activeAnnouncement, setActiveAnnouncement] = useState<{
     title: string
     content: string
+    image_url?: string | null
     created_at: string
   } | null>(null)
   const [modalLiked, setModalLiked] = useState(false)
@@ -651,6 +652,7 @@ export default function AnnouncementPopup() {
         onClose={() => setActiveAnnouncement(null)}
         title={activeAnnouncement?.title ?? null}
         content={activeAnnouncement?.content ?? null}
+        imageUrl={activeAnnouncement?.image_url ?? null}
         createdAt={activeAnnouncement?.created_at}
       />
     </>

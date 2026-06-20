@@ -1,11 +1,11 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState, type ChangeEvent } from "react"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { apiUrl } from "@/lib/api-base"
-import { Shield, Users, FileText, Trash2, AlertCircle, Bot, Cpu, Save, RefreshCw, Megaphone, Ban, ShieldCheck, MessageSquare } from "lucide-react"
+import { Shield, Users, FileText, Trash2, AlertCircle, Bot, Cpu, Save, RefreshCw, Megaphone, Ban, ShieldCheck, MessageSquare, ImageIcon, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -24,6 +24,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import { useToast } from "@/hooks/use-toast"
 import { broadcastAnnouncement } from "@/lib/supabase"
+import { compressImage } from "@/lib/image-compress"
 import MengmegziAgentPanel from "@/components/admin/mengmegzi-agent-panel"
 import { motion } from "framer-motion"
 
@@ -169,6 +170,49 @@ export default function AdminPage() {
   const [annContent, setAnnContent] = useState("")
   const [sendingAnn, setSendingAnn] = useState(false)
   const [showBroadcastConfirm, setShowBroadcastConfirm] = useState(false)
+  // 公告配图（单张，可选）：annImageFile=待上传原文件，annImagePreview=本地预览 data URL
+  const [annImageFile, setAnnImageFile] = useState<File | null>(null)
+  const [annImagePreview, setAnnImagePreview] = useState("")
+  const annFileInputRef = useRef<HTMLInputElement>(null)
+
+  // 选择公告配图：单张、≤5MB，读为本地预览（与发帖图同口径）
+  const handleAnnImageSelect = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = "" // 允许再次选择同一文件
+    if (!file) return
+    if (file.size > 5 * 1024 * 1024) {
+      toast({
+        title: "图片过大",
+        description: "公告配图不能超过 5MB",
+        variant: "destructive",
+      })
+      return
+    }
+    setAnnImageFile(file)
+    const reader = new FileReader()
+    reader.onload = (ev) => setAnnImagePreview((ev.target?.result as string) || "")
+    reader.readAsDataURL(file)
+  }
+
+  // 移除已选公告配图
+  const removeAnnImage = () => {
+    setAnnImageFile(null)
+    setAnnImagePreview("")
+  }
+
+  // 上传公告配图到 post-images 桶：上传前客户端压缩为 webp（复用帖子图那套 compressImage）。
+  // 单张、无需缩略图（公告不进列表流）；文件名随机唯一 → 缓存 1 年，最大化 CDN 命中。
+  const uploadAnnouncementImage = async (file: File): Promise<string> => {
+    const { blob, ext, contentType } = await compressImage(file)
+    const fileName = `announcement-${Math.random().toString(36).slice(2)}.${ext}`
+    const { data, error } = await supabase.storage.from("post-images").upload(fileName, blob, {
+      cacheControl: "31536000",
+      upsert: false,
+      contentType,
+    })
+    if (error) throw error
+    return supabase.storage.from("post-images").getPublicUrl(data.path).data.publicUrl
+  }
 
   // 发布全员公告
   const handleBroadcast = async () => {
@@ -182,13 +226,30 @@ export default function AdminPage() {
     }
     try {
       setSendingAnn(true)
-      await broadcastAnnouncement(annTitle.trim(), annContent.trim())
+      // 选了图 → 先压缩上传拿公开 URL；没选则发纯文字公告（与从前完全一致）
+      let imageUrl: string | null = null
+      if (annImageFile) {
+        try {
+          imageUrl = await uploadAnnouncementImage(annImageFile)
+        } catch (upErr: any) {
+          console.error("公告配图上传失败:", upErr)
+          toast({
+            title: "图片上传失败",
+            description: upErr?.message || "请稍后重试",
+            variant: "destructive",
+          })
+          setSendingAnn(false)
+          return
+        }
+      }
+      await broadcastAnnouncement(annTitle.trim(), annContent.trim(), imageUrl)
       toast({
         title: "已推送",
         description: "公告已发送给所有用户",
       })
       setAnnTitle("")
       setAnnContent("")
+      removeAnnImage()
     } catch (e: any) {
       console.error("发布公告失败:", e)
       toast({
@@ -1836,6 +1897,47 @@ export default function AdminPage() {
                 />
                 <p className="text-right text-xs text-gray-500">{annContent.length}/2000</p>
               </div>
+
+              {/* 配图（单张，可选）：上传前自动压缩为 webp，降低存储与 egress */}
+              <div className="space-y-2">
+                <label className="text-sm text-gray-400">配图（可选，单张）</label>
+                <input
+                  ref={annFileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleAnnImageSelect}
+                />
+                {annImagePreview ? (
+                  <div className="relative inline-block">
+                    <img
+                      src={annImagePreview}
+                      alt="公告配图预览"
+                      className="max-h-48 rounded-lg border border-white/15 object-contain bg-black/20"
+                    />
+                    <button
+                      type="button"
+                      onClick={removeAnnImage}
+                      disabled={sendingAnn}
+                      className="absolute top-1.5 right-1.5 rounded-full bg-black/60 p-1 text-white hover:bg-black/80 disabled:opacity-50"
+                      aria-label="移除配图"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => annFileInputRef.current?.click()}
+                    disabled={sendingAnn}
+                    className="flex h-28 w-28 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-white/20 bg-white/[0.04] text-white/50 transition-colors hover:border-white/35 hover:bg-white/[0.08] hover:text-white/80 disabled:opacity-50"
+                  >
+                    <ImageIcon className="h-5 w-5" />
+                    <span className="text-xs">选择图片</span>
+                  </button>
+                )}
+                <p className="text-xs text-gray-500">上传前会自动压缩（转 webp、限制尺寸），降低存储与流量。</p>
+              </div>
             </CardContent>
             <CardFooter className="justify-end">
               <Button
@@ -1870,6 +1972,13 @@ export default function AdminPage() {
                 <span className="mt-1 block whitespace-pre-wrap break-words text-gray-400 line-clamp-4">
                   {annContent || "（无内容）"}
                 </span>
+                {annImagePreview && (
+                  <img
+                    src={annImagePreview}
+                    alt="公告配图预览"
+                    className="mt-2 block max-h-32 rounded border border-white/10 object-contain"
+                  />
+                )}
               </span>
             </AlertDialogDescription>
           </AlertDialogHeader>
