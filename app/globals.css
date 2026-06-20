@@ -4529,3 +4529,76 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
 }
 @keyframes dmxAvatarIn { from { opacity: 0; transform: scale(0.7); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .dmx-avatar { animation: none; } }
+
+/* ============================================================
+   管理面板毛玻璃皮肤
+   与站内 .profile-glass / .glass-card 同一套语言，把原本死板的
+   bg-gray-900 实底卡片换成「糊身后站点底图」的磨砂玻璃。
+   采样源：layout.tsx 里 position:fixed; z-index:-1 的固定底图，
+   每个页面背后都有它；祖先 .container 无 filter/opacity，
+   不会触发「祖先 filter 废掉子级 backdrop-filter」的坑。
+
+   分两档，避免嵌套 backdrop-filter 反复采样浪费 GPU：
+   - .admin-panel-glass：顶层卡片 / 对话框，真 backdrop-filter
+   - .admin-inset-glass ：卡片内部的子块，纯半透明实底（不再叠模糊）
+   类定义放文件末尾，靠 CSS 源码顺序盖过 Tailwind 的 .bg-card 基类。
+   ============================================================ */
+.admin-panel-glass {
+  background: rgba(22, 24, 32, 0.5);
+  backdrop-filter: blur(22px) saturate(140%);
+  -webkit-backdrop-filter: blur(22px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  /* 大圆角：覆盖 shadcn Card 的 rounded-lg（本类在文件末尾、源码顺序更靠后） */
+  border-radius: 1.1rem;
+  box-shadow:
+    0 10px 36px rgba(0, 0, 0, 0.38),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+/* tab 容器：比卡片更通透一点，挂在卡片之上像一条玻璃导航条 */
+.admin-tabs-glass {
+  background: rgba(22, 24, 32, 0.45);
+  backdrop-filter: blur(18px) saturate(135%);
+  -webkit-backdrop-filter: blur(18px) saturate(135%);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 1rem;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.3);
+}
+
+/* 卡片内部子块（当前配置回显 / 开关行 / 列表外框等）：
+   纯半透明实底，不再叠 backdrop-filter —— 嵌套模糊既贵又会采样到
+   父卡片内容而非页面底图，观感反而脏。 */
+.admin-inset-glass {
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  /* 覆盖各处子块原本的 rounded-md，统一更圆 */
+  border-radius: 0.85rem;
+}
+
+/* 触屏 / 安卓：backdrop-filter 每帧实时采样成本高、易卡，
+   降级为高不透明度纯实底（沿用项目既有的玻璃降级策略）。 */
+@media (hover: none) {
+  .admin-panel-glass,
+  .admin-tabs-glass {
+    background: rgba(20, 22, 30, 0.92);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+/* 切换标签页时新面板的「高斯模糊渐入」入场，参考萌萌子面板 .profile-glass 的观感。
+   复用既有的 blurFadeIn 关键帧（opacity 0→1 + translateY 20px→0 + blur 24px→0）。
+   关键约束：本类必须挂在「卡片本体」——也就是和 .admin-panel-glass 同一个元素上，
+   绝不能挂在它的祖先（如 TabsContent 包裹层）。因为 blurFadeIn 会给元素加 filter，
+   而「祖先有 filter（哪怕结束停在 blur(0)）会废掉子级 backdrop-filter 的背景采样」；
+   同元素上 backdrop-filter 先采样、filter 再作用于结果，二者可共存（与 .glass-card 入场同理）。
+   缓动曲线沿用萌萌子 .profile-glass 同一条 cubic-bezier；时长在它 1.6s 基础上缩短到 1.2s，切页更跟手。
+   Radix 切 tab 会重挂内容，动画自然重放。 */
+.admin-tab-enter {
+  animation: blurFadeIn 1.2s cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .admin-tab-enter {
+    animation: none;
+  }
+}

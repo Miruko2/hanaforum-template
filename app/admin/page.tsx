@@ -25,6 +25,19 @@ import { Switch } from "@/components/ui/switch"
 import { useToast } from "@/hooks/use-toast"
 import { broadcastAnnouncement } from "@/lib/supabase"
 import MengmegziAgentPanel from "@/components/admin/mengmegzi-agent-panel"
+import { motion } from "framer-motion"
+
+// 标签页配置：驱动顶部带「果冻滑动」高亮的标签条（仿首页排序切换的 layoutId 弹簧）
+const ADMIN_TABS: { value: string; label: string; icon: typeof Shield }[] = [
+  { value: "admins", label: "管理员", icon: Shield },
+  { value: "users", label: "用户", icon: Users },
+  { value: "posts", label: "帖子", icon: FileText },
+  { value: "hanako", label: "AI 对话权限", icon: Bot },
+  { value: "ai-config", label: "AI 模型", icon: Cpu },
+  { value: "dm-ai-config", label: "私信 AI", icon: MessageSquare },
+  { value: "announcements", label: "公告", icon: Megaphone },
+  { value: "mengmegzi", label: "萌萌子", icon: Bot },
+]
 
 // ─── 模块级缓存 ────────────────────────────────────────────
 // 同一个 tab 内导航走又回来时，沿用上次数据，避免每次都重新请求 spinner。
@@ -69,12 +82,33 @@ type CachedDmAiConfig = {
 }
 let cachedDmAiConfig: CachedDmAiConfig | null = null
 
+// 列表加载骨架：壳层即时渲染期间占位，避免数据未到时误显示「暂无数据」。
+function SkeletonRows({ rows = 3, cols = 3 }: { rows?: number; cols?: number }) {
+  return (
+    <div>
+      {Array.from({ length: rows }).map((_, i) => (
+        <div
+          key={i}
+          className="grid gap-4 p-4 border-b border-white/5 last:border-0"
+          style={{ gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}
+        >
+          {Array.from({ length: cols }).map((_, j) => (
+            <div key={j} className="h-4 rounded bg-white/10 animate-pulse" />
+          ))}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export default function AdminPage() {
   const { user, isAdmin, loading: authLoading } = useSimpleAuth()
   const router = useRouter()
   const { toast } = useToast()
   // 缓存命中就跳过 spinner，直接渲染
   const [loading, setLoading] = useState(!cachedAdminData)
+  // 受控标签页：自己掌握当前 tab，才能驱动 layoutId 果冻滑动高亮
+  const [activeTab, setActiveTab] = useState("admins")
   const [users, setUsers] = useState<any[]>(cachedAdminData?.users || [])
   const [userCount, setUserCount] = useState<number>(cachedAdminData?.userCount ?? 0)
   const [posts, setPosts] = useState<any[]>(cachedAdminData?.posts || [])
@@ -99,6 +133,8 @@ export default function AdminPage() {
   const bannedIds = new Set(bannedUsers.map((b) => b.user_id))
   // 用户列表搜索词（按用户名 / 用户 ID 客户端过滤已加载列表）
   const [userSearch, setUserSearch] = useState("")
+  // 帖子列表搜索词（按标题客户端过滤已加载的帖子）
+  const [postSearch, setPostSearch] = useState("")
   // 封禁确认弹窗
   const [banTarget, setBanTarget] = useState<{ id: string; username: string } | null>(null)
   const [banReason, setBanReason] = useState("")
@@ -194,8 +230,14 @@ export default function AdminPage() {
           .order("updated_at", { ascending: false, nullsFirst: false }),
         supabase
           .from("posts")
-          .select("id, title, content, description, category, user_id, created_at")
-          .order("created_at", { ascending: false }),
+          // 只取列表实际展示的列：content / description 可能是大段正文，
+          // 这里根本不显示，拉下来纯属浪费 egress（200 篇累加可观）。砍掉只留必需列。
+          .select("id, title, user_id, created_at")
+          .order("created_at", { ascending: false })
+          // 后台审核只需最近帖子；不设上限会把全站历史帖一次性拉下来并渲染成
+          // 几千行 DOM，是「进面板等半天」的主要数据成本。取最近 200 篇，
+          // 命中上限时下方列表会提示。
+          .limit(200),
         supabase
           .from("admin_users")
           .select("id, user_id, added_by, created_at")
@@ -228,80 +270,66 @@ export default function AdminPage() {
         snapshot.userCount = usersResult.value.count ?? snapshot.users.length
       }
 
-      // 处理帖子列表
-      if (postsResult.status === "fulfilled" && !postsResult.value.error) {
-        const postsData = postsResult.value.data || []
-        const postUserIds = [...new Set(postsData.map(p => p.user_id).filter(Boolean))]
-        const usernameMap = new Map<string, string>()
+      // 帖子 / 管理员 / 白名单都要把 user_id 翻成用户名。原来这三块各自
+      // 再查一次 profiles（3 次串行往返，是首屏慢的一大头）。这里先把三者
+      // 需要的 id 汇总，合并成「一次」profiles 查询，再分别套各自的展示逻辑。
+      const postsData =
+        postsResult.status === "fulfilled" && !postsResult.value.error
+          ? postsResult.value.data || []
+          : null
+      const adminsData =
+        adminsResult.status === "fulfilled" && !adminsResult.value.error
+          ? adminsResult.value.data || []
+          : null
+      const allowedData =
+        allowedResult.status === "fulfilled" && !allowedResult.value.error
+          ? allowedResult.value.data || []
+          : null
 
-        if (postUserIds.length > 0) {
-          const { data: profiles } = await supabase
-            .from("profiles")
-            .select("id, username")
-            .in("id", postUserIds)
+      const needIds = new Set<string>()
+      for (const p of postsData || []) if (p.user_id) needIds.add(p.user_id)
+      for (const a of adminsData || []) if (a.user_id) needIds.add(a.user_id)
+      for (const a of allowedData || []) if (a.user_id) needIds.add(a.user_id)
 
-          for (const p of profiles || []) {
-            if (p.username) {
-              const name = p.username.includes("@") ? p.username.split("@")[0] : p.username
-              usernameMap.set(p.id, name)
-            }
-          }
-        }
-
-        snapshot.posts = postsData.map(post => ({
-          ...post,
-          username: usernameMap.get(post.user_id) || `用户_${post.user_id.substring(0, 6)}`,
-        }))
+      // id → 原始 username（null 表示该 profile 没设用户名）
+      const profileNameMap = new Map<string, string | null>()
+      if (needIds.size > 0) {
+        const { data: profs } = await supabase
+          .from("profiles")
+          .select("id, username")
+          .in("id", [...needIds])
+        for (const p of profs || []) profileNameMap.set(p.id, p.username ?? null)
       }
 
-      // 处理管理员列表
-      if (adminsResult.status === "fulfilled" && !adminsResult.value.error) {
-        const adminsData = adminsResult.value.data || []
-        const adminUserIds = [...new Set(adminsData.map(a => a.user_id).filter(Boolean))]
-        const adminProfileMap = new Map<string, { username: string | null }>()
+      // 帖子：用户名去掉邮箱后缀，查不到则回退「用户_前6位」
+      if (postsData) {
+        snapshot.posts = postsData.map((post) => {
+          const raw = profileNameMap.get(post.user_id)
+          const name = raw
+            ? raw.includes("@")
+              ? raw.split("@")[0]
+              : raw
+            : `用户_${post.user_id.substring(0, 6)}`
+          return { ...post, username: name }
+        })
+      }
 
-        if (adminUserIds.length > 0) {
-          const { data: adminProfiles } = await supabase
-            .from("profiles")
-            .select("id, username")
-            .in("id", adminUserIds)
-
-          for (const p of adminProfiles || []) {
-            adminProfileMap.set(p.id, { username: p.username })
-          }
-        }
-
-        snapshot.admins = adminsData.map(a => ({
+      // 管理员：保持 { users: { username, email } } 形状不变（展示处直接读）
+      if (adminsData) {
+        snapshot.admins = adminsData.map((a) => ({
           ...a,
           users: {
-            username: adminProfileMap.get(a.user_id)?.username || null,
+            username: profileNameMap.get(a.user_id) ?? null,
             email: null,
           },
         }))
       }
 
-      // 处理 AI 白名单
-      if (allowedResult.status === "fulfilled" && !allowedResult.value.error) {
-        const allowedData = allowedResult.value.data || []
-        const allowedUserIds = allowedData.map((a) => a.user_id).filter(Boolean)
-        const allowedUsernameMap = new Map<string, string>()
-
-        if (allowedUserIds.length > 0) {
-          const { data: allowedProfiles } = await supabase
-            .from("profiles")
-            .select("id, username")
-            .in("id", allowedUserIds)
-
-          for (const p of allowedProfiles || []) {
-            if (p.username) {
-              allowedUsernameMap.set(p.id, p.username)
-            }
-          }
-        }
-
+      // AI 白名单：username 原样（展示处自带「用户_前6位」回退）
+      if (allowedData) {
         snapshot.hanakoAllowedUsers = allowedData.map((a) => ({
           ...a,
-          username: allowedUsernameMap.get(a.user_id) || null,
+          username: profileNameMap.get(a.user_id) ?? null,
         }))
       }
 
@@ -964,7 +992,10 @@ export default function AdminPage() {
     }
   }
 
-  if (loading) {
+  // 只在「认证初始化」阶段短暂等待（getSession 基本读本地存储、很快，且有 1s 超时兜底）。
+  // 关键改动：不再为「数据加载」整页转圈——壳层（标题 + 标签页）立刻渲染，
+  // 各列表内部用骨架占位，数据到了再填。这样进面板是「秒开 + 渐入」，不再空等半天。
+  if (authLoading) {
     return (
       <div className="container mx-auto py-10 flex items-center justify-center min-h-[60vh]">
         <div className="text-center">
@@ -978,7 +1009,7 @@ export default function AdminPage() {
   if (!isAdmin) {
     return (
       <div className="container mx-auto py-10">
-        <Card className="bg-gray-900 border-gray-800">
+        <Card className="admin-panel-glass admin-tab-enter">
           <CardHeader>
             <CardTitle className="text-red-400 flex items-center">
               <AlertCircle className="mr-2 h-5 w-5" />
@@ -1006,6 +1037,12 @@ export default function AdminPage() {
       )
     : users
 
+  // 帖子按标题过滤（客户端，大小写不敏感）；已加载帖子上限 200，过滤是纯内存操作、零额外请求
+  const postQuery = postSearch.trim().toLowerCase()
+  const filteredPosts = postQuery
+    ? posts.filter((p) => (p.title || "").toLowerCase().includes(postQuery))
+    : posts
+
   return (
     <div className="container mx-auto py-10">
       <div className="flex items-center justify-between mb-6">
@@ -1030,44 +1067,37 @@ export default function AdminPage() {
         </Button>
       </div>
 
-      <Tabs defaultValue="admins" className="w-full">
-        <TabsList className="mb-4 bg-gray-900">
-          <TabsTrigger value="admins" className="data-[state=active]:bg-lime-900/30 data-[state=active]:text-lime-400">
-            <Shield className="mr-2 h-4 w-4" />
-            管理员
-          </TabsTrigger>
-          <TabsTrigger value="users" className="data-[state=active]:bg-lime-900/30 data-[state=active]:text-lime-400">
-            <Users className="mr-2 h-4 w-4" />
-            用户
-          </TabsTrigger>
-          <TabsTrigger value="posts" className="data-[state=active]:bg-lime-900/30 data-[state=active]:text-lime-400">
-            <FileText className="mr-2 h-4 w-4" />
-            帖子
-          </TabsTrigger>
-          <TabsTrigger value="hanako" className="data-[state=active]:bg-lime-900/30 data-[state=active]:text-lime-400">
-            <Bot className="mr-2 h-4 w-4" />
-            AI 对话权限
-          </TabsTrigger>
-          <TabsTrigger value="ai-config" className="data-[state=active]:bg-lime-900/30 data-[state=active]:text-lime-400">
-            <Cpu className="mr-2 h-4 w-4" />
-            AI 模型
-          </TabsTrigger>
-          <TabsTrigger value="dm-ai-config" className="data-[state=active]:bg-lime-900/30 data-[state=active]:text-lime-400">
-            <MessageSquare className="mr-2 h-4 w-4" />
-            私信 AI
-          </TabsTrigger>
-          <TabsTrigger value="announcements" className="data-[state=active]:bg-lime-900/30 data-[state=active]:text-lime-400">
-            <Megaphone className="mr-2 h-4 w-4" />
-            公告
-          </TabsTrigger>
-          <TabsTrigger value="mengmegzi" className="data-[state=active]:bg-lime-900/30 data-[state=active]:text-lime-400">
-            <Bot className="mr-2 h-4 w-4" />
-            萌萌子
-          </TabsTrigger>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        {/* 标签条：layoutId 弹簧让柠檬绿高亮在标签间「果冻滑动」（仿首页排序切换）。
+            !flex / !h-auto 强制覆盖 Radix TabsList 基类的 inline-flex/h-10，标签多时自动换行。 */}
+        <TabsList className="mb-5 admin-tabs-glass !flex !h-auto flex-wrap items-center justify-start gap-1.5 p-2">
+          {ADMIN_TABS.map(({ value, label, icon: Icon }) => {
+            const active = activeTab === value
+            return (
+              <TabsTrigger
+                key={value}
+                value={value}
+                className="relative rounded-full px-3.5 py-1.5 text-sm transition-colors data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+              >
+                {active && (
+                  <motion.span
+                    layoutId="admin-tab-pill"
+                    className="absolute inset-0 rounded-full bg-lime-400"
+                    style={{ boxShadow: "0 0 16px rgba(132,204,22,0.45)" }}
+                    transition={{ type: "spring", stiffness: 600, damping: 35 }}
+                  />
+                )}
+                <Icon className={`relative z-10 mr-1.5 h-4 w-4 ${active ? "text-black" : "text-white/65"}`} />
+                <span className={`relative z-10 ${active ? "text-black font-semibold" : "text-white/65"}`}>
+                  {label}
+                </span>
+              </TabsTrigger>
+            )
+          })}
         </TabsList>
 
         <TabsContent value="admins">
-          <Card className="bg-gray-900 border-gray-800">
+          <Card className="admin-panel-glass admin-tab-enter">
             <CardHeader>
               <CardTitle>管理员列表</CardTitle>
               <CardDescription>管理所有管理员账户</CardDescription>
@@ -1078,26 +1108,28 @@ export default function AdminPage() {
                   placeholder="输入用户名或用户 ID"
                   value={newAdminEmail}
                   onChange={(e) => setNewAdminEmail(e.target.value)}
-                  className="mr-2 bg-gray-800 border-gray-700"
+                  className="mr-2 bg-white/5 border-white/15"
                 />
                 <Button onClick={handleAddAdmin} disabled={addingAdmin} className="bg-lime-700 hover:bg-lime-600">
                   {addingAdmin ? "添加中..." : "添加管理员"}
                 </Button>
               </div>
 
-              <div className="border rounded-md border-gray-800">
-                <div className="grid grid-cols-3 gap-4 p-4 font-medium text-gray-400 border-b border-gray-800">
+              <div className="border rounded-xl border-white/10">
+                <div className="grid grid-cols-3 gap-4 p-4 font-medium text-gray-400 border-b border-white/10">
                   <div>用户名</div>
                   <div>添加时间</div>
                   <div className="text-right">操作</div>
                 </div>
-                {admins.length === 0 ? (
+                {loading && admins.length === 0 ? (
+                  <SkeletonRows rows={3} cols={3} />
+                ) : admins.length === 0 ? (
                   <div className="p-4 text-center text-gray-500">暂无数据</div>
                 ) : (
                   admins.map((admin) => (
                     <div
                       key={admin.id}
-                      className="grid grid-cols-3 gap-4 p-4 border-b border-gray-800 last:border-0 items-center"
+                      className="grid grid-cols-3 gap-4 p-4 border-b border-white/10 last:border-0 items-center"
                     >
                       <div className="text-white">
                         {admin.users?.username || `用户_${admin.user_id?.substring(0, 6) || "未知"}`}
@@ -1133,7 +1165,7 @@ export default function AdminPage() {
         </TabsContent>
 
         <TabsContent value="users">
-          <Card className="bg-gray-900 border-gray-800">
+          <Card className="admin-panel-glass admin-tab-enter">
             <CardHeader>
               <div className="flex items-start justify-between gap-4">
                 <div>
@@ -1156,7 +1188,7 @@ export default function AdminPage() {
                   placeholder="搜索用户名或用户 ID..."
                   value={userSearch}
                   onChange={(e) => setUserSearch(e.target.value)}
-                  className="bg-gray-800 border-gray-700"
+                  className="bg-white/5 border-white/15"
                 />
                 {userQuery && (
                   <p className="mt-1.5 text-xs text-gray-500">
@@ -1170,13 +1202,15 @@ export default function AdminPage() {
                 )}
               </div>
 
-              <div className="border rounded-md border-gray-800">
-                <div className="grid grid-cols-[1fr_1fr_auto] gap-4 p-4 font-medium text-gray-400 border-b border-gray-800">
+              <div className="border rounded-xl border-white/10">
+                <div className="grid grid-cols-[1fr_1fr_auto] gap-4 p-4 font-medium text-gray-400 border-b border-white/10">
                   <div>用户名</div>
                   <div>用户 ID</div>
                   <div className="text-right">操作</div>
                 </div>
-                {filteredUsers.length === 0 ? (
+                {loading && users.length === 0 ? (
+                  <SkeletonRows rows={4} cols={3} />
+                ) : filteredUsers.length === 0 ? (
                   <div className="p-4 text-center text-gray-500">
                     {userQuery ? "没有匹配的用户" : "暂无数据"}
                   </div>
@@ -1186,7 +1220,7 @@ export default function AdminPage() {
                     return (
                       <div
                         key={u.id}
-                        className="grid grid-cols-[1fr_1fr_auto] gap-4 p-4 border-b border-gray-800 last:border-0 items-center"
+                        className="grid grid-cols-[1fr_1fr_auto] gap-4 p-4 border-b border-white/10 last:border-0 items-center"
                       >
                         <div className="text-white flex items-center gap-2 min-w-0">
                           <span className="truncate">{u.username || "未设置"}</span>
@@ -1235,26 +1269,55 @@ export default function AdminPage() {
         </TabsContent>
 
         <TabsContent value="posts">
-          <Card className="bg-gray-900 border-gray-800">
+          <Card className="admin-panel-glass admin-tab-enter">
             <CardHeader>
               <CardTitle>帖子列表</CardTitle>
-              <CardDescription>管理所有帖子</CardDescription>
+              <CardDescription>
+                管理所有帖子
+                {posts.length >= 200 && (
+                  <span className="text-amber-400/80">（仅显示最近 200 篇，更早的帖子未列出）</span>
+                )}
+              </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="border rounded-md border-gray-800">
-                <div className="grid grid-cols-4 gap-4 p-4 font-medium text-gray-400 border-b border-gray-800">
+              {/* 搜索：按标题过滤已加载的帖子（客户端、即时，不发请求） */}
+              <div className="mb-4">
+                <Input
+                  placeholder="搜索帖子标题..."
+                  value={postSearch}
+                  onChange={(e) => setPostSearch(e.target.value)}
+                  className="bg-white/5 border-white/15"
+                />
+                {postQuery && (
+                  <p className="mt-1.5 text-xs text-gray-500">
+                    匹配到 {filteredPosts.length} 篇
+                    {posts.length >= 200 && (
+                      <span className="text-amber-400/80">
+                        （仅在最近 200 篇内搜索，更早的帖子未加载）
+                      </span>
+                    )}
+                  </p>
+                )}
+              </div>
+
+              <div className="border rounded-xl border-white/10">
+                <div className="grid grid-cols-4 gap-4 p-4 font-medium text-gray-400 border-b border-white/10">
                   <div>标题</div>
                   <div>作者</div>
                   <div>发布时间</div>
                   <div className="text-right">操作</div>
                 </div>
-                {posts.length === 0 ? (
-                  <div className="p-4 text-center text-gray-500">暂无数据</div>
+                {loading && posts.length === 0 ? (
+                  <SkeletonRows rows={5} cols={4} />
+                ) : filteredPosts.length === 0 ? (
+                  <div className="p-4 text-center text-gray-500">
+                    {postQuery ? "没有匹配的帖子" : "暂无数据"}
+                  </div>
                 ) : (
-                  posts.map((post) => (
+                  filteredPosts.map((post) => (
                     <div
                       key={post.id}
-                      className="grid grid-cols-4 gap-4 p-4 border-b border-gray-800 last:border-0 items-center"
+                      className="grid grid-cols-4 gap-4 p-4 border-b border-white/10 last:border-0 items-center"
                     >
                       <div className="text-white truncate">{post.title}</div>
                       <div className="text-gray-300">{post.username || "匿名用户"}</div>
@@ -1287,14 +1350,14 @@ export default function AdminPage() {
         </TabsContent>
 
         <TabsContent value="hanako">
-          <Card className="bg-gray-900 border-gray-800">
+          <Card className="admin-panel-glass admin-tab-enter">
             <CardHeader>
               <CardTitle>AI 对话白名单</CardTitle>
               <CardDescription>管理允许与 Hanako AI 对话的用户</CardDescription>
             </CardHeader>
             <CardContent>
               {/* 白名单总开关 */}
-              <div className="mb-5 rounded-md border border-gray-800 bg-gray-950 p-4">
+              <div className="mb-5 rounded-md admin-inset-glass p-4">
                 <div className="flex items-start justify-between gap-4">
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
@@ -1333,26 +1396,28 @@ export default function AdminPage() {
                   placeholder="输入用户名或用户 ID"
                   value={newAllowedUserInput}
                   onChange={(e) => setNewAllowedUserInput(e.target.value)}
-                  className="mr-2 bg-gray-800 border-gray-700"
+                  className="mr-2 bg-white/5 border-white/15"
                 />
                 <Button onClick={handleAddAllowedUser} disabled={addingAllowedUser} className="bg-lime-700 hover:bg-lime-600">
                   {addingAllowedUser ? "添加中..." : "添加用户"}
                 </Button>
               </div>
 
-              <div className="border rounded-md border-gray-800">
-                <div className="grid grid-cols-3 gap-4 p-4 font-medium text-gray-400 border-b border-gray-800">
+              <div className="border rounded-xl border-white/10">
+                <div className="grid grid-cols-3 gap-4 p-4 font-medium text-gray-400 border-b border-white/10">
                   <div>用户名</div>
                   <div>添加时间</div>
                   <div className="text-right">操作</div>
                 </div>
-                {hanakoAllowedUsers.length === 0 ? (
+                {loading && hanakoAllowedUsers.length === 0 ? (
+                  <SkeletonRows rows={3} cols={3} />
+                ) : hanakoAllowedUsers.length === 0 ? (
                   <div className="p-4 text-center text-gray-500">暂无数据</div>
                 ) : (
                   hanakoAllowedUsers.map((allowed) => (
                     <div
                       key={allowed.id}
-                      className="grid grid-cols-3 gap-4 p-4 border-b border-gray-800 last:border-0 items-center"
+                      className="grid grid-cols-3 gap-4 p-4 border-b border-white/10 last:border-0 items-center"
                     >
                       <div className="text-white">
                         {allowed.username || `用户_${allowed.user_id?.substring(0, 6) || "未知"}`}
@@ -1386,7 +1451,7 @@ export default function AdminPage() {
         </TabsContent>
 
         <TabsContent value="ai-config">
-          <Card className="bg-gray-900 border-gray-800">
+          <Card className="admin-panel-glass admin-tab-enter">
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>
@@ -1409,7 +1474,7 @@ export default function AdminPage() {
             </CardHeader>
             <CardContent className="space-y-5">
               {/* 当前生效配置回显 */}
-              <div className="rounded-md border border-gray-800 bg-gray-950 p-4 text-sm">
+              <div className="rounded-md admin-inset-glass p-4 text-sm">
                 <div className="text-gray-400 mb-2 text-xs uppercase tracking-wider">
                   当前 DB 中的配置
                 </div>
@@ -1444,7 +1509,7 @@ export default function AdminPage() {
                       </span>
                     </div>
                     {aiConfig.updated_at && (
-                      <div className="flex pt-1.5 mt-1.5 border-t border-gray-800">
+                      <div className="flex pt-1.5 mt-1.5 border-t border-white/10">
                         <span className="text-gray-500 w-24 shrink-0">更新于:</span>
                         <span className="text-gray-400">
                           {new Date(aiConfig.updated_at).toLocaleString("zh-CN")}
@@ -1469,7 +1534,7 @@ export default function AdminPage() {
                     placeholder="https://api.deepseek.com/v1"
                     value={aiBaseUrl}
                     onChange={(e) => setAiBaseUrl(e.target.value)}
-                    className="bg-gray-800 border-gray-700 font-mono text-sm"
+                    className="bg-white/5 border-white/15 font-mono text-sm"
                   />
                   <p className="text-xs text-gray-500 mt-1">
                     OpenAI 兼容接口的 base URL（不含末尾 <code className="text-gray-400">/chat/completions</code>）
@@ -1484,7 +1549,7 @@ export default function AdminPage() {
                     placeholder="deepseek-chat"
                     value={aiModel}
                     onChange={(e) => setAiModel(e.target.value)}
-                    className="bg-gray-800 border-gray-700 font-mono text-sm"
+                    className="bg-white/5 border-white/15 font-mono text-sm"
                   />
                   <p className="text-xs text-gray-500 mt-1">
                     模型名称，例如 <code className="text-gray-400">deepseek-chat</code>、<code className="text-gray-400">deepseek-reasoner</code>、<code className="text-gray-400">gpt-4o-mini</code> 等
@@ -1503,7 +1568,7 @@ export default function AdminPage() {
                     placeholder={aiConfig?.api_key_set ? "已设置（留空保持不变）" : "首次设置请填入"}
                     value={aiApiKey}
                     onChange={(e) => setAiApiKey(e.target.value)}
-                    className="bg-gray-800 border-gray-700 font-mono text-sm"
+                    className="bg-white/5 border-white/15 font-mono text-sm"
                     autoComplete="off"
                   />
                   <p className="text-xs text-gray-500 mt-1">
@@ -1512,7 +1577,7 @@ export default function AdminPage() {
                 </div>
               </div>
 
-              <div className="flex items-center justify-end pt-2 border-t border-gray-800">
+              <div className="flex items-center justify-end pt-2 border-t border-white/10">
                 <Button
                   onClick={handleSaveAiConfig}
                   disabled={aiConfigSaving || aiConfigLoading}
@@ -1527,7 +1592,7 @@ export default function AdminPage() {
         </TabsContent>
 
         <TabsContent value="dm-ai-config">
-          <Card className="bg-gray-900 border-gray-800">
+          <Card className="admin-panel-glass admin-tab-enter">
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>
@@ -1550,7 +1615,7 @@ export default function AdminPage() {
             </CardHeader>
             <CardContent className="space-y-5">
               {/* 当前 DB 配置回显 */}
-              <div className="rounded-md border border-gray-800 bg-gray-950 p-4 text-sm">
+              <div className="rounded-md admin-inset-glass p-4 text-sm">
                 <div className="text-gray-400 mb-2 text-xs uppercase tracking-wider">当前 DB 中的配置</div>
                 {dmConfig ? (
                   <div className="space-y-1.5 font-mono text-xs">
@@ -1593,7 +1658,7 @@ export default function AdminPage() {
                       <span className="text-white">{dmConfig.max_unanswered}</span>
                     </div>
                     {dmConfig.updated_at && (
-                      <div className="flex pt-1.5 mt-1.5 border-t border-gray-800">
+                      <div className="flex pt-1.5 mt-1.5 border-t border-white/10">
                         <span className="text-gray-500 w-28 shrink-0">更新于:</span>
                         <span className="text-gray-400">
                           {new Date(dmConfig.updated_at).toLocaleString("zh-CN")}
@@ -1609,7 +1674,7 @@ export default function AdminPage() {
               </div>
 
               {/* 开关：拨动即时落库，不依赖下方"保存配置" */}
-              <div className="flex items-center justify-between rounded-md border border-gray-800 bg-gray-950 p-3">
+              <div className="flex items-center justify-between rounded-md admin-inset-glass p-3">
                 <div>
                   <div className="text-sm text-gray-200">回复私信</div>
                   <div className="text-xs text-gray-500">关闭时她不回任何私信（用户发了也静默）。拨动即时保存。</div>
@@ -1625,7 +1690,7 @@ export default function AdminPage() {
                   />
                 </div>
               </div>
-              <div className="flex items-center justify-between rounded-md border border-gray-800 bg-gray-950 p-3">
+              <div className="flex items-center justify-between rounded-md admin-inset-glass p-3">
                 <div>
                   <div className="text-sm text-gray-200">主动私信在线用户</div>
                   <div className="text-xs text-gray-500">需第 2 批 + CF worker 部署才真正生效；这里先存开关。拨动即时保存。</div>
@@ -1650,7 +1715,7 @@ export default function AdminPage() {
                     placeholder="https://api.deepseek.com/v1"
                     value={dmBaseUrl}
                     onChange={(e) => setDmBaseUrl(e.target.value)}
-                    className="bg-gray-800 border-gray-700 font-mono text-sm"
+                    className="bg-white/5 border-white/15 font-mono text-sm"
                   />
                   <p className="text-xs text-gray-500 mt-1">
                     OpenAI 兼容接口 base URL（不含末尾 <code className="text-gray-400">/chat/completions</code>）
@@ -1662,7 +1727,7 @@ export default function AdminPage() {
                     placeholder="deepseek-chat"
                     value={dmModel}
                     onChange={(e) => setDmModel(e.target.value)}
-                    className="bg-gray-800 border-gray-700 font-mono text-sm"
+                    className="bg-white/5 border-white/15 font-mono text-sm"
                   />
                   <p className="text-xs text-gray-500 mt-1">
                     私聊不需要工具调用，任何聊天模型都行，可挑更便宜的
@@ -1678,7 +1743,7 @@ export default function AdminPage() {
                     placeholder={dmConfig?.api_key_set ? "已设置（留空保持不变）" : "首次设置请填入"}
                     value={dmApiKey}
                     onChange={(e) => setDmApiKey(e.target.value)}
-                    className="bg-gray-800 border-gray-700 font-mono text-sm"
+                    className="bg-white/5 border-white/15 font-mono text-sm"
                     autoComplete="off"
                   />
                 </div>
@@ -1691,7 +1756,7 @@ export default function AdminPage() {
                     placeholder="留空则用代码内置的私信人设"
                     value={dmPersona}
                     onChange={(e) => setDmPersona(e.target.value)}
-                    className="bg-gray-800 border-gray-700 text-sm min-h-[88px]"
+                    className="bg-white/5 border-white/15 text-sm min-h-[88px]"
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
@@ -1703,7 +1768,7 @@ export default function AdminPage() {
                       max={720}
                       value={dmCooldown}
                       onChange={(e) => setDmCooldown(Number(e.target.value))}
-                      className="bg-gray-800 border-gray-700 font-mono text-sm"
+                      className="bg-white/5 border-white/15 font-mono text-sm"
                     />
                     <p className="text-xs text-gray-500 mt-1">同一人多久最多被主动私信 1 次</p>
                   </div>
@@ -1715,14 +1780,14 @@ export default function AdminPage() {
                       max={50}
                       value={dmMaxUnanswered}
                       onChange={(e) => setDmMaxUnanswered(Number(e.target.value))}
-                      className="bg-gray-800 border-gray-700 font-mono text-sm"
+                      className="bg-white/5 border-white/15 font-mono text-sm"
                     />
                     <p className="text-xs text-gray-500 mt-1">连发几条没回就停</p>
                   </div>
                 </div>
               </div>
 
-              <div className="flex items-center justify-end pt-2 border-t border-gray-800">
+              <div className="flex items-center justify-end pt-2 border-t border-white/10">
                 <Button
                   onClick={handleSaveDmAiConfig}
                   disabled={dmConfigSaving || dmConfigLoading}
@@ -1737,7 +1802,7 @@ export default function AdminPage() {
         </TabsContent>
 
         <TabsContent value="announcements">
-          <Card className="bg-gray-900 border-gray-800">
+          <Card className="admin-panel-glass admin-tab-enter">
             <CardHeader>
               <CardTitle className="flex items-center">
                 <Megaphone className="mr-2 h-5 w-5 text-lime-400" />
@@ -1756,7 +1821,7 @@ export default function AdminPage() {
                   placeholder="例如：更新公告"
                   value={annTitle}
                   onChange={(e) => setAnnTitle(e.target.value)}
-                  className="bg-gray-800 border-gray-700"
+                  className="bg-white/5 border-white/15"
                   maxLength={60}
                 />
               </div>
@@ -1766,7 +1831,7 @@ export default function AdminPage() {
                   placeholder="输入公告内容..."
                   value={annContent}
                   onChange={(e) => setAnnContent(e.target.value)}
-                  className="bg-gray-800 border-gray-700 min-h-[160px]"
+                  className="bg-white/5 border-white/15 min-h-[160px]"
                   maxLength={2000}
                 />
                 <p className="text-right text-xs text-gray-500">{annContent.length}/2000</p>
@@ -1792,7 +1857,7 @@ export default function AdminPage() {
 
       {/* 公告广播二次确认 */}
       <AlertDialog open={showBroadcastConfirm} onOpenChange={setShowBroadcastConfirm}>
-        <AlertDialogContent className="bg-gray-900 border-gray-800 text-white">
+        <AlertDialogContent className="admin-panel-glass text-white">
           <AlertDialogHeader>
             <AlertDialogTitle className="text-lime-400 flex items-center">
               <Megaphone className="mr-2 h-5 w-5" />
@@ -1800,7 +1865,7 @@ export default function AdminPage() {
             </AlertDialogTitle>
             <AlertDialogDescription className="text-gray-300">
               这条公告将作为系统通知推送给<span className="text-lime-400">所有当前用户</span>，无法撤回。确定要发送吗？
-              <span className="block mt-2 rounded-md bg-gray-800/70 p-3 text-sm">
+              <span className="block mt-2 rounded-md bg-black/30 border border-white/10 p-3 text-sm">
                 <span className="block font-semibold text-white">{annTitle || "（无标题）"}</span>
                 <span className="mt-1 block whitespace-pre-wrap break-words text-gray-400 line-clamp-4">
                   {annContent || "（无内容）"}
@@ -1809,7 +1874,7 @@ export default function AdminPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel className="bg-gray-800 text-white hover:bg-gray-700 border-gray-700">
+            <AlertDialogCancel className="bg-white/10 text-white hover:bg-white/20 border-white/15">
               取消
             </AlertDialogCancel>
             <AlertDialogAction
@@ -1828,7 +1893,7 @@ export default function AdminPage() {
       </AlertDialog>
 
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-        <AlertDialogContent className="bg-gray-900 border-gray-800 text-white">
+        <AlertDialogContent className="admin-panel-glass text-white">
           <AlertDialogHeader>
             <AlertDialogTitle className="text-red-400 flex items-center">
               <AlertCircle className="mr-2 h-5 w-5" />
@@ -1843,7 +1908,7 @@ export default function AdminPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel className="bg-gray-800 text-white hover:bg-gray-700 border-gray-700">
+            <AlertDialogCancel className="bg-white/10 text-white hover:bg-white/20 border-white/15">
               取消
             </AlertDialogCancel>
             <AlertDialogAction className="bg-red-900 hover:bg-red-800 text-white" onClick={confirmDelete}>
@@ -1855,7 +1920,7 @@ export default function AdminPage() {
 
       {/* 封禁确认弹窗（带可选理由） */}
       <AlertDialog open={!!banTarget} onOpenChange={(open) => { if (!open) { setBanTarget(null); setBanReason("") } }}>
-        <AlertDialogContent className="bg-gray-900 border-gray-800 text-white">
+        <AlertDialogContent className="admin-panel-glass text-white">
           <AlertDialogHeader>
             <AlertDialogTitle className="text-red-400 flex items-center">
               <Ban className="mr-2 h-5 w-5" />
@@ -1873,12 +1938,12 @@ export default function AdminPage() {
               placeholder="例如：辱骂他人"
               value={banReason}
               onChange={(e) => setBanReason(e.target.value)}
-              className="bg-gray-800 border-gray-700 min-h-[72px]"
+              className="bg-white/5 border-white/15 min-h-[72px]"
               maxLength={200}
             />
           </div>
           <AlertDialogFooter>
-            <AlertDialogCancel className="bg-gray-800 text-white hover:bg-gray-700 border-gray-700">
+            <AlertDialogCancel className="bg-white/10 text-white hover:bg-white/20 border-white/15">
               取消
             </AlertDialogCancel>
             <AlertDialogAction

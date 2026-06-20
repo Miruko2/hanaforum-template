@@ -68,7 +68,7 @@ export default function AdminCheckPage() {
   if (!user) {
     return (
       <div className="container py-10">
-        <Card className="bg-gray-900 border-gray-800 text-white">
+        <Card className="admin-panel-glass text-white">
           <CardHeader>
             <CardTitle className="text-red-400">未登录</CardTitle>
             <CardDescription className="text-gray-300">请先登录后再检查管理员状态</CardDescription>
@@ -80,7 +80,7 @@ export default function AdminCheckPage() {
 
   return (
     <div className="container py-10">
-      <Card className="bg-gray-900 border-gray-800 text-white">
+      <Card className="admin-panel-glass text-white">
         <CardHeader>
           <CardTitle className="text-lime-400 flex items-center">
             <Shield className="h-5 w-5 mr-2" />
@@ -95,7 +95,7 @@ export default function AdminCheckPage() {
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {/* 数据库检查 */}
-              <div className="bg-gray-800/50 p-4 rounded-lg">
+              <div className="admin-inset-glass p-4 rounded-lg">
                 <div className="flex items-center mb-2">
                   {directCheck === null ? (
                     <div className="w-5 h-5 mr-2 rounded-full border-2 border-gray-500 border-t-transparent animate-spin"></div>
@@ -116,7 +116,7 @@ export default function AdminCheckPage() {
               </div>
 
               {/* Context 检查 */}
-              <div className="bg-gray-800/50 p-4 rounded-lg">
+              <div className="admin-inset-glass p-4 rounded-lg">
                 <div className="flex items-center mb-2">
                   {contextCheck === null ? (
                     <div className="w-5 h-5 mr-2 rounded-full border-2 border-gray-500 border-t-transparent animate-spin"></div>
@@ -137,7 +137,7 @@ export default function AdminCheckPage() {
               </div>
 
               {/* localStorage 检查 */}
-              <div className="bg-gray-800/50 p-4 rounded-lg">
+              <div className="admin-inset-glass p-4 rounded-lg">
                 <div className="flex items-center mb-2">
                   {localStorageCheck === null ? (
                     <div className="w-5 h-5 mr-2 rounded-full border-2 border-gray-500 border-t-transparent animate-spin"></div>
@@ -159,12 +159,12 @@ export default function AdminCheckPage() {
             </div>
           </div>
 
-          <Separator className="bg-gray-800" />
+          <Separator className="bg-white/10" />
 
           {/* 用户信息 */}
           <div>
             <h3 className="text-lg font-medium text-white mb-4">用户信息</h3>
-            <div className="bg-gray-800/50 p-4 rounded-lg">
+            <div className="admin-inset-glass p-4 rounded-lg">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <p className="text-sm text-gray-400 mb-1">用户 ID:</p>
@@ -179,7 +179,7 @@ export default function AdminCheckPage() {
           </div>
 
           {/* 状态总结 */}
-          <div className="bg-gray-800/80 p-4 rounded-lg">
+          <div className="admin-inset-glass p-4 rounded-lg">
             <div className="flex items-start">
               {directCheck && contextCheck && localStorageCheck ? (
                 <>
