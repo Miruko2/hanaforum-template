@@ -214,6 +214,9 @@ async function stripImages(
       .update({
         image_url: remaining[0] ?? null,
         image_urls: remaining.length ? remaining : null,
+        // 图被全部剔除（单图视差帖违规）→ 顺带清空遮罩列，避免悬空引用
+        //（多图帖本就不设遮罩，故仅在清空时处理即足够）。
+        ...(remaining.length === 0 ? { image_mask_url: null } : {}),
       })
       .eq("id", postId)
     if (error) console.error("[moderate-image] 剔除违规图失败:", error)
@@ -222,10 +225,11 @@ async function stripImages(
 }
 
 // 删存储里的违规图(仅当确属本项目 post-images 桶；路径从 URL 反解，不接受外部任意路径)。
-// 主图 + 对应 640px 缩略图一起删：发帖时客户端会同步上传 `<base>_thumb.webp`
-// (命名约定见 lib/post-image-thumb.ts，此处为 Deno 环境复制实现)，
-// 只删主图会让违规缩略图以公开 URL 残留到每周孤儿清理才消失。
-// gif 无缩略图；缩略图不存在时 remove 静默忽略，多删无害。
+// 主图 + 对应 640px 缩略图 + 主体视差遮罩一起删：发帖时客户端会同步上传
+// `<base>_thumb.webp`(缩略图)、单图视差帖还会上传 `<base>_mask.webp`(遮罩)，
+// (命名约定见 lib/post-image-thumb.ts / lib/post-image-mask.ts，此处为 Deno 环境复制实现)。
+// 只删主图会让违规缩略图/遮罩以公开 URL 残留到每周孤儿清理才消失。
+// gif 无缩略图/遮罩；目标不存在时 remove 静默忽略，多删无害。_mask.png 为旧格式一并带上。
 async function deleteStorageImage(admin: SupabaseClient, imageUrl: string): Promise<void> {
   if (!imageUrl.startsWith(POST_IMAGES_PREFIX)) return
   try {
@@ -234,7 +238,7 @@ async function deleteStorageImage(admin: SupabaseClient, imageUrl: string): Prom
     if (!/\.gif$/i.test(path)) {
       const dot = path.lastIndexOf(".")
       const base = dot > 0 ? path.slice(0, dot) : path
-      targets.push(`${base}_thumb.webp`)
+      targets.push(`${base}_thumb.webp`, `${base}_mask.webp`, `${base}_mask.png`)
     }
     const { error } = await admin.storage.from("post-images").remove(targets)
     if (error) console.error("[moderate-image] 删图失败:", error)

@@ -54,11 +54,15 @@ async function getReferencedFilenames() {
     const name = decodeURIComponent(url.slice(idx + marker.length).split("?")[0])
     if (!name) return
     referenced.add(name)
-    // 缩略图与主图同生共死：主图被引用 ⇒ 对应 `<base>_thumb.webp` 也算被引用
-    //（路径约定见 lib/post-image-thumb.ts；gif 无缩略图，多加个名字无害）。
+    // 缩略图 / 主体视差遮罩与主图同生共死：主图被引用 ⇒ 其 `<base>_thumb.webp`、
+    // `<base>_mask.webp`（及旧格式 `<base>_mask.png`）都算被引用，否则会被当孤儿误删。
+    // ⚠️ 遮罩漏加 = 视差遮罩超安全期后被整片删除、整个「主体视差」功能失效。
+    // 约定见 lib/post-image-thumb.ts / lib/post-image-mask.ts；gif 无缩略图/遮罩，多加名字无害。
     const dot = name.lastIndexOf(".")
     const base = dot > 0 ? name.slice(0, dot) : name
     referenced.add(`${base}_thumb.webp`)
+    referenced.add(`${base}_mask.webp`)
+    referenced.add(`${base}_mask.png`)
   }
   const pageSize = 1000
   let from = 0
