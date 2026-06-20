@@ -213,6 +213,13 @@
   .row {
     transition: none;
   }
+  /* 触屏：气泡/表情包关掉文字选择与原生长按菜单，长按改为弹出撤回菜单 */
+  .bubble,
+  .msgSticker {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
 }
 .rowOther {
   justify-content: flex-start;

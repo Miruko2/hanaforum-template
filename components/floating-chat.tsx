@@ -234,7 +234,7 @@ function getInstalledAt(): number {
 }
 
 export default function FloatingChat() {
-  const { user } = useSimpleAuth()
+  const { user, isAdmin } = useSimpleAuth()
   const { toast } = useToast()
 
   // open / 未读红点由导航栏入口共享：本组件只读 open（决定渲染面板）、写 unread（红点数）。
@@ -272,6 +272,13 @@ export default function FloatingChat() {
   // 右键菜单（关闭私聊）
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; convId: string; username: string } | null>(null)
   const ctxMenuRef = useRef<HTMLDivElement>(null)
+
+  // 消息右键 / 长按菜单：撤回（自己发的）或删除（管理员对大厅任意消息）。硬删除。
+  const [msgMenu, setMsgMenu] = useState<{ x: number; y: number; msg: DisplayMsg } | null>(null)
+  const msgMenuRef = useRef<HTMLDivElement>(null)
+  const msgPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // 长按打开菜单后抑制紧随的一次点击（避免长按表情包又弹出灯箱）
+  const suppressClickRef = useRef(false)
 
   // 头像点击 → 弹出精简社交卡片（背景图/头像/签名 + 私聊/进入主页）
   const [avatarMenu, setAvatarMenu] = useState<{ x: number; y: number; partner: Partner } | null>(null)
@@ -744,6 +751,16 @@ export default function FloatingChat() {
           return next
         })
       })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "dm_messages", filter: `pair_key=eq.${pk}` }, (payload) => {
+        // 对方撤回了某条消息 → 从列表与缓存移除（依赖 dm_messages REPLICA IDENTITY FULL，
+        // 否则 DELETE 旧行只带主键、pair_key 过滤匹配不上、收不到事件）
+        const id = (payload.old as { id: string }).id
+        setMessages((prev) => {
+          const next = prev.filter((x) => x.id !== id)
+          msgCacheRef.current.set(key, next)
+          return next
+        })
+      })
       .subscribe()
 
     return () => {
@@ -1141,6 +1158,12 @@ export default function FloatingChat() {
   const onScroll = () => {
     const el = feedRef.current
     if (!el) return
+    // 滚动时关掉消息菜单（按下到现在内容已移动，菜单会悬浮脱节）；同时取消未触发的长按计时
+    if (msgMenu) setMsgMenu(null)
+    if (msgPressTimerRef.current) {
+      clearTimeout(msgPressTimerRef.current)
+      msgPressTimerRef.current = null
+    }
     const distToBottom = el.scrollHeight - el.scrollTop - el.clientHeight
     atBottomRef.current = distToBottom < 60
     // 滚到顶部附近 → 加载更早历史（并发/无更多/切会话由 loadOlder 内部判定，重复触发安全）
@@ -1346,6 +1369,57 @@ export default function FloatingChat() {
     window.setTimeout(() => el.classList.remove(styles.rowFlash), 1200)
   }
 
+  // 能否对这条消息动手：自己发的可撤回；管理员可删大厅任意消息（私聊管理员看不到、不涉及）。
+  const canModerate = useCallback(
+    (m: DisplayMsg) => {
+      if (!user) return false
+      if (m.fromId === user.id) return true
+      return isAdmin && activeRef.current.kind === "hall"
+    },
+    [user, isAdmin],
+  )
+
+  // 撤回 / 删除一条消息：硬删除该行，经 realtime DELETE 从所有人界面移除。
+  // 乐观先本地移除（成功后 realtime DELETE 再移除、按 id 幂等）；失败按时间序复位并提示。
+  const recallMsg = useCallback(
+    async (m: DisplayMsg) => {
+      setMsgMenu(null)
+      if (!user) return
+      const a = activeRef.current
+      const table = a.kind === "hall" ? "chat_messages" : "dm_messages"
+      const key = a.kind === "hall" ? "hall" : pairKey(user.id, a.id)
+      setMessages((prev) => {
+        const next = prev.filter((x) => x.id !== m.id)
+        msgCacheRef.current.set(key, next)
+        return next
+      })
+      const { error } = await supabase.from(table).delete().eq("id", m.id)
+      if (error) {
+        setMessages((prev) => {
+          const next = mergeMsgs(prev, [m])
+          msgCacheRef.current.set(key, next)
+          return next
+        })
+        const noPerm = (error as { code?: string }).code === "42501" || /row-level/i.test(error.message || "")
+        toast({
+          title: "撤回失败",
+          description: noPerm ? "没有权限删除这条消息" : error.message || "请稍后再试",
+          variant: "destructive",
+        })
+      }
+    },
+    [user, toast],
+  )
+
+  // 打开消息菜单（无可执行操作则不弹，避免普通用户对别人消息右键弹空菜单）
+  const openMsgMenu = useCallback(
+    (clientX: number, clientY: number, m: DisplayMsg) => {
+      if (!canModerate(m)) return
+      setMsgMenu({ x: clientX, y: clientY, msg: m })
+    },
+    [canModerate],
+  )
+
   // @ 补全：把光标前「词首 @…」整段替换成 @用户名+空格，光标跟到补全末尾。仅大厅用。
   const completeMention = (username: string) => {
     const ta = textareaRef.current
@@ -1434,11 +1508,12 @@ export default function FloatingChat() {
     clearPendingHall()
   }, [pendingHall, switchTo, clearPendingHall])
 
-  // 切换会话时清掉「正在回复」和 @ 菜单：回复/提及上下文属于某个会话，不该跨会话残留
+  // 切换会话时清掉「正在回复」「@ 菜单」「撤回菜单」：这些上下文属于某个会话，不该跨会话残留
   // （否则在大厅开了回复再切到私聊，会把大厅消息错误地当引用附到私信上）。
   useEffect(() => {
     setReplyTo(null)
     setMentionQuery(null)
+    setMsgMenu(null)
   }, [active])
 
   // 关闭（删除）一个私聊会话
@@ -1467,6 +1542,22 @@ export default function FloatingChat() {
       document.removeEventListener("touchstart", handler)
     }
   }, [ctxMenu])
+
+  // 点击/触摸外部关闭消息撤回菜单
+  useEffect(() => {
+    if (!msgMenu) return
+    const handler = (e: MouseEvent | TouchEvent) => {
+      if (msgMenuRef.current && !msgMenuRef.current.contains(e.target as Node)) {
+        setMsgMenu(null)
+      }
+    }
+    document.addEventListener("mousedown", handler)
+    document.addEventListener("touchstart", handler)
+    return () => {
+      document.removeEventListener("mousedown", handler)
+      document.removeEventListener("touchstart", handler)
+    }
+  }, [msgMenu])
 
   if (!user) return null
 
@@ -1651,7 +1742,38 @@ export default function FloatingChat() {
                         ) : (
                           <UserAvatar username={m.username} avatarUrl={m.avatar_url} size={28} />
                         ))}
-                      <div className={styles.msgCol}>
+                      <div
+                        className={styles.msgCol}
+                        onContextMenu={(e) => {
+                          e.preventDefault()
+                          openMsgMenu(e.clientX, e.clientY, m)
+                        }}
+                        onTouchStart={(e) => {
+                          const t = e.touches[0]
+                          if (!t) return
+                          if (msgPressTimerRef.current) clearTimeout(msgPressTimerRef.current)
+                          msgPressTimerRef.current = setTimeout(() => {
+                            suppressClickRef.current = true
+                            openMsgMenu(t.clientX, t.clientY, m)
+                            // 兜底：若长按后没有紧随的 click 消费该标志，600ms 后自清
+                            window.setTimeout(() => {
+                              suppressClickRef.current = false
+                            }, 600)
+                          }, 500)
+                        }}
+                        onTouchEnd={() => {
+                          if (msgPressTimerRef.current) {
+                            clearTimeout(msgPressTimerRef.current)
+                            msgPressTimerRef.current = null
+                          }
+                        }}
+                        onTouchMove={() => {
+                          if (msgPressTimerRef.current) {
+                            clearTimeout(msgPressTimerRef.current)
+                            msgPressTimerRef.current = null
+                          }
+                        }}
+                      >
                         {!mine && active.kind === "hall" && <span className={styles.msgName}>{m.username}</span>}
                         {/* 引用块：被引用消息的快照，点击滚到原消息 */}
                         {m.reply_to && (
@@ -1669,7 +1791,14 @@ export default function FloatingChat() {
                           <HanakoImg
                             base={`/hanako/stickers/${normalizeEmotion(m.content)}`}
                             className={styles.msgSticker}
-                            onClick={(src) => setLightboxSrc(src)}
+                            onClick={(src) => {
+                              // 长按打开菜单后会触发一次 click，这里吞掉、不弹灯箱
+                              if (suppressClickRef.current) {
+                                suppressClickRef.current = false
+                                return
+                              }
+                              setLightboxSrc(src)
+                            }}
                           />
                         ) : (
                           <div className={`${styles.bubble} ${mine ? styles.bubbleMine : styles.bubbleOther}`}>{m.content}</div>
@@ -1870,6 +1999,20 @@ export default function FloatingChat() {
       >
         <button className={styles.ctxMenuItem} onClick={() => closeDm(ctxMenu.convId)}>
           删除会话
+        </button>
+      </div>,
+      document.body,
+    )}
+
+    {/* 消息右键 / 长按菜单：自己的→撤回；管理员对别人的（大厅）→删除 */}
+    {msgMenu && createPortal(
+      <div
+        ref={msgMenuRef}
+        className={styles.ctxMenu}
+        style={{ left: msgMenu.x, top: msgMenu.y }}
+      >
+        <button className={styles.ctxMenuItem} onClick={() => recallMsg(msgMenu.msg)}>
+          {msgMenu.msg.fromId === user.id ? "撤回" : "删除"}
         </button>
       </div>,
       document.body,
