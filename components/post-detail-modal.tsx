@@ -649,6 +649,11 @@ export default function PostDetailModal({
                 自带 portal 到 body，盖在详情框之上 */}
             <ImageLightbox
               images={lightboxOpen ? images.map((u) => cdnUrl(u) || u) : null}
+              maskSrc={
+                lightboxOpen && images.length === 1 && post.image_mask_url
+                  ? cdnUrl(post.image_mask_url) || post.image_mask_url
+                  : null
+              }
               index={imageIndex}
               onIndexChange={setImageIndex}
               alt={post.title}

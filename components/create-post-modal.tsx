@@ -24,6 +24,9 @@ import { guardVerify } from "@/lib/verify-gate-bus"
 import ImageLightbox from "@/components/image-lightbox"
 import { StickerPicker } from "@/components/stickers/sticker-picker"
 import { makeStickerToken } from "@/lib/stickers"
+import { generateMatte, matteToPngBlob, isMatteSupported } from "@/lib/anime-matte"
+import { postMaskName, postImageObjectName } from "@/lib/post-image-mask"
+import { useIsMobile } from "@/hooks/use-mobile"
 
 interface CreatePostModalProps {
   onClose: () => void
@@ -38,6 +41,16 @@ interface CreatePostModalProps {
 
 // 发帖最多可上传的图片数
 const MAX_IMAGES = 9
+
+// 从 data URL / URL 载入为 <img>（给主体抠像用）
+function loadHtmlImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const i = new Image()
+    i.onload = () => resolve(i)
+    i.onerror = reject
+    i.src = src
+  })
+}
 
 // 编辑区里的一张图片：可能是「已存在的图」（带 url，提交时直接复用）
 // 或「新选的文件」（带 file，提交时上传）。preview 用于 <img> 即时显示。
@@ -77,6 +90,10 @@ export function CreatePostForm({
   const descRef = useRef<HTMLTextAreaElement>(null)
   const { user } = useSimpleAuth()
   const { toast } = useToast()
+  const isMobile = useIsMobile()
+  // 「3D 视差」开关（实验）：仅单张新图、桌面端显示；提交时本机抠主体遮罩
+  const [genParallax, setGenParallax] = useState(false)
+  const [matteStatus, setMatteStatus] = useState("")
   const [imageRatio, setImageRatio] = useState<number>(editPost?.image_ratio || 0.75)
   // 点击预览图后，原图在屏幕中心聚焦放大（复用帖子详情页的灯箱）；记录看哪一张
   const [lightboxOpen, setLightboxOpen] = useState(false)
@@ -340,9 +357,44 @@ export function CreatePostForm({
 
       console.debug("准备创建帖子，用户ID:", user.id)
 
+      // 「3D 视差」：单图新帖且用户勾选 → 本机抠主体遮罩、上传 _mask.png。
+      // 全程 try/catch 非阻断：抠像或上传失败都不影响正常发帖（只是没有效果）。
+      let maskUrl: string | null = null
+      if (genParallax && images.length === 1 && images[0]?.file && cover) {
+        try {
+          const srcImg = await loadHtmlImage(images[0].preview)
+          const matte = await generateMatte(srcImg, (phase) => {
+            setMatteStatus(
+              phase === "model"
+                ? "首次需下载抠像模型(约 176MB，之后缓存)…"
+                : phase === "infer"
+                  ? "正在抠出主体…"
+                  : "准备抠像引擎…",
+            )
+          })
+          const blob = await matteToPngBlob(matte)
+          const coverName = postImageObjectName(cover)
+          const maskName = coverName ? postMaskName(coverName) : null
+          if (maskName) {
+            const up = await supabase.storage.from("post-images").upload(maskName, blob, {
+              cacheControl: "31536000",
+              upsert: true,
+              contentType: "image/png",
+            })
+            if (!up.error) {
+              maskUrl = supabase.storage.from("post-images").getPublicUrl(maskName).data.publicUrl
+            }
+          }
+        } catch (mErr) {
+          console.warn("视差遮罩生成失败（不影响发帖）:", mErr)
+        } finally {
+          setMatteStatus("")
+        }
+      }
+
       // 创建帖子 - 同时设置content和description字段
       const withUrls = await postsHaveImageUrls()
-      const result = await createPost({
+      const basePayload: Record<string, any> = {
         title,
         category,
         description,
@@ -353,7 +405,20 @@ export function CreatePostForm({
         user_id: user.id,
         likes: 0,
         comments: 0,
-      })
+      }
+      // image_mask_url 需先跑 scripts/2026-06-20-post-image-mask.sql。若该列尚不存在
+      // 导致插入失败，自动去掉遮罩字段重试，保证发帖永不被这个实验字段拖垮。
+      let result: any
+      try {
+        result = await createPost(maskUrl ? { ...basePayload, image_mask_url: maskUrl } : basePayload)
+      } catch (insErr) {
+        if (maskUrl) {
+          console.warn("带 image_mask_url 插入失败（可能未跑迁移），改为无遮罩重试:", insErr)
+          result = await createPost(basePayload)
+        } else {
+          throw insErr
+        }
+      }
 
       console.debug("帖子创建成功:", result)
 
@@ -535,6 +600,27 @@ export function CreatePostForm({
                     </span>
                   </button>
                 )}
+              </div>
+            )}
+
+            {/* 3D 视差（实验）：仅单张新图、桌面端、且环境支持时显示 */}
+            {images.length === 1 && !!images[0]?.file && !isMobile && isMatteSupported() && (
+              <div className="rounded-lg border border-lime-400/20 bg-lime-400/[0.06] p-3">
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={genParallax}
+                    onChange={(e) => setGenParallax(e.target.checked)}
+                    disabled={isSubmitting}
+                    className="h-4 w-4 accent-lime-400"
+                  />
+                  <span className="text-sm font-medium text-white/90">✨ 3D 视差效果（实验）</span>
+                </label>
+                <p className="mt-1 pl-6 text-xs text-white/45">
+                  发布时在你的浏览器抠出主体，详情页里图片会随鼠标/拖动产生景深视差。
+                  首次会下载抠像模型（约 176MB，之后缓存），发布会多花几秒到几十秒。
+                </p>
+                {matteStatus && <p className="mt-1 pl-6 text-xs text-lime-400">{matteStatus}</p>}
               </div>
             )}
 

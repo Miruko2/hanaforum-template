@@ -1,7 +1,7 @@
 import { supabase } from "./supabaseClient"
 import type { Comment } from "./types"
 import { queueNewPost, removePostFromQueue } from "./post-realtime-update"
-import { postsHaveImageUrls } from "./post-images"
+import { postsHaveImageUrls, postsHaveMaskColumn } from "./post-images"
 
 // 本地缓存点赞状态，避免频繁请求
 const likeStatusCache = new Map<string, boolean>()
@@ -326,10 +326,11 @@ export async function getPosts() {
     
     // 获取帖子基本信息
     const withUrls = await postsHaveImageUrls()
+    const withMask = await postsHaveMaskColumn()
     const { data: postsData, error: postsError } = await supabase
       .from("posts")
       .select(
-        `id, title, content, description, category, image_url, ${withUrls ? "image_urls, " : ""}image_ratio, created_at, user_id`
+        `id, title, content, description, category, image_url, ${withUrls ? "image_urls, " : ""}${withMask ? "image_mask_url, " : ""}image_ratio, created_at, user_id`
       )
       .order("created_at", { ascending: false })
       .limit(1000) // 增加获取的帖子数量限制到1000

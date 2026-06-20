@@ -35,6 +35,23 @@ export function postsHaveImageUrls(): Promise<boolean> {
   return columnCheck
 }
 
+// 同理探测 posts 是否已有 image_mask_url 列（主体视差用，scripts/2026-06-20-post-image-mask.sql）。
+// feed 的显式 select 引用不存在的列会让整表查询报错 → 帖子列表空白，故同样探测+缓存+回退。
+let maskColumnCheck: Promise<boolean> | null = null
+export function postsHaveMaskColumn(): Promise<boolean> {
+  if (!maskColumnCheck) {
+    maskColumnCheck = (async () => {
+      try {
+        const { error } = await supabase.from("posts").select("image_mask_url").limit(1)
+        return !error
+      } catch {
+        return false
+      }
+    })()
+  }
+  return maskColumnCheck
+}
+
 /** 取帖子的有序图片列表（封面在首位）。无图返回 []。 */
 export function postImageList(post: PostImageSource): string[] {
   const list = Array.isArray(post.image_urls)

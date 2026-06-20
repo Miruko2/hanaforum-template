@@ -1,7 +1,7 @@
 import { supabase } from "./supabaseClient"
 import type { Post, Comment } from "./types"
 import { cache, withCache } from "./cache-utils"
-import { postsHaveImageUrls } from "./post-images"
+import { postsHaveImageUrls, postsHaveMaskColumn } from "./post-images"
 
 // 内存缓存
 const memoryCache = new Map<string, { data: any; expiry: number }>()
@@ -60,9 +60,10 @@ export const getPostsOptimized = withCache(
     try {
       // 获取帖子基本数据和计数，不包含用户信息
       const withUrls = await postsHaveImageUrls()
+      const withMask = await postsHaveMaskColumn()
       const { data, error } = await supabase
         .from("posts")
-        .select(postSelect(withUrls))
+        .select(postSelect(withUrls, withMask))
         .order("created_at", { ascending: false })
         .limit(1000) // 增加加载数量限制到1000，确保能显示足够多的帖子
       // 动态 select 字符串下 supabase-js 推断不出行类型，这里统一按 any[] 处理
@@ -159,6 +160,7 @@ export const getPostsOptimized = withCache(
             category: post.category,
             image_url: post.image_url,
             image_urls: Array.isArray(post.image_urls) && post.image_urls.length ? post.image_urls : (post.image_url ? [post.image_url] : undefined),
+            image_mask_url: post.image_mask_url ?? undefined,
             image_ratio: imageRatio,
             created_at: post.created_at,
             likes: 0, // 填充必需字段
@@ -613,13 +615,14 @@ if (typeof window !== 'undefined') {
 
 // posts 表标准查询字段（含点赞/评论计数）。多处查询复用，避免重复字符串。
 // withUrls=false 时省略 image_urls（多图列尚未迁移时回退，避免整表查询报错）。
-const postSelect = (withUrls: boolean) => `
+// withMask=false 时省略 image_mask_url（主体视差列未迁移时回退，同理）。
+const postSelect = (withUrls: boolean, withMask: boolean) => `
   id,
   title,
   content,
   description,
   category,
-  image_url,${withUrls ? "\n  image_urls," : ""}
+  image_url,${withUrls ? "\n  image_urls," : ""}${withMask ? "\n  image_mask_url," : ""}
   image_ratio,
   created_at,
   user_id,
@@ -633,7 +636,7 @@ export const getPostsPaginated = withCache(
     try {
       let query = supabase
         .from("posts")
-        .select(postSelect(await postsHaveImageUrls()))
+        .select(postSelect(await postsHaveImageUrls(), await postsHaveMaskColumn()))
         .order("created_at", { ascending: false })
         .range(page * limit, page * limit + limit - 1);
       if (category) query = query.eq("category", category);
@@ -665,7 +668,7 @@ export const getHotPostsPaginated = withCache(
           p_limit: limit,
           p_category: category,
         })
-        .select(postSelect(await postsHaveImageUrls()));
+        .select(postSelect(await postsHaveImageUrls(), await postsHaveMaskColumn()));
       if (error) {
         console.error("❌ 获取热度帖子失败:", error);
         return [];
@@ -703,7 +706,7 @@ export const getFollowingPostsPaginated = withCache(
           p_limit: limit,
           p_category: category,
         })
-        .select(postSelect(await postsHaveImageUrls()));
+        .select(postSelect(await postsHaveImageUrls(), await postsHaveMaskColumn()));
       if (error) {
         console.error("❌ 获取关注帖子失败:", error);
         return [];
@@ -725,7 +728,7 @@ export const getUserPosts = withCache(
     try {
       const { data, error } = await supabase
         .from("posts")
-        .select(postSelect(await postsHaveImageUrls()))
+        .select(postSelect(await postsHaveImageUrls(), await postsHaveMaskColumn()))
         .eq("user_id", userId)
         .order("created_at", { ascending: false })
         .limit(limit);
@@ -838,6 +841,7 @@ function mapPostsWithProfiles(
         category: post.category,
         image_url: post.image_url,
         image_urls: Array.isArray(post.image_urls) && post.image_urls.length ? post.image_urls : (post.image_url ? [post.image_url] : undefined),
+        image_mask_url: post.image_mask_url ?? undefined,
         image_ratio: imageRatio,
         created_at: post.created_at,
         likes: 0, // 填充必需字段

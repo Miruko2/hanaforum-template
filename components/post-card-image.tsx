@@ -211,6 +211,8 @@ export default function PostCardImage({
       )}
       style={aspectStyle}
     >
+      {/* 主体视差只放灯箱（点击放大），详情内嵌图维持静态图 —— 否则 hover 既触发视差、
+          又触发放大图标+暗角遮罩，两者抢同一手势互相打架（用户 2026-06-20 拍板）。 */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         ref={imageRef}

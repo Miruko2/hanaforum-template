@@ -5,10 +5,14 @@ import { createPortal } from "react-dom"
 import { motion, AnimatePresence } from "framer-motion"
 import { X, Loader2, ChevronLeft, ChevronRight } from "lucide-react"
 import { cn } from "@/lib/utils"
+import SubjectParallax from "./subject-parallax"
+import { detectIsAndroidApp } from "@/app/music/_lib/useIsAndroid"
 
 interface ImageLightboxProps {
   /** 单图直链；为 null/空时不展示灯箱（向后兼容） */
   src?: string | null
+  /** 单图主体遮罩直链；提供且非安卓 APK 时，单图灯箱用主体视差渲染（无残影） */
+  maskSrc?: string | null
   /** 多图直链数组；非空时优先于 src，启用左右切换 + 圆点指示器 */
   images?: string[] | null
   /** 多图当前索引（受控） */
@@ -30,6 +34,7 @@ interface ImageLightboxProps {
  */
 export default function ImageLightbox({
   src,
+  maskSrc,
   images,
   index = 0,
   onIndexChange,
@@ -62,11 +67,11 @@ export default function ImageLightbox({
     () => typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent),
   )
   // 安卓 app（Capacitor WebView）：单图入场去掉 scale 几何动画（首次大图栅格化 + 动画并发会撕裂）。
-  const [isAndroidApp] = useState(() => {
-    if (typeof navigator === "undefined" || typeof window === "undefined") return false
-    const ua = navigator.userAgent
-    return (/Android/.test(ua) && /wv|WebView/.test(ua)) || "Capacitor" in window
-  })
+  // 安卓 app 判定走 canonical 的 detectIsAndroidApp：朴素的 `"Capacitor" in window` 在桌面
+  // web 也为真（Capacitor web 运行时会注入该全局），会把桌面误判成安卓 app → 跳过主体视差
+  // （灯箱视差一直不出现的真因）。detectIsAndroidApp 用 Capacitor.getPlatform()==='android'
+  // 判定，桌面/iOS/安卓 Chrome 均为 false，仅真·APK 为 true。
+  const [isAndroidApp] = useState(detectIsAndroidApp)
 
   // ── 单图：解码后再弹入 ───────────────────────────────────────────────
   useEffect(() => {
@@ -327,6 +332,33 @@ export default function ImageLightbox({
                 ))}
               </div>
             </>
+          ) : maskSrc && !isAndroidApp ? (
+            // 单图 + 有遮罩：主体视差（无残影）。透明 ghost 图定出 contain 尺寸，视差画布盖其上。
+            // 点击图片不关闭（在交互），点背景/×/Esc 关闭。
+            <motion.div
+              className="relative"
+              onClick={(e) => e.stopPropagation()}
+              initial={{ scale: 0.85, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.7, opacity: 0 }}
+              transition={{ type: "spring", stiffness: 300, damping: 26, mass: 0.7 }}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={list[0]}
+                alt=""
+                aria-hidden
+                draggable={false}
+                className="block max-h-[88vh] max-w-[92vw] select-none object-contain opacity-0"
+              />
+              <SubjectParallax
+                src={list[0]}
+                maskSrc={maskSrc}
+                fallbackSrc={list[0]}
+                alt={alt}
+                className="rounded-2xl overflow-hidden shadow-[0_30px_90px_-20px_rgba(0,0,0,0.8)]"
+              />
+            </motion.div>
           ) : (
             <>
               {/* 单图加载中 spinner */}
