@@ -252,12 +252,20 @@ const PostCard = memo(function PostCard({
       // hero 转场：量出整张卡片的屏幕矩形（起点）+ 卡片图已加载的 URL（飞行图图源）。
       // 用整卡矩形而非只图片，让「整个帖子元素」一起飞、底部信息再淡出。
       const cardEl = cardRef.current
+      // hover 增强给 wrapper(.post-card-container) 加了 scale(1.05) 放大；getBoundingClientRect
+      // 含祖先 transform，会量到「放大态」矩形 → 关闭回飞落回放大态、与静止卡差 5% 跳变。
+      // 量取前同步清掉 wrapper 的 hover 放大、量完即还原（同一 tick、无中间绘制 → 不闪），
+      // 确保 hero 起止矩形都是静止态尺寸。
+      const wrapEl = cardEl?.parentElement as HTMLElement | null
+      const prevWrapTransform = wrapEl?.style.transform ?? ""
+      if (wrapEl) wrapEl.style.transform = "none"
       const imgWrapEl = cardEl?.querySelector(".image-container") as HTMLElement | null
       const imgEl = cardEl?.querySelector(".image-container img") as HTMLImageElement | null
       setSourceRect(cardEl ? cardEl.getBoundingClientRect() : null)
       // 图片区矩形：关闭回飞图据此精准落回源卡图片槽（与源卡图片像素重合、不跳变）
       setSourceImgRect(imgWrapEl ? imgWrapEl.getBoundingClientRect() : null)
       setSourceSrc(imgEl ? imgEl.currentSrc || imgEl.src : null)
+      if (wrapEl) wrapEl.style.transform = prevWrapTransform
       onClick()
     }
   }, [isActive, onClick])

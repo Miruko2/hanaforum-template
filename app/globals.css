@@ -301,17 +301,104 @@ body {
   position: relative;
 }
 
-/* 卡片悬停效果 —— 模糊加强 + 背景略提亮 */
+/* 卡片悬停效果 —— 模糊加强 + 背景提亮（描边/发光维持中性） */
 .glass-card:hover {
   background: rgba(35, 35, 48, 0.48);
   backdrop-filter: blur(26px) saturate(160%);
   -webkit-backdrop-filter: blur(26px) saturate(160%);
+  /* 描边/发光维持中性（去掉柠檬绿边框发光，仅保留投影 + 顶部高光） */
   border-color: rgba(255, 255, 255, 0.2);
-  box-shadow: 
+  box-shadow:
     0 16px 48px rgba(0, 0, 0, 0.4),
     0 0 20px rgba(255, 255, 255, 0.1),
     0 1px 0 rgba(255, 255, 255, 0.15) inset;
-  transform: translateY(-8px) scale(1.02);
+  /* ⚠️ 升降/缩放已移到 .post-card-container:hover（见下方「hover 增强」块）。
+     写在这里会被 .glass-card 入场动画的 forwards 关键帧永久覆盖、根本不生效
+     —— 这正是此前「hover 变化不大」的真因。 */
+}
+
+/* ============================================================
+ * 帖子卡片 hover 增强（2026-06-20）—— 聚焦上浮 + 邻卡后退 + 图片放大 + 流光
+ * 仅桌面指针设备（@media hover:hover）：手机无 hover、点按即开帖（hero 转场），
+ * 这些动效对触屏无意义、且会干扰 hero 起点矩形测量，故整体门控。
+ *
+ * 关键：位移/缩放挂在 wrapper(.post-card-container) 上，不挂 .glass-card ——
+ * 后者的入场动画 animation:...forwards 会把自身 transform/opacity/filter 钉死在
+ * 100% 关键帧（层级高于普通 :hover），任何写在 .glass-card:hover 的 transform 都失效。
+ * wrapper 不参与入场动画，在它上面做 transform 才真正生效。
+ * ============================================================ */
+.post-card-container {
+  position: relative; /* 让 hover 时的 z-index 生效（瀑布流列是普通块、子项 static） */
+  transition: transform 0.45s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  /* 1) 悬停卡上浮放大 + 抬到同层之上，视觉上「挤」进邻卡的留白 */
+  .post-card-container:hover {
+    transform: translateY(-10px) scale(1.05);
+    z-index: 20;
+  }
+
+  /* 1') 同瀑布流内、未被悬停的邻卡整体轻微缩小 —— 制造「聚焦其一、其余后退」的景深。
+        只用 transform（合成器友好、零重排、不破坏子级 backdrop-filter 采样）；
+        不用 opacity/filter 调暗：那要么被入场动画覆盖、要么破坏毛玻璃。 */
+  .masonry-grid:hover .post-card-container:not(:hover) {
+    transform: scale(0.975);
+  }
+
+  /* 2) 卡内图片缓慢放大，被图片容器 overflow:hidden 裁切 → Ken-Burns 观感。
+        img 自身无入场动画，scale 不会被覆盖。 */
+  .glass-card:hover .image-glow img {
+    transform: scale(1.08);
+  }
+
+  /* 3) 流光：一道斜向高光在悬停瞬间扫过卡面（绝区零霓虹质感）。 */
+  .glass-card:hover::before {
+    animation: cardSheenSweep 0.9s cubic-bezier(0.23, 1, 0.32, 1);
+  }
+}
+
+/* 图片放大的过渡（基础态全局声明无妨：触屏不触发 hover 就不会变） */
+.image-glow img {
+  transition: transform 0.6s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+/* 流光层基础态：透明、停在卡左外侧，等待 hover 触发扫过动画。
+   z-index:2 → 位于图片(及其暗角 z1)之上、作者头像/角标(z10/z20)之下；
+   pointer-events:none 不挡点击。 */
+.glass-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background: linear-gradient(
+    115deg,
+    transparent 38%,
+    rgba(255, 255, 255, 0.16) 47%,
+    rgba(190, 242, 100, 0.12) 53%,
+    transparent 62%
+  );
+  transform: translateX(-130%);
+  opacity: 0;
+}
+
+@keyframes cardSheenSweep {
+  0%   { transform: translateX(-130%); opacity: 0; }
+  12%  { opacity: 1; }
+  100% { transform: translateX(130%); opacity: 0; }
+}
+
+/* 无障碍：用户要求减少动效时，去掉所有位移/缩放/流光，仅保留颜色与发光 */
+@media (prefers-reduced-motion: reduce) {
+  .post-card-container:hover,
+  .masonry-grid:hover .post-card-container:not(:hover),
+  .glass-card:hover .image-glow img {
+    transform: none !important;
+  }
+  .glass-card:hover::before {
+    animation: none !important;
+  }
 }
 
 /* 激活状态的卡片 */
@@ -678,7 +765,8 @@ body {
 }
 
 .glass-card:hover .image-glow::before {
-  opacity: 0.6;
+  /* hover 时减弱暗角（原为加深 0.6），让图片更鲜亮、配合放大更突出 */
+  opacity: 0.25;
 }
 
 /* 模态框样式 */
