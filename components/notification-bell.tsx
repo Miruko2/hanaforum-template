@@ -6,6 +6,7 @@ import { Bell, X } from "lucide-react"
 import { createPortal } from "react-dom"
 import { useNotifications } from "@/contexts/notification-context"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
+import { useChatUI } from "@/contexts/chat-ui-context"
 import { useToast } from "@/hooks/use-toast"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { Button } from "@/components/ui/button"
@@ -25,6 +26,7 @@ export default function NotificationBell({ mobileView = false }: NotificationBel
   const { notifications, unreadCount, isLoading, markAsRead, markAllAsRead } =
     useNotifications()
   const { user, isAdmin } = useSimpleAuth()
+  const { openHall } = useChatUI()
   const { toast } = useToast()
   const isMobile = useIsMobile()
   const router = useRouter()
@@ -75,6 +77,13 @@ export default function NotificationBell({ mobileView = false }: NotificationBel
       try {
         if (!notification.is_read) {
           markAsRead(notification.id)
+        }
+
+        // 聊天提及：关铃铛弹窗 + 打开聊天切到大厅（@提及/引用都发生在大厅，无帖子可跳）
+        if (notification.type === "chat_mention") {
+          setIsOpen(false)
+          openHall()
+          return
         }
 
         // 公告类通知：打开公告弹窗（先关铃铛弹窗）
@@ -140,7 +149,7 @@ export default function NotificationBell({ mobileView = false }: NotificationBel
         setLoadingPostId(null)
       }
     },
-    [markAsRead, user, toast, router],
+    [markAsRead, user, toast, router, openHall],
   )
 
   const handleModalLike = useCallback(

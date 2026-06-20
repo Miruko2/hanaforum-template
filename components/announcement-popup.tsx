@@ -124,6 +124,15 @@ function viewOf(n: Notification): CardView {
         needAnnouncementFill: false,
         needProfileFill: false,
       }
+    case "chat_mention":
+      return {
+        logoUrl: actorAvatar,
+        eyebrow: "聊天提及",
+        title: `${actorName} 在大厅提到了你`,
+        body: n.message || "",
+        needAnnouncementFill: false,
+        needProfileFill: false,
+      }
     case "post_removed":
       return {
         logoUrl: "/logo.png",
@@ -172,7 +181,7 @@ function detectAndroid(): boolean {
 export default function AnnouncementPopup() {
   const { user, isAdmin } = useSimpleAuth()
   const { notifications, markAsRead } = useNotifications()
-  const { open: chatOpen, startDmWith } = useChatUI()
+  const { open: chatOpen, startDmWith, openHall } = useChatUI()
   const { toast } = useToast()
   const isMobile = useIsMobile()
   const router = useRouter()
@@ -516,6 +525,12 @@ export default function AnnouncementPopup() {
       // 公开通知：标记已读 + 按类型复刻铃铛
       const n = item
       if (!n.is_read) markAsRead(n.id)
+
+      // 聊天提及：打开聊天面板并切到大厅（@提及/引用都发生在大厅）
+      if (n.type === "chat_mention") {
+        openHall()
+        return
+      }
 
       if (n.type === "announcement") {
         if (!n.announcement_id) return

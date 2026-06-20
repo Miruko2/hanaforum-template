@@ -1,6 +1,6 @@
 "use client"
 
-import { Heart, MessageCircle, Reply, ShieldAlert, Megaphone, UserPlus, Loader2 } from "lucide-react"
+import { Heart, MessageCircle, Reply, ShieldAlert, Megaphone, UserPlus, AtSign, Loader2 } from "lucide-react"
 import { cdnUrl } from "@/lib/cdn-url"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { formatDate, cn } from "@/lib/utils"
@@ -45,6 +45,12 @@ const TYPE_META: Record<
     icon: UserPlus,
     color: "text-sky-400",
     bg: "bg-sky-500/15 border-sky-500/25",
+  },
+  // 聊天大厅被 @ 或被引用
+  chat_mention: {
+    icon: AtSign,
+    color: "text-lime-400",
+    bg: "bg-lime-500/15 border-lime-500/25",
   },
 }
 

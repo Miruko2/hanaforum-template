@@ -4,8 +4,9 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { cdnUrl } from "@/lib/cdn-url"
 import { createPortal } from "react-dom"
 import { motion, AnimatePresence } from "framer-motion"
-import { X, Send, Smile, Users, Hash, CalendarDays } from "lucide-react"
+import { X, Send, Smile, Users, Hash, CalendarDays, Reply } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
+import { createNotification } from "@/lib/supabase"
 import { apiUrl } from "@/lib/api-base"
 import { MENGMEGZI_USER_ID, HANAKO_DM_USERNAME, HANAKO_AVATAR, normalizeEmotion, DM_KEEP_RECENT_MSGS, HALL_CHIME_IN_PROBABILITY, HALL_MENTION_REGEX } from "@/lib/hanako/constants"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
@@ -19,6 +20,16 @@ import { cnDate, cnDayRangeUTC, type DateBucket } from "@/lib/cn-date"
 import { fetchUserCardData } from "@/lib/user-card"
 import { guardVerify, openVerifyGate } from "@/lib/verify-gate-bus"
 import styles from "./floating-chat.module.css"
+
+// 被引用消息的「快照」：denormalized 存进 reply_to（jsonb），渲染引用块时零 join、
+// 原消息被删也不影响展示。senderId 用于「被引用 → 给作者发 chat_mention 通知」。
+interface ReplySnapshot {
+  id: string
+  senderId: string
+  name: string
+  excerpt: string
+  kind: "text" | "sticker"
+}
 
 // 统一的展示消息形状（大厅与私聊都映射到这个）
 interface DisplayMsg {
@@ -34,6 +45,8 @@ interface DisplayMsg {
   isNew?: boolean
   // 私信已读回执：对方读过这条（我发的）消息的时刻；大厅消息恒 undefined
   read_at?: string | null
+  // 引用回复：被引用消息的快照；非回复消息为 null
+  reply_to?: ReplySnapshot | null
 }
 
 interface Partner {
@@ -58,6 +71,15 @@ const PREWARM_MAX_CONVS = 5
 const STICKERS = ["happy", "shy", "confused", "cuddle", "excited", "sleepy"]
 const ASSET_EXTS = ["jpg", "png", "webp", "gif"]
 
+// 消息查询列：集中常量，避免多处 select 字符串漂移（新增 reply_to 后只改这一处）。
+const HALL_COLS = "id,user_id,username,avatar_url,kind,content,created_at,reply_to"
+const DM_COLS = "id,sender_id,kind,content,created_at,read_at,reply_to"
+
+// 单条消息最多给多少人发 @提及通知（防刷屏：@满屏也只通知前 N 个）。
+const MAX_MENTION_NOTIFS = 10
+// 引用块 / 通知里被引用内容的摘要长度
+const REPLY_EXCERPT_LEN = 60
+
 // 滚动渐入高斯模糊动效已禁用（原常量 BLUR_FADE_ZONE=50 / BLUR_MAX=12 已移除）。
 // 详见下方 updateBlur 注释。
 
@@ -73,6 +95,33 @@ const IS_TOUCH =
 const useIsoLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect
 
 const pairKey = (a: string, b: string) => [a, b].sort().join(":")
+
+// 文本里是否「@了某个用户名」：要求 @name 前后是边界（空格/换行/串首尾/标点），
+// 避免「@张三」误命中「@张三丰」。autocomplete 补全后带尾空格，天然满足边界。
+function mentionHit(text: string, name: string): boolean {
+  if (!name) return false
+  const token = "@" + name
+  let from = 0
+  for (;;) {
+    const i = text.indexOf(token, from)
+    if (i < 0) return false
+    const before = text[i - 1]
+    const after = text[i + token.length]
+    const beforeOk = before === undefined || before === " " || before === "\n"
+    // 之后是串尾/空白/换行，或非「字母数字下划线/汉字」（标点）即算边界
+    const afterOk =
+      after === undefined || after === " " || after === "\n" || !/[\w一-龥]/.test(after)
+    if (beforeOk && afterOk) return true
+    from = i + 1
+  }
+}
+
+// 被引用 / @通知里展示的内容摘要：表情包用占位，文本截断。
+function replyExcerpt(kind: "text" | "sticker", content: string, max = REPLY_EXCERPT_LEN): string {
+  if (kind === "sticker") return "[表情]"
+  const t = content.replace(/\s+/g, " ").trim()
+  return t.length > max ? t.slice(0, max) + "…" : t
+}
 
 // localStorage key for persisting chat panel position
 const POS_STORAGE_KEY = "floating-chat-pos"
@@ -190,7 +239,7 @@ export default function FloatingChat() {
 
   // open / 未读红点由导航栏入口共享：本组件只读 open（决定渲染面板）、写 unread（红点数）。
   // pendingDm：外部（社交页「私聊」按钮）请求发起的私聊对象，消费后 clearPendingDm 清掉。
-  const { open, setOpen, setUnread, pendingDm, clearPendingDm } = useChatUI()
+  const { open, setOpen, setUnread, pendingDm, clearPendingDm, pendingHall, clearPendingHall } = useChatUI()
   const router = useRouter()
   const [active, setActive] = useState<Active>({ kind: "hall" })
   const [convs, setConvs] = useState<DmConv[]>([])
@@ -213,8 +262,11 @@ export default function FloatingChat() {
   const [input, setInput] = useState("")
   const [sending, setSending] = useState(false)
   const [showStickers, setShowStickers] = useState(false)
-  // @ 补全菜单：输入框敲 @ 时弹出萌萌子选项，点击补全 @萌萌子+空格
-  const [mentionOpen, setMentionOpen] = useState(false)
+  // @ 补全菜单（仅大厅）：输入框敲「词首 @」时，mentionQuery=@后到光标的查询串（""即刚敲@）；
+  // 非补全态为 null。据此过滤在线/会话/发言者名单弹候选；点击/回车补全 @用户名+空格。
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null)
+  // 引用回复：当前正在回复的消息（大厅+私聊都可用）。发送后或点✕清空。
+  const [replyTo, setReplyTo] = useState<DisplayMsg | null>(null)
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
 
   // 右键菜单（关闭私聊）
@@ -347,6 +399,31 @@ export default function FloatingChat() {
   const myId = user?.id
   const myName =
     user?.user_metadata?.username || (user?.email ? user.email.split("@")[0] : "匿名")
+
+  // @ 候选名单：在线用户 + 私聊会话 + 当前消息发言者，按 id 去重、排除自己。
+  // 萌萌子用固定展示名/头像（profiles 可能脏）；她仍可被 @（触发她的 AI 回复），
+  // 但发通知时会被排除（她是 AI、不需要小红点）。
+  const mentionRoster = useMemo(() => {
+    const map = new Map<string, { id: string; username: string; avatar_url?: string | null }>()
+    const add = (id: string, username: string, avatar_url?: string | null) => {
+      if (!id || id === myId || map.has(id)) return
+      const isHanako = id === MENGMEGZI_USER_ID
+      map.set(id, {
+        id,
+        username: isHanako ? HANAKO_DM_USERNAME : username || "用户",
+        avatar_url: isHanako ? HANAKO_AVATAR : avatar_url ?? null,
+      })
+    }
+    for (const u of online) add(u.id, u.username, u.avatar_url)
+    for (const c of convs) add(c.id, c.username, c.avatar_url)
+    for (const m of messages) if (m.fromId !== myId) add(m.fromId, m.username, m.avatar_url)
+    return [...map.values()]
+  }, [online, convs, messages, myId])
+  // rosterRef：发送时（send 回调里）解析文本里的 @用户名 → id，读最新名单不吃闭包旧值。
+  const rosterRef = useRef(mentionRoster)
+  useEffect(() => {
+    rosterRef.current = mentionRoster
+  }, [mentionRoster])
 
   // 自己的头像（发送快照 + 心跳带上）
   useEffect(() => {
@@ -526,7 +603,7 @@ export default function FloatingChat() {
       ;(async () => {
         const { data, error } = await supabase
           .from("chat_messages")
-          .select("id,user_id,username,avatar_url,kind,content,created_at")
+          .select(HALL_COLS)
           .order("created_at", { ascending: false })
           .limit(PAGE_SIZE)
         if (!alive || error) return
@@ -611,7 +688,7 @@ export default function FloatingChat() {
     ;(async () => {
       const { data, error } = await supabase
         .from("dm_messages")
-        .select("id,sender_id,kind,content,created_at,read_at")
+        .select(DM_COLS)
         .eq("pair_key", pk)
         .order("created_at", { ascending: false })
         .limit(PAGE_SIZE)
@@ -696,7 +773,7 @@ export default function FloatingChat() {
         ;(async () => {
           const { data, error } = await supabase
             .from("dm_messages")
-            .select("id,sender_id,kind,content,created_at,read_at")
+            .select(DM_COLS)
             .eq("pair_key", key)
             .order("created_at", { ascending: false })
             .limit(PAGE_SIZE)
@@ -780,7 +857,7 @@ export default function FloatingChat() {
       if (a.kind === "hall") {
         const { data, error } = await supabase
           .from("chat_messages")
-          .select("id,user_id,username,avatar_url,kind,content,created_at")
+          .select(HALL_COLS)
           .lt("created_at", cursor.created_at)
           .order("created_at", { ascending: false })
           .limit(PAGE_SIZE)
@@ -792,7 +869,7 @@ export default function FloatingChat() {
         const partner: Partner = { id: a.id, username: a.username, avatar_url: a.avatar_url }
         const { data, error } = await supabase
           .from("dm_messages")
-          .select("id,sender_id,kind,content,created_at,read_at")
+          .select(DM_COLS)
           .eq("pair_key", key)
           .lt("created_at", cursor.created_at)
           .order("created_at", { ascending: false })
@@ -839,7 +916,7 @@ export default function FloatingChat() {
       if (a.kind === "hall") {
         const { data, error } = await supabase
           .from("chat_messages")
-          .select("id,user_id,username,avatar_url,kind,content,created_at")
+          .select(HALL_COLS)
           .gt("created_at", cursor.created_at)
           .order("created_at", { ascending: true })
           .limit(PAGE_SIZE)
@@ -851,7 +928,7 @@ export default function FloatingChat() {
         const partner: Partner = { id: a.id, username: a.username, avatar_url: a.avatar_url }
         const { data, error } = await supabase
           .from("dm_messages")
-          .select("id,sender_id,kind,content,created_at,read_at")
+          .select(DM_COLS)
           .eq("pair_key", key)
           .gt("created_at", cursor.created_at)
           .order("created_at", { ascending: true })
@@ -955,7 +1032,7 @@ export default function FloatingChat() {
       if (a.kind === "hall") {
         const { data, error } = await supabase
           .from("chat_messages")
-          .select("id,user_id,username,avatar_url,kind,content,created_at")
+          .select(HALL_COLS)
           .gte("created_at", startUTC)
           .order("created_at", { ascending: true })
           .limit(PAGE_SIZE)
@@ -965,7 +1042,7 @@ export default function FloatingChat() {
         const partner: Partner = { id: a.id, username: a.username, avatar_url: a.avatar_url }
         const { data, error } = await supabase
           .from("dm_messages")
-          .select("id,sender_id,kind,content,created_at,read_at")
+          .select(DM_COLS)
           .eq("pair_key", key)
           .gte("created_at", startUTC)
           .order("created_at", { ascending: true })
@@ -999,7 +1076,7 @@ export default function FloatingChat() {
     if (a.kind === "hall") {
       const { data, error } = await supabase
         .from("chat_messages")
-        .select("id,user_id,username,avatar_url,kind,content,created_at")
+        .select(HALL_COLS)
         .order("created_at", { ascending: false })
         .limit(PAGE_SIZE)
       if (error) return
@@ -1008,7 +1085,7 @@ export default function FloatingChat() {
       const partner: Partner = { id: a.id, username: a.username, avatar_url: a.avatar_url }
       const { data, error } = await supabase
         .from("dm_messages")
-        .select("id,sender_id,kind,content,created_at,read_at")
+        .select(DM_COLS)
         .eq("pair_key", key)
         .order("created_at", { ascending: false })
         .limit(PAGE_SIZE)
@@ -1137,8 +1214,35 @@ export default function FloatingChat() {
     requestAnimationFrame(() => requestAnimationFrame(jump))
   }, [open, active])
 
+  // 大厅：给被 @ 或被引用的用户建 chat_mention 通知（与点赞/评论/关注共用通知系统，
+  // 自动点亮铃铛红点 + 触发顶部弹窗）。排除自己和萌萌子，按 id 去重，限量防刷屏。
+  const notifyHallMentions = useCallback(
+    (text: string, kind: "text" | "sticker", replySnap: ReplySnapshot | null) => {
+      if (!user) return
+      const targets = new Map<string, string>() // userId → 通知文案
+      // 被引用：通知被引用消息的作者（文案比 @ 更具体，优先）
+      if (replySnap && replySnap.senderId !== user.id && replySnap.senderId !== MENGMEGZI_USER_ID) {
+        targets.set(replySnap.senderId, `${myName} 在大厅回复了你：${replyExcerpt(kind, text, 40)}`)
+      }
+      // @ 提及：仅文本消息按名单边界匹配；排除自己/萌萌子；已被「回复」覆盖的不重复
+      if (kind === "text") {
+        for (const u of rosterRef.current) {
+          if (targets.size >= MAX_MENTION_NOTIFS) break
+          if (u.id === user.id || u.id === MENGMEGZI_USER_ID || targets.has(u.id)) continue
+          if (mentionHit(text, u.username)) {
+            targets.set(u.id, `${myName} 在大厅 @了你：${replyExcerpt("text", text, 40)}`)
+          }
+        }
+      }
+      for (const [userId, message] of targets) {
+        void createNotification({ userId, type: "chat_mention", actorId: user.id, message })
+      }
+    },
+    [user, myName],
+  )
+
   const send = useCallback(
-    async (kind: "text" | "sticker", content: string) => {
+    async (kind: "text" | "sticker", content: string, replyMsg?: DisplayMsg | null) => {
       if (!user || sending) return
       const text = content.trim()
       if (!text) return
@@ -1146,17 +1250,27 @@ export default function FloatingChat() {
       // 与发帖/发弹幕入口一致；否则未验证用户在聊天里只会看到裸的发送失败。
       if (guardVerify()) return
       const a = activeRef.current
+      // 被引用消息快照（大厅+私聊都存，渲染引用块用；senderId 供大厅发通知）
+      const replySnap: ReplySnapshot | null = replyMsg
+        ? {
+            id: replyMsg.id,
+            senderId: replyMsg.fromId,
+            name: replyMsg.username,
+            excerpt: replyExcerpt(replyMsg.kind, replyMsg.content),
+            kind: replyMsg.kind,
+          }
+        : null
       setSending(true)
       try {
         let error
         if (a.kind === "hall") {
           ;({ error } = await supabase
             .from("chat_messages")
-            .insert([{ user_id: user.id, username: myName, avatar_url: avatarRef.current, kind, content: text }]))
+            .insert([{ user_id: user.id, username: myName, avatar_url: avatarRef.current, kind, content: text, reply_to: replySnap }]))
         } else {
           ;({ error } = await supabase
             .from("dm_messages")
-            .insert([{ pair_key: pairKey(user.id, a.id), sender_id: user.id, recipient_id: a.id, kind, content: text }]))
+            .insert([{ pair_key: pairKey(user.id, a.id), sender_id: user.id, recipient_id: a.id, kind, content: text, reply_to: replySnap }]))
         }
         if (error) {
           // 未验证邮箱（DB 兜底）：弹验证窗而非裸的「发送失败」。
@@ -1175,24 +1289,30 @@ export default function FloatingChat() {
             description: rl ? "慢一点～3 秒最多 3 条" : msg || "请稍后再试",
             variant: "destructive",
           })
-        } else if (a.kind === "dm" && a.id === MENGMEGZI_USER_ID) {
-          // 私聊对象是萌萌子：触发独立模型异步回复（fire-and-forget，失败静默）。
-          // 文本和表情包都触发；表情包的 content 是情绪 id，后端会转成心情描述进上下文。
-          // 她的回复经 dm 实时订阅自动出现在会话里，这里无需处理返回值。
-          ;(async () => {
-            try {
-              const { data: s } = await supabase.auth.getSession()
-              const tok = s?.session?.access_token
-              if (!tok) return
-              await fetch(apiUrl("/api/hanako-dm"), {
-                method: "POST",
-                headers: { "Content-Type": "application/json", Authorization: `Bearer ${tok}` },
-                body: JSON.stringify({ content: text, kind }),
-              })
-            } catch {
-              // 静默：她没回不影响用户已发出的消息
-            }
-          })()
+        } else {
+          // 大厅：被 @ 或被引用的用户发 chat_mention 通知（点亮铃铛红点 + 顶部弹窗）。
+          // 仅大厅触发：私聊一对一、@无意义，被引用方本就会收到私信通知，不重复打扰。
+          if (a.kind === "hall") {
+            notifyHallMentions(text, kind, replySnap)
+          } else if (a.id === MENGMEGZI_USER_ID) {
+            // 私聊对象是萌萌子：触发独立模型异步回复（fire-and-forget，失败静默）。
+            // 文本和表情包都触发；表情包的 content 是情绪 id，后端会转成心情描述进上下文。
+            // 她的回复经 dm 实时订阅自动出现在会话里，这里无需处理返回值。
+            ;(async () => {
+              try {
+                const { data: s } = await supabase.auth.getSession()
+                const tok = s?.session?.access_token
+                if (!tok) return
+                await fetch(apiUrl("/api/hanako-dm"), {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", Authorization: `Bearer ${tok}` },
+                  body: JSON.stringify({ content: text, kind }),
+                })
+              } catch {
+                // 静默：她没回不影响用户已发出的消息
+              }
+            })()
+          }
         }
       } catch (e) {
         toast({ title: "发送失败", description: (e as Error)?.message || "请稍后重试", variant: "destructive" })
@@ -1200,21 +1320,43 @@ export default function FloatingChat() {
         setSending(false)
       }
     },
-    [user, sending, myName, toast],
+    [user, sending, myName, toast, notifyHallMentions],
   )
 
-  // @ 补全：把光标前最近的「词首 @」之后的内容替换成 萌萌子+空格，光标跟到补全末尾。
-  // 仅大厅用。补全后关闭菜单、聚焦输入框、重算高度。
-  const completeMention = () => {
+  // 当前 @ 候选：按 mentionQuery 过滤名单（最多 6 个）。null（非补全态）或空匹配 → 不弹菜单。
+  const mentionList = useMemo(() => {
+    if (mentionQuery === null) return []
+    const q = mentionQuery.trim().toLowerCase()
+    const base = q ? mentionRoster.filter((u) => u.username.toLowerCase().includes(q)) : mentionRoster
+    return base.slice(0, 6)
+  }, [mentionQuery, mentionRoster])
+
+  // 开始引用某条消息：记录它 + 聚焦输入框（输入框上方显示「回复 X」条）
+  const beginReply = (m: DisplayMsg) => {
+    setReplyTo(m)
+    requestAnimationFrame(() => textareaRef.current?.focus())
+  }
+
+  // 点击气泡上方的引用块 → 滚到原消息并短暂高亮（仅当原消息还在已加载列表里才生效）
+  const scrollToMsg = (id: string) => {
+    const el = feedRef.current?.querySelector<HTMLElement>(`[data-mid="${id}"]`)
+    if (!el) return
+    el.scrollIntoView({ block: "center", behavior: "smooth" })
+    el.classList.add(styles.rowFlash)
+    window.setTimeout(() => el.classList.remove(styles.rowFlash), 1200)
+  }
+
+  // @ 补全：把光标前「词首 @…」整段替换成 @用户名+空格，光标跟到补全末尾。仅大厅用。
+  const completeMention = (username: string) => {
     const ta = textareaRef.current
     if (!ta) return
     const v = input
     const pos = ta.selectionStart ?? v.length
     const before = v.slice(0, pos)
-    // 复用 onChange 的同一套「词首 @」判定，找到要替换的 @ 位置
+    // 找光标前最近的「词首 @」位置（前一字符是空格/换行/串首）
     let atIdx = -1
     for (let i = before.length - 1; i >= 0; i--) {
-      if (before[i] === " ") break
+      if (before[i] === " " || before[i] === "\n") break
       if (before[i] === "@") {
         const prev = before[i - 1]
         if (prev === undefined || prev === " " || prev === "\n") atIdx = i
@@ -1222,12 +1364,12 @@ export default function FloatingChat() {
       }
     }
     if (atIdx < 0) return
-    const insert = "萌萌子 "
-    const next = v.slice(0, atIdx + 1) + insert + v.slice(pos)
-    setInput(next.slice(0, MAX_LEN))
-    setMentionOpen(false)
-    // 光标放到补全词之后（@萌萌子 的空格后）
-    const caret = atIdx + 1 + insert.length
+    const insert = `@${username} `
+    const next = (v.slice(0, atIdx) + insert + v.slice(pos)).slice(0, MAX_LEN)
+    setInput(next)
+    setMentionQuery(null)
+    // 光标放到补全词之后（@用户名 的空格后）
+    const caret = atIdx + insert.length
     requestAnimationFrame(() => {
       if (!textareaRef.current) return
       textareaRef.current.focus()
@@ -1239,8 +1381,9 @@ export default function FloatingChat() {
   const submitText = () => {
     const t = input.trim()
     if (!t) return
-    send("text", t)
+    send("text", t, replyTo)
     setInput("")
+    setReplyTo(null)
     // Reset textarea height after clearing
     if (textareaRef.current) textareaRef.current.style.height = "auto"
   }
@@ -1283,6 +1426,20 @@ export default function FloatingChat() {
     startDm({ id: pendingDm.id, username: pendingDm.username, avatar_url: pendingDm.avatar_url ?? null })
     clearPendingDm()
   }, [pendingDm, myId, startDm, clearPendingDm])
+
+  // 消费外部「打开聊天并切到大厅」请求（铃铛/通知弹窗点击 chat_mention 时）。
+  useEffect(() => {
+    if (!pendingHall) return
+    switchTo({ kind: "hall" })
+    clearPendingHall()
+  }, [pendingHall, switchTo, clearPendingHall])
+
+  // 切换会话时清掉「正在回复」和 @ 菜单：回复/提及上下文属于某个会话，不该跨会话残留
+  // （否则在大厅开了回复再切到私聊，会把大厅消息错误地当引用附到私信上）。
+  useEffect(() => {
+    setReplyTo(null)
+    setMentionQuery(null)
+  }, [active])
 
   // 关闭（删除）一个私聊会话
   const closeDm = useCallback((convId: string) => {
@@ -1474,7 +1631,7 @@ export default function FloatingChat() {
                 messages.map((m) => {
                   const mine = m.fromId === user.id
                   return (
-                    <div key={m.id} data-day={cnDate(m.created_at)} className={`${styles.row} ${mine ? styles.rowMine : styles.rowOther} ${m.isNew ? styles.rowNew : ""}`}>
+                    <div key={m.id} data-day={cnDate(m.created_at)} data-mid={m.id} className={`${styles.row} ${mine ? styles.rowMine : styles.rowOther} ${m.isNew ? styles.rowNew : ""}`}>
                       {!mine &&
                         (active.kind === "hall" ? (
                           <button
@@ -1496,6 +1653,18 @@ export default function FloatingChat() {
                         ))}
                       <div className={styles.msgCol}>
                         {!mine && active.kind === "hall" && <span className={styles.msgName}>{m.username}</span>}
+                        {/* 引用块：被引用消息的快照，点击滚到原消息 */}
+                        {m.reply_to && (
+                          <button
+                            type="button"
+                            className={styles.quoteBlock}
+                            onClick={() => scrollToMsg(m.reply_to!.id)}
+                            title="查看原消息"
+                          >
+                            <span className={styles.quoteName}>{m.reply_to.name}</span>
+                            <span className={styles.quoteText}>{m.reply_to.excerpt}</span>
+                          </button>
+                        )}
                         {m.kind === "sticker" ? (
                           <HanakoImg
                             base={`/hanako/stickers/${normalizeEmotion(m.content)}`}
@@ -1510,6 +1679,16 @@ export default function FloatingChat() {
                           <span className={styles.readMark}>已读</span>
                         )}
                       </div>
+                      {/* 回复按钮：hover 浮现（桌面）/ 触屏常驻淡显，点击引用该消息 */}
+                      <button
+                        type="button"
+                        className={styles.replyBtn}
+                        onClick={() => beginReply(m)}
+                        title="回复"
+                        aria-label="回复这条消息"
+                      >
+                        <Reply className="h-3.5 w-3.5" />
+                      </button>
                     </div>
                   )
                 })
@@ -1552,7 +1731,8 @@ export default function FloatingChat() {
                       key={id}
                       className={styles.stickerBtn}
                       onClick={() => {
-                        send("sticker", id)
+                        send("sticker", id, replyTo)
+                        setReplyTo(null)
                         setShowStickers(false)
                       }}
                       aria-label={id}
@@ -1572,8 +1752,9 @@ export default function FloatingChat() {
             </AnimatePresence>
 
             <footer className={styles.footer}>
+              {/* @ 候选菜单：在线 / 会话 / 发言者名单，按输入过滤（仅大厅） */}
               <AnimatePresence>
-                {mentionOpen && (
+                {mentionQuery !== null && mentionList.length > 0 && (
                   <motion.div
                     className={styles.mentionMenu}
                     initial={{ opacity: 0, y: 6, scale: 0.96 }}
@@ -1581,77 +1762,101 @@ export default function FloatingChat() {
                     exit={{ opacity: 0, y: 6, scale: 0.96 }}
                     transition={{ duration: 0.12 }}
                   >
-                    <button
-                      className={styles.mentionItem}
-                      onMouseDown={(e) => {
-                        // 用 mousedown 而非 click：避免先触发 textarea blur 导致光标位置丢失
-                        e.preventDefault()
-                        completeMention()
-                      }}
-                    >
-                      <UserAvatar username={HANAKO_DM_USERNAME} avatarUrl={HANAKO_AVATAR} size={22} />
-                      <span>{HANAKO_DM_USERNAME}</span>
-                      <span className={styles.mentionHint}>回车选择</span>
-                    </button>
+                    {mentionList.map((u, i) => (
+                      <button
+                        key={u.id}
+                        className={styles.mentionItem}
+                        onMouseDown={(e) => {
+                          // 用 mousedown 而非 click：避免先触发 textarea blur 导致光标位置丢失
+                          e.preventDefault()
+                          completeMention(u.username)
+                        }}
+                      >
+                        <UserAvatar username={u.username} avatarUrl={u.avatar_url} size={22} />
+                        <span>{u.username}</span>
+                        {i === 0 && <span className={styles.mentionHint}>回车选择</span>}
+                      </button>
+                    ))}
                   </motion.div>
                 )}
               </AnimatePresence>
-              <button className={styles.iconBtn} onClick={() => setShowStickers((s) => !s)} aria-label="表情包">
-                <Smile className="h-5 w-5" />
-              </button>
-              <textarea
-                ref={textareaRef}
-                className={styles.input}
-                value={input}
-                rows={1}
-                onChange={(e) => {
-                  const v = e.target.value.slice(0, MAX_LEN)
-                  setInput(v)
-                  autoResize(e.currentTarget)
-                  // @ 补全：仅大厅场景。检测光标前文本里「词首 @」且 @ 后无空格 → 弹菜单。
-                  // 词首 = @ 前是空格/行首/串首。@ 后一旦敲了空格即关闭（视为放弃补全）。
-                  if (active.kind === "hall") {
-                    const pos = e.target.selectionStart ?? v.length
-                    const before = v.slice(0, pos)
-                    // 找最后一个未被空格打断的 @
-                    const atIdx = (() => {
+
+              {/* 引用回复条：显示正在回复的消息，点 ✕ 取消 */}
+              {replyTo && (
+                <div className={styles.replyBar}>
+                  <Reply className="h-3.5 w-3.5" style={{ flexShrink: 0, opacity: 0.55 }} />
+                  <span className={styles.replyBarText}>
+                    <b>{replyTo.username}</b>
+                    {"："}
+                    {replyExcerpt(replyTo.kind, replyTo.content)}
+                  </span>
+                  <button
+                    type="button"
+                    className={styles.replyBarClose}
+                    onClick={() => setReplyTo(null)}
+                    aria-label="取消回复"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
+
+              <div className={styles.footerRow}>
+                <button className={styles.iconBtn} onClick={() => setShowStickers((s) => !s)} aria-label="表情包">
+                  <Smile className="h-5 w-5" />
+                </button>
+                <textarea
+                  ref={textareaRef}
+                  className={styles.input}
+                  value={input}
+                  rows={1}
+                  onChange={(e) => {
+                    const v = e.target.value.slice(0, MAX_LEN)
+                    setInput(v)
+                    autoResize(e.currentTarget)
+                    // @ 补全：仅大厅。取光标前「词首 @」到光标的查询串（""=刚敲 @）；否则 null。
+                    // 词首 = @ 前是空格/行首/串首；@ 后敲空格/换行即结束（视为放弃补全）。
+                    if (active.kind === "hall") {
+                      const pos = e.target.selectionStart ?? v.length
+                      const before = v.slice(0, pos)
+                      let q: string | null = null
                       for (let i = before.length - 1; i >= 0; i--) {
-                        if (before[i] === " ") return -1 // 遇空格停止：当前词不含 @
-                        if (before[i] === "@") {
-                          // @ 必须在词首：前一个字符是空格/行首/串首
+                        const ch = before[i]
+                        if (ch === " " || ch === "\n") break // 遇空格/换行：当前词不含 @
+                        if (ch === "@") {
                           const prev = before[i - 1]
-                          return prev === undefined || prev === " " || prev === "\n" ? i : -1
+                          if (prev === undefined || prev === " " || prev === "\n") q = before.slice(i + 1)
+                          break
                         }
                       }
-                      return -1
-                    })()
-                    setMentionOpen(atIdx >= 0)
-                  } else {
-                    setMentionOpen(false)
-                  }
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault()
-                    // 菜单开着时回车=选中补全，而非发送
-                    if (mentionOpen) {
-                      completeMention()
+                      setMentionQuery(q)
                     } else {
-                      submitText()
-                      setMentionOpen(false)
+                      setMentionQuery(null)
                     }
-                  } else if (e.key === "Escape" && mentionOpen) {
-                    e.preventDefault()
-                    setMentionOpen(false)
-                  }
-                }}
-                placeholder={active.kind === "hall" ? "对大厅说点什么…" : `私聊 ${active.username}…`}
-                maxLength={MAX_LEN}
-                onBlur={() => setMentionOpen(false)}
-              />
-              <button className={styles.send} onClick={submitText} disabled={sending || !input.trim()} aria-label="发送">
-                <Send className="h-4 w-4" />
-              </button>
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault()
+                      // 菜单有候选时回车=选中第一个补全，而非发送
+                      if (mentionQuery !== null && mentionList.length > 0) {
+                        completeMention(mentionList[0].username)
+                      } else {
+                        submitText()
+                        setMentionQuery(null)
+                      }
+                    } else if (e.key === "Escape" && mentionQuery !== null) {
+                      e.preventDefault()
+                      setMentionQuery(null)
+                    }
+                  }}
+                  placeholder={active.kind === "hall" ? "对大厅说点什么…" : `私聊 ${active.username}…`}
+                  maxLength={MAX_LEN}
+                  onBlur={() => setMentionQuery(null)}
+                />
+                <button className={styles.send} onClick={submitText} disabled={sending || !input.trim()} aria-label="发送">
+                  <Send className="h-4 w-4" />
+                </button>
+              </div>
             </footer>
           </div>
         </motion.div>
@@ -1725,6 +1930,7 @@ interface ChatRow {
   kind: "text" | "sticker"
   content: string
   created_at: string
+  reply_to?: ReplySnapshot | null
 }
 interface DmRow {
   id: string
@@ -1733,6 +1939,7 @@ interface DmRow {
   content: string
   created_at: string
   read_at?: string | null
+  reply_to?: ReplySnapshot | null
 }
 
 function mapHall(m: ChatRow): DisplayMsg {
@@ -1747,6 +1954,7 @@ function mapHall(m: ChatRow): DisplayMsg {
     kind: m.kind,
     content: m.content,
     created_at: m.created_at,
+    reply_to: m.reply_to ?? null,
   }
 }
 function mapDm(m: DmRow, myId: string, myName: string, partner: Partner): DisplayMsg {
@@ -1763,6 +1971,7 @@ function mapDm(m: DmRow, myId: string, myName: string, partner: Partner): Displa
     content: m.content,
     created_at: m.created_at,
     read_at: m.read_at ?? null,
+    reply_to: m.reply_to ?? null,
   }
 }
 

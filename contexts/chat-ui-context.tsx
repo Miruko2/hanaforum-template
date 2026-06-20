@@ -36,6 +36,12 @@ type ChatUIValue = {
   startDmWith: (target: DmTarget) => void
   // floating-chat 处理完 pendingDm 后调用，避免重复触发
   clearPendingDm: () => void
+  // 外部（铃铛/通知弹窗点击 chat_mention）请求打开聊天并切到大厅
+  pendingHall: boolean
+  // 打开聊天面板并请求切到大厅（@提及/引用都发生在大厅）
+  openHall: () => void
+  // floating-chat 处理完 pendingHall 后调用，避免重复触发
+  clearPendingHall: () => void
 }
 
 const ChatUIContext = createContext<ChatUIValue | null>(null)
@@ -44,6 +50,7 @@ export function ChatUIProvider({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false)
   const [unread, setUnread] = useState(0)
   const [pendingDm, setPendingDm] = useState<DmTarget | null>(null)
+  const [pendingHall, setPendingHall] = useState(false)
   const toggle = () => setOpen((o) => !o)
 
   const startDmWith = useCallback((target: DmTarget) => {
@@ -52,9 +59,27 @@ export function ChatUIProvider({ children }: { children: ReactNode }) {
   }, [])
   const clearPendingDm = useCallback(() => setPendingDm(null), [])
 
+  const openHall = useCallback(() => {
+    setPendingHall(true)
+    setOpen(true)
+  }, [])
+  const clearPendingHall = useCallback(() => setPendingHall(false), [])
+
   return (
     <ChatUIContext.Provider
-      value={{ open, setOpen, toggle, unread, setUnread, pendingDm, startDmWith, clearPendingDm }}
+      value={{
+        open,
+        setOpen,
+        toggle,
+        unread,
+        setUnread,
+        pendingDm,
+        startDmWith,
+        clearPendingDm,
+        pendingHall,
+        openHall,
+        clearPendingHall,
+      }}
     >
       {children}
     </ChatUIContext.Provider>
@@ -74,6 +99,9 @@ export function useChatUI(): ChatUIValue {
       pendingDm: null,
       startDmWith: () => {},
       clearPendingDm: () => {},
+      pendingHall: false,
+      openHall: () => {},
+      clearPendingHall: () => {},
     }
   }
   return ctx

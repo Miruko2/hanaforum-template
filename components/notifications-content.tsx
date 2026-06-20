@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useNotifications } from "@/contexts/notification-context"
+import { useChatUI } from "@/contexts/chat-ui-context"
 import { Button } from "@/components/ui/button"
 import { Loader2, MailX } from "lucide-react"
 import { navigateTo } from "@/lib/app-navigation"
@@ -24,6 +25,7 @@ import { useIsMobile } from "@/hooks/use-mobile"
 export default function NotificationsContent() {
   const { user, isAdmin } = useSimpleAuth()
   const { notifications, unreadCount, isLoading, markAsRead, markAllAsRead } = useNotifications()
+  const { openHall } = useChatUI()
   const { toast } = useToast()
   const isMobile = useIsMobile()
   const router = useRouter()
@@ -54,6 +56,12 @@ export default function NotificationsContent() {
         // 先立即标记已读（乐观更新）
         if (!notification.is_read) {
           markAsRead(notification.id)
+        }
+
+        // 聊天提及：打开聊天面板并切到大厅（@提及/引用都发生在大厅，无帖子可跳）
+        if (notification.type === "chat_mention") {
+          openHall()
+          return
         }
 
         // 公告类通知：打开公告弹窗
@@ -128,7 +136,7 @@ export default function NotificationsContent() {
         setLoadingPostId(null)
       }
     },
-    [markAsRead, user, toast, router],
+    [markAsRead, user, toast, router, openHall],
   )
 
   // 模态框里的点赞交互（沿用首页 PostCard 的乐观更新套路）
