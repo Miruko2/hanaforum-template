@@ -19,6 +19,7 @@ type FriendLink = { name: string; url: string; desc?: string; tag?: string }
 // 真朋友的个人站 —— 平等互链、彼此推荐，和「申请收录」性质的导航站完全分开。
 // 新增一位朋友 = 往这里加一条。
 const FRIEND_SITES: FriendLink[] = [
+  { name: "Ar-Sr-Na 主站", url: "https://arsrna.cn/", desc: "创意，从一条时间轴开始", tag: "科技 · 官网" },
   { name: "Ar-Sr-Na", url: "https://www.arirs.cn/", desc: "就是放文章的地方", tag: "前端 · 技术博客" },
 ]
 
