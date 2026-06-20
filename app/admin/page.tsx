@@ -49,6 +49,9 @@ type CachedAdminData = {
   users: any[]
   // 注册用户真实总数（count: "exact"，不受 PostgREST max-rows=1000 限制）
   userCount: number
+  // 曾参与用户数（曾发帖/评论/弹幕/私信/聊天的去重人数，真实活跃口径）。
+  // 跨表去重 PostgREST 做不到，故由 /api/admin/engaged-count 调只读函数聚合。
+  engagedCount: number
   posts: any[]
   admins: any[]
   hanakoAllowedUsers: any[]
@@ -112,6 +115,7 @@ export default function AdminPage() {
   const [activeTab, setActiveTab] = useState("admins")
   const [users, setUsers] = useState<any[]>(cachedAdminData?.users || [])
   const [userCount, setUserCount] = useState<number>(cachedAdminData?.userCount ?? 0)
+  const [engagedCount, setEngagedCount] = useState<number>(cachedAdminData?.engagedCount ?? 0)
   const [posts, setPosts] = useState<any[]>(cachedAdminData?.posts || [])
   const [admins, setAdmins] = useState<any[]>(cachedAdminData?.admins || [])
   const [newAdminEmail, setNewAdminEmail] = useState("")
@@ -283,8 +287,23 @@ export default function AdminPage() {
   const loadData = async () => {
     setLoading(true)
     try {
+      // 曾参与用户数：跨内容表去重 PostgREST 做不到，走 service_role 的 admin API
+      // 调只读函数。失败（未登录/非管理员/函数未建/网络）返回 null，下方沿用上次值、不清零。
+      const engagedCountPromise = (async (): Promise<number | null> => {
+        const { data: sessionData } = await supabase.auth.getSession()
+        const token = sessionData?.session?.access_token
+        if (!token) return null
+        const res = await fetch(apiUrl("/api/admin/engaged-count"), {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store",
+        })
+        if (!res.ok) return null
+        const j = await res.json().catch(() => null)
+        return typeof j?.engagedCount === "number" ? j.engagedCount : null
+      })()
+
       // 并行查询所有表
-      const [usersResult, postsResult, adminsResult, allowedResult, bannedResult] = await Promise.allSettled([
+      const [usersResult, postsResult, adminsResult, allowedResult, bannedResult, engagedResult] = await Promise.allSettled([
         supabase
           .from("profiles")
           .select("id, username, avatar_url, updated_at", { count: "exact" })
@@ -311,6 +330,7 @@ export default function AdminPage() {
           .from("banned_users")
           .select("user_id, reason, created_at, expires_at")
           .order("created_at", { ascending: false }),
+        engagedCountPromise,
       ])
 
       // 收集本次拉到的结果到 snapshot，最后一并写 state + 缓存
@@ -318,6 +338,7 @@ export default function AdminPage() {
       const snapshot: CachedAdminData = {
         users,
         userCount,
+        engagedCount,
         posts,
         admins,
         hanakoAllowedUsers,
@@ -329,6 +350,11 @@ export default function AdminPage() {
         snapshot.users = usersResult.value.data || []
         // 真实总数取 count（不受 1000 行限制）；拿不到则退回列表长度
         snapshot.userCount = usersResult.value.count ?? snapshot.users.length
+      }
+
+      // 曾参与用户数（拿不到/失败时沿用上次值，不清零）
+      if (engagedResult.status === "fulfilled" && typeof engagedResult.value === "number") {
+        snapshot.engagedCount = engagedResult.value
       }
 
       // 帖子 / 管理员 / 白名单都要把 user_id 翻成用户名。原来这三块各自
@@ -402,6 +428,7 @@ export default function AdminPage() {
       // 一并提交：组件 state + 模块缓存
       setUsers(snapshot.users)
       setUserCount(snapshot.userCount)
+      setEngagedCount(snapshot.engagedCount)
       setPosts(snapshot.posts)
       setAdmins(snapshot.admins)
       setHanakoAllowedUsers(snapshot.hanakoAllowedUsers)
@@ -1233,12 +1260,30 @@ export default function AdminPage() {
                   <CardTitle>用户列表</CardTitle>
                   <CardDescription>查看所有注册用户</CardDescription>
                 </div>
-                {/* 注册用户总数：等于下方列表行数（profiles 表） */}
-                <div className="shrink-0 text-right">
-                  <div className="text-3xl font-bold text-lime-400 tabular-nums leading-none">
-                    {userCount}
+                {/* 右上统计：注册总数(参考) + 曾参与用户(真实活跃口径，主指标) */}
+                <div className="shrink-0 flex items-start gap-5 sm:gap-7 text-right">
+                  {/* 注册用户总数：profiles 表 count（不受 1000 行限制）。仅作参考，
+                      含那波把 SMTP 撑爆的注册潮，不代表真实活跃。 */}
+                  <div title="profiles 全量注册数（含注册潮，仅作参考）">
+                    <div className="text-3xl font-bold text-gray-300 tabular-nums leading-none">
+                      {userCount}
+                    </div>
+                    <div className="mt-1 text-xs text-gray-500">注册总数</div>
                   </div>
-                  <div className="mt-1 text-xs text-gray-500">注册用户总数</div>
+                  {/* 曾参与用户：曾发帖/评论/弹幕/私信/聊天的去重人数 = 真实活跃口径 */}
+                  <div title="曾发帖 / 评论 / 弹幕 / 私信 / 聊天室发言的去重用户数（真实参与用户，免疫注册潮）">
+                    <div className="text-3xl font-bold text-lime-400 tabular-nums leading-none">
+                      {engagedCount}
+                    </div>
+                    <div className="mt-1 text-xs text-gray-500">
+                      曾参与用户
+                      {userCount > 0 && engagedCount > 0 && (
+                        <span className="ml-1 text-gray-600">
+                          · 占注册 {((engagedCount / userCount) * 100).toFixed(1)}%
+                        </span>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
             </CardHeader>
