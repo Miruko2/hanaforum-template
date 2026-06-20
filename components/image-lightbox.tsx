@@ -11,7 +11,7 @@ import { detectIsAndroidApp } from "@/app/music/_lib/useIsAndroid"
 interface ImageLightboxProps {
   /** 单图直链；为 null/空时不展示灯箱（向后兼容） */
   src?: string | null
-  /** 单图主体遮罩直链；提供且非安卓 APK 时，单图灯箱用主体视差渲染（无残影） */
+  /** 单图主体遮罩直链；提供时单图灯箱用主体视差渲染（无残影，含安卓 APK——组件内部对 WebView 降级） */
   maskSrc?: string | null
   /** 多图直链数组；非空时优先于 src，启用左右切换 + 圆点指示器 */
   images?: string[] | null
@@ -332,16 +332,19 @@ export default function ImageLightbox({
                 ))}
               </div>
             </>
-          ) : maskSrc && !isAndroidApp ? (
+          ) : maskSrc ? (
             // 单图 + 有遮罩：主体视差（无残影）。透明 ghost 图定出 contain 尺寸，视差画布盖其上。
-            // 点击图片不关闭（在交互），点背景/×/Esc 关闭。
+            // 点击图片不关闭（在交互），点背景/×/Esc 关闭。安卓 APK 也启用（视差组件内部
+            // 对 WebView 做了瞬显/触摸回中等降级；WebGL 失败仍自动回退静态图）。
+            // 入场动画：APK 走纯 opacity（缩放几何动画与 canvas 首帧栅格化并发会撕裂 WebView
+            // backing buffer），其余平台 spring 缩放弹入。
             <motion.div
               className="relative"
               onClick={(e) => e.stopPropagation()}
-              initial={{ scale: 0.85, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.7, opacity: 0 }}
-              transition={{ type: "spring", stiffness: 300, damping: 26, mass: 0.7 }}
+              initial={isAndroidApp ? { opacity: 0 } : { scale: 0.85, opacity: 0 }}
+              animate={isAndroidApp ? { opacity: 1 } : { scale: 1, opacity: 1 }}
+              exit={isAndroidApp ? { opacity: 0 } : { scale: 0.7, opacity: 0 }}
+              transition={isAndroidApp ? { duration: 0.2 } : { type: "spring", stiffness: 300, damping: 26, mass: 0.7 }}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img

@@ -3,10 +3,12 @@
 // 主体视差渲染组件：一张图 + 一张深度遮罩（主体近/背景远），用 WebGL 着色器
 // 按深度位移 UV，鼠标/拖动时主体跟手、背景几乎不动。单图位移、无第二层副本 →
 // 无残影。遮罩缺失 / WebGL 不可用 / 任何加载失败 → 自动回退原生 <img>。
-// 调用方负责「是否启用」的判定（单图、有遮罩、非安卓 APK），见 post-card-image。
+// 调用方负责「是否启用」的判定（单图 + 有遮罩），见 image-lightbox 单图分支。
+// 安卓 APK 也启用：组件内部对 WebView 做降级（canvas 瞬显不淡入、触摸抬指回中）。
 
 import { useEffect, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
+import { detectIsAndroidApp } from "@/app/music/_lib/useIsAndroid"
 
 interface SubjectParallaxProps {
   src: string // 高清主图 URL（已 cdnUrl 处理）
@@ -57,6 +59,10 @@ export default function SubjectParallax({
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [ready, setReady] = useState(false)
   const [failed, setFailed] = useState(false)
+  // 安卓 APK(Capacitor WebView)：去掉 canvas 淡入过渡，就绪即瞬显。WebView 合成器对
+  // 「不透明 WebGL canvas 的 opacity 渐变」易闪/撕裂；瞬显更稳（canvas 只在纹理就绪、
+  // 画完首帧后才显示，无半成品）。桌面/移动浏览器保留 300ms 淡入。
+  const [isApp] = useState(detectIsAndroidApp)
 
   useEffect(() => {
     const wrap = wrapRef.current!
@@ -195,6 +201,9 @@ export default function SubjectParallax({
         wrap.addEventListener("pointerdown", onPointer)
         wrap.addEventListener("pointerleave", onLeave)
         wrap.addEventListener("pointercancel", onLeave)
+        // 触屏抬指回中：pointerup 在触摸结束时触发（部分 WebView 不可靠地补发
+        // pointerleave，故显式监听 pointerup），松手后图缓动回正、不停在歪位。
+        wrap.addEventListener("pointerup", onLeave)
         raf = requestAnimationFrame(frame)
       })
       .catch((e) => fail("图片/遮罩加载失败（跨域 CORS 或 404？）: " + ((e as Error)?.message || e)))
@@ -210,6 +219,7 @@ export default function SubjectParallax({
       wrap.removeEventListener("pointerdown", onPointer)
       wrap.removeEventListener("pointerleave", onLeave)
       wrap.removeEventListener("pointercancel", onLeave)
+      wrap.removeEventListener("pointerup", onLeave)
       try {
         glc.deleteTexture(texImg); glc.deleteTexture(texDepth)
         glc.deleteBuffer(buf); glc.deleteProgram(prog)
@@ -236,7 +246,11 @@ export default function SubjectParallax({
       {!failed && (
         <canvas
           ref={canvasRef}
-          className={cn("absolute inset-0 w-full h-full transition-opacity duration-300", ready ? "opacity-100" : "opacity-0")}
+          className={cn(
+            "absolute inset-0 w-full h-full",
+            !isApp && "transition-opacity duration-300",
+            ready ? "opacity-100" : "opacity-0",
+          )}
           style={{ display: "block" }}
         />
       )}
