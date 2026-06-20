@@ -24,7 +24,7 @@ import { guardVerify } from "@/lib/verify-gate-bus"
 import ImageLightbox from "@/components/image-lightbox"
 import { StickerPicker } from "@/components/stickers/sticker-picker"
 import { makeStickerToken } from "@/lib/stickers"
-import { generateMatte, matteToPngBlob, isMatteSupported } from "@/lib/anime-matte"
+import { generateMatte, matteToWebpBlob, isMatteSupported } from "@/lib/anime-matte"
 import { postMaskName, postImageObjectName } from "@/lib/post-image-mask"
 import { useIsMobile } from "@/hooks/use-mobile"
 
@@ -372,14 +372,14 @@ export function CreatePostForm({
                   : "准备抠像引擎…",
             )
           })
-          const blob = await matteToPngBlob(matte)
+          const blob = await matteToWebpBlob(matte)
           const coverName = postImageObjectName(cover)
           const maskName = coverName ? postMaskName(coverName) : null
           if (maskName) {
             const up = await supabase.storage.from("post-images").upload(maskName, blob, {
               cacheControl: "31536000",
               upsert: true,
-              contentType: "image/png",
+              contentType: "image/webp",
             })
             if (!up.error) {
               maskUrl = supabase.storage.from("post-images").getPublicUrl(maskName).data.publicUrl

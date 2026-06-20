@@ -154,9 +154,12 @@ export async function generateMatte(
   return out
 }
 
-// 把遮罩 canvas 导出为 PNG blob（灰度，体积小）。
-export function matteToPngBlob(canvas: HTMLCanvasElement): Promise<Blob> {
+// 把遮罩 canvas 导出为 webp blob（有损 0.85）。遮罩是平滑深度图、渲染端还会再羽化，
+// 有损 webp 画质无感损失，体积比无损 PNG 小一个数量级（省存储/egress）。
+// 现代桌面浏览器 canvas 均支持 webp 编码；发帖抠像开关本就桌面专属，故不做 png 回退
+//（极端不支持时 toBlob 会回退 png 字节，<img>/Image() 按内容嗅探仍能解码，不至于崩）。
+export function matteToWebpBlob(canvas: HTMLCanvasElement): Promise<Blob> {
   return new Promise((resolve, reject) => {
-    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("toBlob failed"))), "image/png")
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("toBlob failed"))), "image/webp", 0.85)
   })
 }

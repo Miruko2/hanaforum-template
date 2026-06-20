@@ -1,12 +1,13 @@
 // 帖子图「主体遮罩」文件名约定，照搬 lib/post-image-thumb.ts 的做法。
-// 遮罩是灰度 PNG（主体≈白、背景≈黑），与主图同桶（post-images），按 `_mask.png` 命名。
+// 遮罩是灰度 webp（主体≈白、背景≈黑），与主图同桶（post-images），按 `_mask.webp` 命名。
 // 用于「主体视差」效果（components/subject-parallax + lib/anime-matte）。
-// 渲染端以帖子的 image_mask_url 列为准；本文件只负责发帖时的命名/解析。
+// 渲染端以帖子的 image_mask_url 列为准（按存储 URL 原样读，不假设扩展名），故旧 `_mask.png`
+// 存量遮罩仍可正常加载；本文件只负责发帖时的命名/解析。
 
 export const POST_MASK_SUFFIX = "_mask"
-export const POST_MASK_EXT = "png"
+export const POST_MASK_EXT = "webp"
 
-// 主图存储文件名 → 遮罩文件名（abc.webp → abc_mask.png）。GIF 不做遮罩。
+// 主图存储文件名 → 遮罩文件名（abc.webp → abc_mask.webp）。GIF 不做遮罩。
 export function postMaskName(mainName: string): string | null {
   if (/\.gif$/i.test(mainName)) return null
   const dot = mainName.lastIndexOf(".")

@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from "react"
 import { cn } from "@/lib/utils"
 import type { Post } from "@/lib/types"
-import { ImageOff, Copy } from "lucide-react"
+import { ImageOff, Copy, Box } from "lucide-react"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { postThumbUrl } from "@/lib/post-image-thumb"
 import { postImageList } from "@/lib/post-images"
@@ -234,6 +234,14 @@ export default function PostCardImage({
         <div className="pointer-events-none absolute right-2 top-2 z-10 flex items-center gap-1 rounded-full bg-black/55 px-2 py-1 text-xs font-medium text-white backdrop-blur-sm">
           <Copy className="h-3.5 w-3.5" />
           {imageCount}
+        </div>
+      )}
+      {/* 3D 视差角标：单图且有遮罩 → 标记「点开放大可看主体视差」，让浏览的用户知道。
+          列表卡片与详情都显示（与多图互斥，单图才有遮罩）。lime 品牌色点出这是特殊效果。 */}
+      {imageCount === 1 && post.image_mask_url && (
+        <div className="pointer-events-none absolute left-2 top-2 z-10 flex items-center gap-1 rounded-full bg-black/55 px-2 py-1 text-xs font-semibold text-lime-300 ring-1 ring-lime-400/30 backdrop-blur-sm">
+          <Box className="h-3.5 w-3.5" />
+          3D
         </div>
       )}
     </div>
