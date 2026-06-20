@@ -185,14 +185,25 @@ export default function SubjectParallax({
         // 主图纹理
         glc.activeTexture(glc.TEXTURE0); glc.bindTexture(glc.TEXTURE_2D, texImg)
         glc.texImage2D(glc.TEXTURE_2D, 0, glc.RGBA, glc.RGBA, glc.UNSIGNED_BYTE, image)
-        // 深度纹理 = 遮罩，做一遍羽化让位移过渡平滑。羽化越宽 → 主体↔背景的深度交界
-        // 从"硬边"变成渐变带，大位移时的错切撕扯被摊开、不再扎眼（代价：边缘略微"化开"）。
+        // 深度纹理 = 遮罩，做一遍羽化让位移过渡平滑（主体↔背景交界从硬边变渐变带，
+        // 否则大位移时像「没羽化的抠图硬贴」很突兀）。
+        // ⚠️ 不用 ctx.filter="blur()"：iOS/iPadOS WebKit 长期不支持 canvas 2D filter
+        //    （iOS<17 完全无效、之后也有 quirks），会被静默忽略 → iPad 遮罩没羽化、硬边
+        //    （PC/安卓 Chromium 内核支持故正常，「偏偏 iPad 突兀」即此）。改用「缩小再放大」：
+        //    downscale 做块平均、upscale 走 bilinear 插值 → 平滑渐变 ≈ 模糊，全平台一致、iOS 安全。
         const mw = mask.naturalWidth, mh = mask.naturalHeight
+        const feather = Math.max(1, Math.round(Math.max(mw, mh) * 0.017)) // 羽化半径(px)，≈缩小倍率
+        const sw = Math.max(1, Math.round(mw / feather))
+        const sh = Math.max(1, Math.round(mh / feather))
+        const small = document.createElement("canvas"); small.width = sw; small.height = sh
+        const sctx = small.getContext("2d")!
+        sctx.imageSmoothingEnabled = true
+        sctx.drawImage(mask, 0, 0, sw, sh) // 缩小（块平均）
         const dc = document.createElement("canvas"); dc.width = mw; dc.height = mh
         const dx = dc.getContext("2d")!
-        dx.filter = `blur(${Math.max(1, Math.round(Math.max(mw, mh) * 0.017))}px)`
-        dx.drawImage(mask, 0, 0)
-        dx.filter = "none"
+        dx.imageSmoothingEnabled = true
+        dx.imageSmoothingQuality = "high"
+        dx.drawImage(small, 0, 0, mw, mh) // 放大（bilinear → 平滑渐变 = 羽化）
         glc.activeTexture(glc.TEXTURE1); glc.bindTexture(glc.TEXTURE_2D, texDepth)
         glc.texImage2D(glc.TEXTURE_2D, 0, glc.RGBA, glc.RGBA, glc.UNSIGNED_BYTE, dc)
         resize()
