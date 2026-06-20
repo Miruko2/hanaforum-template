@@ -31,7 +31,7 @@ import {
   navigateWithTransition,
   ringDirection,
 } from "@/lib/view-transition-nav"
-import { Clapperboard, Zap, Music } from "lucide-react"
+import { Clapperboard, Zap, Music, Link2 } from "lucide-react"
 
 // Navigation 内用 useSearchParams 读 ?category=xxx 高亮分类；
 // output:'export' 静态构建下必须包 Suspense（见底部 default export）。
@@ -245,6 +245,7 @@ function NavigationContent() {
     { key: "live", icon: <Zap className="h-5 w-5" />, zh: "弹幕墙", en: "DANMAKU", tone: "pink", active: pathname === "/live", onClick: () => { flipNav("/live"); closeMobileMenu() } },
     { key: "cinema", icon: <Clapperboard className="h-5 w-5" />, zh: inCinema ? "退出影院" : "影院模式", en: "CINEMA", tone: "pink", active: inCinema, onClick: () => { toggleCinemaMode(); closeMobileMenu() } },
     { key: "music", icon: <Music className="h-5 w-5" />, zh: "音乐", en: "MUSIC", tone: "pink", active: pathname === "/music", onClick: () => { flipNav("/music"); closeMobileMenu() } },
+    { key: "links", icon: <Link2 className="h-5 w-5" />, zh: "友情链接", en: "FRIENDS", tone: "lime", active: pathname === "/links", onClick: () => { flipNav("/links"); closeMobileMenu() } },
   ]
   if (user) {
     actionCards.push({ key: "profile", icon: <User className="h-5 w-5" />, zh: "个人中心", en: "PROFILE", tone: "lime", active: pathname === "/profile", onClick: () => { flipNav("/profile"); closeMobileMenu() } })
@@ -334,6 +335,21 @@ function NavigationContent() {
                 )}
               >
                 <Music className="h-4 w-4" />
+              </Link>
+
+              {/* 友情链接 */}
+              <Link
+                href="/links"
+                title="友情链接"
+                onClick={(e) => handleFlipLink(e, "/links")}
+                className={cn(
+                  "flex items-center justify-center h-9 w-9 rounded-xl transition-all duration-200",
+                  pathname === "/links"
+                    ? "bg-lime-400/20 text-lime-400 shadow-lg"
+                    : "text-gray-300 hover:text-lime-400 hover:bg-white/10",
+                )}
+              >
+                <Link2 className="h-4 w-4" />
               </Link>
 
               {isAdmin && (

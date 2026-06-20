@@ -401,6 +401,66 @@ body {
   }
 }
 
+/* ============================================================
+ * 友情链接卡片 hover（2026-06-20）—— 复刻首页帖子卡：
+ * 聚焦放大上浮 + 邻卡缩小后退 + 流光扫过（复用 cardSheenSweep 关键帧）。
+ * 结构同帖子卡：transform 挂 wrapper(.friend-card-wrap)、毛玻璃 + 流光挂内层
+ * (.friend-card)，避免 transform 与 backdrop-filter 同元素相互干扰。仅桌面指针设备。
+ * ============================================================ */
+.friend-card-wrap {
+  position: relative; /* 让 hover 时的 z-index 生效 */
+  transition: transform 0.45s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.friend-card {
+  position: relative;
+  overflow: hidden; /* 裁切流光，贴合圆角 */
+}
+
+/* 流光层基础态：斜向高光，停在卡左外侧、透明，等 hover 触发扫过 */
+.friend-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(
+    115deg,
+    transparent 38%,
+    rgba(255, 255, 255, 0.16) 47%,
+    rgba(190, 242, 100, 0.12) 53%,
+    transparent 62%
+  );
+  transform: translateX(-130%);
+  opacity: 0;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  /* 1) 悬停卡放大上浮 + 抬到同层之上，挤进邻卡留白 */
+  .friend-card-wrap:hover {
+    transform: translateY(-6px) scale(1.05);
+    z-index: 20;
+  }
+  /* 2) 同组未悬停的邻卡轻微缩小 —— 聚焦其一、其余后退的景深 */
+  .friend-grid:hover .friend-card-wrap:not(:hover) {
+    transform: scale(0.96);
+  }
+  /* 3) 流光扫过卡面 */
+  .friend-card-wrap:hover .friend-card::before {
+    animation: cardSheenSweep 0.9s cubic-bezier(0.23, 1, 0.32, 1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .friend-card-wrap:hover,
+  .friend-grid:hover .friend-card-wrap:not(:hover) {
+    transform: none !important;
+  }
+  .friend-card-wrap:hover .friend-card::before {
+    animation: none !important;
+  }
+}
+
 /* 激活状态的卡片 */
 .glass-card.active {
   background: linear-gradient(
