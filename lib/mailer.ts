@@ -126,7 +126,12 @@ type Provider = { name: string; send: (to: string, code: string) => Promise<Outc
 
 function buildProviders(): Provider[] {
   const list: Provider[] = []
-  if (RESEND_API_KEY && RESEND_FROM) list.push({ name: "resend", send: sendViaResend })
+  // EMAIL_DISABLE_RESEND=1 时跳过 Resend，强制走 SMTP 兜底（Brevo）。
+  // 用途：测试 Brevo 兜底是否可用；或 Resend 故障时临时切走。
+  const resendOff = process.env.EMAIL_DISABLE_RESEND === "1"
+  if (RESEND_API_KEY && RESEND_FROM && !resendOff) {
+    list.push({ name: "resend", send: sendViaResend })
+  }
   for (const cfg of smtpFallbacks) {
     list.push({ name: cfg.name || cfg.host, send: (to, code) => sendViaSmtp(cfg, to, code) })
   }
