@@ -11,6 +11,7 @@ import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useToast } from "@/hooks/use-toast"
 import { StickerPicker } from "@/components/stickers/sticker-picker"
 import { makeStickerToken } from "@/lib/stickers"
+import { guardVerify, openVerifyGate } from "@/lib/verify-gate-bus"
 
 interface CommentFormProps {
   postId: string
@@ -84,6 +85,10 @@ export default function CommentForm({
         return
       }
 
+      // 懒触发邮箱验证：未验证 → 弹验证窗并中止本次提交（DB 触发器仍兜底）。
+      // 放在乐观更新之前，避免未验证用户的评论被乐观插入后又被 DB 拒。
+      if (guardVerify()) return
+
       try {
         setIsSubmitting(true)
 
@@ -128,7 +133,11 @@ export default function CommentForm({
             
           } catch (bgError: any) {
             console.error("后台评论提交失败:", bgError)
-            // 不再显示错误提示，只记录日志
+            // 未验证邮箱（DB 兜底）：弹验证窗（乐观插入的这条会被 realtime/刷新纠正）
+            const bmsg = bgError?.message || ""
+            if (/EMAIL_UNVERIFIED/i.test(bmsg) || bgError?.code === "23514") {
+              openVerifyGate()
+            }
           }
         } else {
           // 传统模式：等待服务器响应
@@ -154,7 +163,14 @@ export default function CommentForm({
         }
       } catch (error: any) {
         console.error(isReply ? "发表回复失败:" : "发表评论失败:", error)
-        
+
+        // 未验证邮箱（DB 兜底）：弹验证窗而非裸的「发表失败」。
+        const emsg = error?.message || ""
+        if (/EMAIL_UNVERIFIED/i.test(emsg) || error?.code === "23514") {
+          openVerifyGate()
+          return
+        }
+
         // 静态导出环境下的详细错误处理
         let errorMessage = "发表时出现错误，请稍后重试"
         

@@ -75,7 +75,7 @@ export default function EmailVerifyGate() {
       const [{ data: st }, { data: ev }] = await Promise.all([
         supabase
           .from("verification_state")
-          .select("enforce_since, disabled_until")
+          .select("enforce_since, disabled_until, enforce_all")
           .eq("id", 1)
           .maybeSingle(),
         supabase
@@ -86,6 +86,7 @@ export default function EmailVerifyGate() {
       ])
       const enforceSince = st?.enforce_since ? new Date(st.enforce_since) : null
       const disabledUntil = st?.disabled_until ? new Date(st.disabled_until) : null
+      const enforceAll = !!st?.enforce_all
       const verified = !!ev?.verified_at
       const createdAt = user.created_at ? new Date(user.created_at) : null
       const now = new Date()
@@ -93,8 +94,8 @@ export default function EmailVerifyGate() {
         !!enforceSince &&
         !verified &&
         !(disabledUntil && disabledUntil > now) &&
-        !!createdAt &&
-        createdAt > enforceSince
+        // enforce_all=true：所有未验证者都要验证；否则仅 enforce_since 之后注册的新用户
+        (enforceAll || (!!createdAt && createdAt > enforceSince))
       setNeedsVerify(need)
       setVerifyNeeded(need) // 同步给总线，供发帖/发弹幕入口在提交前同步判断是否拦截
     } catch {
