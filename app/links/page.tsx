@@ -33,6 +33,7 @@ const ACG_NAV_SITES: FriendLink[] = [
   { name: "AcgnHub 萌导航", url: "https://www.acgfans.me/", desc: "你的二次元萌导航姬" },
   { name: "二次元宝藏导航", url: "https://acg.baozangdh.com/", desc: "可能是国内最好的二次元导航" },
   { name: "万萌导航", url: "https://hao.wanmoe.cn/", desc: "ACG · 二次元导航" },
+  { name: "ACG导航站", url: "https://www.acgdhz.com/", desc: "专注 ACG 动漫 · 游戏 · 漫画" },
 ]
 
 // 本站信息：方便对方站长一键复制，加到他们的友链页
