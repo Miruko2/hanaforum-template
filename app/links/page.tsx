@@ -24,13 +24,9 @@ const FRIEND_SITES: FriendLink[] = [
 
 // 二次元 / ACG 导航站。想申请收录的站点往这里加一条即可。
 const ACG_NAV_SITES: FriendLink[] = [
-  { name: "萌站·次元导航", url: "https://www.moe321.com/", desc: "ACG 二次元网址导航之门" },
-  { name: "ACG 导航", url: "https://www.acgdh.cc/", desc: "二次元（ACGN）网站导航姬" },
-  { name: "ACG 盒子", url: "https://www.acgbox.link/", desc: "专注 ACG 的导航盒子" },
+  { name: "萌站·次元导航", url: "https://www.moe321.com/", desc: "ACG 二次元网址导航之门" },  { name: "ACG 盒子", url: "https://www.acgbox.link/", desc: "专注 ACG 的导航盒子" },
   { name: "ACGN 导航", url: "https://nav.acgn.city/", desc: "AcgN·City 二次元导航" },
-  { name: "动漫世界导航", url: "https://nav.acgsq.com/", desc: "一起探索二次元动漫" },
-  { name: "一流导航", url: "https://16map.com/acg", desc: "优质网址大全 · 二次元" },
-  { name: "终极导航", url: "https://www.zjnav.com/acg", desc: "动漫 · 漫画网站大全" },
+  { name: "动漫世界导航", url: "https://nav.acgsq.com/", desc: "一起探索二次元动漫" },  { name: "终极导航", url: "https://www.zjnav.com/acg", desc: "动漫 · 漫画网站大全" },
   { name: "快导航网", url: "https://www.hifast.cn/acg", desc: "ACG 二次元导航" },
   { name: "AcgnHub 萌导航", url: "https://www.acgfans.me/", desc: "你的二次元萌导航姬" },
   { name: "二次元宝藏导航", url: "https://acg.baozangdh.com/", desc: "可能是国内最好的二次元导航" },
