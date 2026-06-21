@@ -7,7 +7,7 @@
 // getPosts / getComments / 通知等大量调用）保持不动——本模块只负责
 // 「当前登录用户自己」的资料读写，避免牵动既有调用方。
 
-import { supabase } from "./supabaseClient"
+import { supabase, getAccessTokenSafe } from "./supabaseClient"
 import { compressImage } from "./image-compress"
 
 // 个人资料。background_url / bio 为社交资料字段（见 scripts/2026-06-10-profiles-social-fields.sql）。
@@ -118,9 +118,18 @@ async function uploadToAvatars(
 ): Promise<string> {
   const { blob, ext, contentType } = await compressImage(file, maxEdge, quality)
   const path = `${filePath}.${ext}`
+  // 显式带上当前用户 access token：兜底 supabase-js 偶发不向 storage 请求注入
+  // Authorization 的问题（详见 getAccessTokenSafe）。否则上传以匿名身份发出，被 avatars
+  // 桶「仅 authenticated 可写」的 RLS 拒（new row violates row-level security policy）。
+  const token = await getAccessTokenSafe()
   const { error: uploadError } = await supabase.storage
     .from("avatars")
-    .upload(path, blob, { upsert: true, cacheControl: "31536000", contentType })
+    .upload(path, blob, {
+      upsert: true,
+      cacheControl: "31536000",
+      contentType,
+      ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
+    })
   if (uploadError) throw uploadError
   return supabase.storage.from("avatars").getPublicUrl(path).data.publicUrl
 }

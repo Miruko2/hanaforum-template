@@ -51,13 +51,16 @@ function getDomainInfo(url: string) {
 const connectionInfo = getDomainInfo(supabaseUrl);
 console.debug("🔧 Supabase客户端初始化:", connectionInfo);
 
+// 会话持久化所用的 localStorage 键。getAccessTokenSafe() 的本地兜底需与此完全一致。
+export const SUPABASE_AUTH_STORAGE_KEY = "supabase.auth.token"
+
 // 创建Supabase客户端 - 增强实时功能配置
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true,
-    storageKey: "supabase.auth.token",
+    storageKey: SUPABASE_AUTH_STORAGE_KEY,
   },
   realtime: {
     params: {
@@ -80,6 +83,34 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     },
   },
 })
+
+// 健壮获取当前用户的 access token（带本地兜底）。
+//
+// 背景：弱网 / VPN / WebView 等环境下，supabase-js 在发请求时内部调用的 getSession()
+// 偶发返回空，导致请求回落匿名 anon key 发出——典型症状是 storage 上传被 avatars 桶
+// 「仅 authenticated 可写」的 RLS 拒（new row violates row-level security policy），
+// 即便本地明明存着有效会话。这里先正常走 getSession（会按需刷新 token），失败或为空
+// 时直接读持久化会话兜底，做到「只要本地有有效会话就一定取得到 token」。
+export async function getAccessTokenSafe(): Promise<string | null> {
+  try {
+    const { data } = await supabase.auth.getSession()
+    if (data.session?.access_token) return data.session.access_token
+  } catch {
+    // 忽略：继续走本地兜底
+  }
+  if (typeof window !== "undefined") {
+    try {
+      const raw = window.localStorage.getItem(SUPABASE_AUTH_STORAGE_KEY)
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        return parsed?.access_token ?? parsed?.currentSession?.access_token ?? null
+      }
+    } catch {
+      // localStorage 不可用 / 解析失败：放弃兜底
+    }
+  }
+  return null
+}
 
 // 连接状态检查函数
 export async function testConnection() {
