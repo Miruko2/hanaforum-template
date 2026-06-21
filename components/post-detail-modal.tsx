@@ -530,8 +530,15 @@ export default function PostDetailModal({
               {useHorizontalLayout ? (
                 /* 横版：左图/文字Hero + 右滚动内容，整体高度由外层 maxHeight 控制 */
                 <div className="flex flex-row" style={{ height: "min(90vh, 840px)" }}>
-                  {/* 左：图片区或文字 Hero，占 45%。ref 供 hero 转场测量目标矩形。 */}
-                  <div ref={heroRef} className="relative w-[45%] shrink-0 bg-black/20">
+                  {/* 左：图片区或文字 Hero，占 45%。ref 供 hero 转场测量目标矩形。
+                      lb-keep-warm：灯箱打开时给图片区合成层「保活」，防安卓 WebView 丢弃其纹理
+                      → 消除「首次关闭灯箱图片揭开时冷重栅格化」的撕裂闪屏（见 globals.css 注释）。 */}
+                  <div
+                    ref={heroRef}
+                    className={`relative w-[45%] shrink-0 bg-black/20${
+                      lightboxOpen && IS_ANDROID ? " lb-keep-warm" : ""
+                    }`}
+                  >
                     {post.image_url ? (
                       hasMultipleImages ? (
                         // 多图：轮播（飞入期间隐藏，交接给飞行图）
@@ -603,8 +610,15 @@ export default function PostDetailModal({
                     overscrollBehavior: "contain",
                   }}
                 >
-                  {/* 图片区：随滚动上移，滚出顶部即消失 */}
-                  <div ref={heroRef} className="relative w-full overflow-hidden">
+                  {/* 图片区：随滚动上移，滚出顶部即消失。
+                      lb-keep-warm：灯箱打开时给图片区合成层「保活」，防安卓 WebView 丢弃其纹理
+                      → 消除「首次关闭灯箱图片揭开时冷重栅格化」的撕裂闪屏（见 globals.css 注释）。 */}
+                  <div
+                    ref={heroRef}
+                    className={`relative w-full overflow-hidden${
+                      lightboxOpen && IS_ANDROID ? " lb-keep-warm" : ""
+                    }`}
+                  >
                     {post.image_url ? (
                       hasMultipleImages ? (
                         // 多图（手机竖版）：轮播。飞入期间不隐藏（详情图缓存秒出做兜底），仅回飞时隐藏。
