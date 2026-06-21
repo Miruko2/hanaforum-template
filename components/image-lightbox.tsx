@@ -271,16 +271,21 @@ export default function ImageLightbox({
         <motion.div
           className="fixed inset-0 z-[80] flex items-center justify-center"
           onClick={onClose}
-          initial={{ opacity: 0 }}
+          // 安卓 app：遮罩入场瞬切 opacity:1（不做 0→1 淡入动画）。
+          // 根因：遮罩做 opacity 0→1 时它是半透明的，背后整个详情模态（多层合成：GlassMorph、
+          // PostCardImage 大图、背景遮罩…）每帧都要重新合成到这个半透明遮罩之下。安卓 WebView
+          // 合成器扛不住首次建立全屏合成层 + 同时每帧重合成背后复杂场景 → 撕裂闪屏（第一次
+          // 冷启动尤甚，因背后合成层刚建立、纹理未缓存；之后纹理缓存命中故不闪；详情页关再开
+          // 后纹理销毁、又回到冷启动态故又闪）。瞬切后遮罩一次性建立合成层、无半透明过渡帧，
+          // 背后无需逐帧重合成 → 不闪。观感：黑屏后 240ms 图片淡入（=「黑屏→图片浮现」），可接受。
+          // 关闭：遮罩 exit 带 delay 淡出，让图片先淡出销毁、遮罩后淡出，错开两层销毁。
+          // 桌面/iOS 维持原 opacity 淡入淡出（WebKit 合成器无此问题）。
+          initial={isAndroidApp ? { opacity: 1 } : { opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          // 安卓 app：关闭时遮罩 exit 延后 0.12s，让图片先淡出销毁、遮罩后淡出，
-          // 避免图片层与全屏遮罩层同时销毁/动画并发撕裂 backing buffer（关闭第一次闪的根因）。
-          // 打开的并发由下方 reveal 延迟（240ms）解决：遮罩 0.22s 淡入完成、合成层稳定后
-          // 图片才 reveal，两者不再撞帧。桌面/iOS 维持原 0.22s 淡入淡出。
           transition={
             isAndroidApp
-              ? { duration: 0.22, exit: { delay: 0.12, duration: 0.22 } }
+              ? { duration: 0, exit: { delay: 0.15, duration: 0 } }
               : { duration: 0.22 }
           }
           style={{
