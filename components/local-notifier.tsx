@@ -1,18 +1,17 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { Capacitor } from "@capacitor/core"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { supabase } from "@/lib/supabaseClient"
 
-// App 存活时把实时收到的私信 / 站内通知弹成「手机系统通知」（安卓本地通知，不依赖谷歌/厂商）。
-//
-// 【调试版·2026-06-21】系统通知一直不弹（App 内通知正常），原生链路隐形看不到。
-// 本版在 notify() 每步打 alert（最多 3 次），把"插件/权限/建渠道/schedule"的结果暴露出来，
-// 收到私信时弹框显示，便于定位卡点。定位后会移除这些 alert。
-// Web 端整段 no-op。
+// 【调试版2·2026-06-21·ln-dbg2】系统通知不弹，且 alert 没出现。改用「屏幕底部常驻浮层」
+// 显示：版本号 + 订阅状态 + 收到的事件 + notify 每步结果。比 alert 可靠（不被 ROM 拦）。
+// 看到底部绿色调试条=新代码已生效；据条里内容定位卡点。定位后整段移除。Web 端不显示。
 
 const LOCAL_NOTIF_ENABLED = true
+const DEBUG_OVERLAY = true
+const VERSION = "ln-dbg2"
 
 const NOTIF_TITLES: Record<string, string> = {
   chat_mention: "有人提到了你",
@@ -26,24 +25,10 @@ const NOTIF_TITLES: Record<string, string> = {
 
 let notifId = 1
 const nameCache = new Map<string, string>()
-
 let pluginPromise: Promise<any> | null = null
 let permRequested = false
 let listenerAdded = false
 let channelReady = false
-
-// 临时可见调试：把隐形的原生链路结果用弹框显示出来（最多 3 次，避免刷屏）
-let dbgCount = 0
-function dbg(msg: string) {
-  try {
-    if (dbgCount < 3) {
-      dbgCount++
-      window.alert("[通知调试] " + msg)
-    }
-  } catch {
-    /* ignore */
-  }
-}
 
 function isNative(): boolean {
   try {
@@ -62,84 +47,76 @@ async function getLN(): Promise<any | null> {
   return pluginPromise
 }
 
-async function notify(title: string, body: string, url: string) {
-  const steps: string[] = []
-  try {
-    const LN = await getLN()
-    steps.push(LN ? "plugin=OK" : "plugin=NULL")
-    if (!LN) {
-      dbg(steps.join(" | "))
-      return
-    }
-
-    if (!listenerAdded) {
-      listenerAdded = true
-      try {
-        await LN.addListener("localNotificationActionPerformed", (a: any) => {
-          const u = a?.notification?.extra?.url
-          if (u && typeof u === "string") {
-            try {
-              window.location.assign(u)
-            } catch {
-              /* ignore */
-            }
-          }
-        })
-      } catch {
-        /* ignore */
-      }
-    }
-
-    if (!permRequested) {
-      permRequested = true
-      try {
-        const p = await LN.checkPermissions()
-        steps.push("perm=" + (p?.display ?? "?"))
-        if (p?.display !== "granted") {
-          const r = await LN.requestPermissions()
-          steps.push("req=" + (r?.display ?? "?"))
-        }
-      } catch (e: any) {
-        steps.push("permERR=" + (e?.message ?? e))
-      }
-    }
-
-    if (!channelReady) {
-      try {
-        await LN.createChannel({
-          id: "messages",
-          name: "消息通知",
-          description: "私信与站内通知",
-          importance: 5,
-          visibility: 1,
-        })
-        channelReady = true
-        steps.push("channel=OK")
-      } catch (e: any) {
-        channelReady = false
-        steps.push("channelERR=" + (e?.message ?? e))
-      }
-    }
-
-    notifId = (notifId + 1) & 0x7fffffff
-    const n: any = { id: notifId, title, body: body || "", extra: { url } }
-    if (channelReady) n.channelId = "messages"
-    await LN.schedule({ notifications: [n] })
-    steps.push("schedule=OK")
-    dbg(steps.join(" | "))
-  } catch (e: any) {
-    steps.push("scheduleERR=" + (e?.message ?? e))
-    dbg(steps.join(" | "))
-  }
-}
-
 export default function LocalNotifier() {
   const { user } = useSimpleAuth()
+  const [log, setLog] = useState<string[]>([])
 
   useEffect(() => {
     if (!LOCAL_NOTIF_ENABLED) return
     if (!isNative() || !user?.id) return
     const myId = user.id
+    const push = (s: string) => setLog((l) => [...l, s].slice(-9))
+    push(`mounted uid=${myId.slice(0, 6)}`)
+
+    const notify = async (title: string, body: string, url: string) => {
+      try {
+        const LN = await getLN()
+        push(LN ? "plugin=OK" : "plugin=NULL")
+        if (!LN) return
+        if (!listenerAdded) {
+          listenerAdded = true
+          try {
+            await LN.addListener("localNotificationActionPerformed", (a: any) => {
+              const u = a?.notification?.extra?.url
+              if (u && typeof u === "string") {
+                try {
+                  window.location.assign(u)
+                } catch {
+                  /* ignore */
+                }
+              }
+            })
+          } catch {
+            /* ignore */
+          }
+        }
+        if (!permRequested) {
+          permRequested = true
+          try {
+            const p = await LN.checkPermissions()
+            push("perm=" + (p?.display ?? "?"))
+            if (p?.display !== "granted") {
+              const r = await LN.requestPermissions()
+              push("req=" + (r?.display ?? "?"))
+            }
+          } catch (e: any) {
+            push("permERR=" + (e?.message ?? e))
+          }
+        }
+        if (!channelReady) {
+          try {
+            await LN.createChannel({
+              id: "messages",
+              name: "消息通知",
+              description: "私信与站内通知",
+              importance: 5,
+              visibility: 1,
+            })
+            channelReady = true
+            push("channel=OK")
+          } catch (e: any) {
+            push("channelERR=" + (e?.message ?? e))
+          }
+        }
+        notifId = (notifId + 1) & 0x7fffffff
+        const n: any = { id: notifId, title, body: body || "", extra: { url } }
+        if (channelReady) n.channelId = "messages"
+        await LN.schedule({ notifications: [n] })
+        push("schedule=OK ✅")
+      } catch (e: any) {
+        push("scheduleERR=" + (e?.message ?? e))
+      }
+    }
 
     const dmCh = supabase
       .channel(`ln-dm-${myId}`)
@@ -148,6 +125,7 @@ export default function LocalNotifier() {
         { event: "INSERT", schema: "public", table: "dm_messages", filter: `recipient_id=eq.${myId}` },
         async (payload) => {
           const r = payload.new as { sender_id?: string; kind?: string; content?: string }
+          push("dm事件 from=" + String(r?.sender_id ?? "").slice(0, 6))
           if (!r || r.sender_id === myId) return
           let name = (r.sender_id && nameCache.get(r.sender_id)) || ""
           if (!name && r.sender_id) {
@@ -169,7 +147,7 @@ export default function LocalNotifier() {
           notify(name || "新私信", body || "发来一条消息", "/chat")
         },
       )
-      .subscribe()
+      .subscribe((status) => push("dm订阅:" + status))
 
     const ntCh = supabase
       .channel(`ln-nt-${myId}`)
@@ -178,11 +156,12 @@ export default function LocalNotifier() {
         { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${myId}` },
         (payload) => {
           const r = payload.new as { type?: string; message?: string }
+          push("通知事件 type=" + (r?.type ?? "?"))
           if (!r) return
           notify(NOTIF_TITLES[r.type ?? ""] ?? "新通知", String(r.message ?? "你有一条新通知"), "/notifications")
         },
       )
-      .subscribe()
+      .subscribe((status) => push("通知订阅:" + status))
 
     return () => {
       try {
@@ -198,5 +177,27 @@ export default function LocalNotifier() {
     }
   }, [user?.id])
 
-  return null
+  if (!DEBUG_OVERLAY || !isNative()) return null
+  return (
+    <div
+      style={{
+        position: "fixed",
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 2147483647,
+        background: "rgba(0,0,0,0.82)",
+        color: "#A3E635",
+        font: "11px/1.45 monospace",
+        padding: "6px 8px",
+        maxHeight: "42vh",
+        overflow: "auto",
+        pointerEvents: "none",
+        whiteSpace: "pre-wrap",
+        wordBreak: "break-all",
+      }}
+    >
+      {`[LN调试 ${VERSION}]\n` + (log.length ? log.join("\n") : "(等待…发条私信看看)")}
+    </div>
+  )
 }
