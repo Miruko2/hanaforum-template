@@ -12,8 +12,10 @@ import { supabase } from "@/lib/supabaseClient"
 // 查名字改后台不阻塞，并保留底部调试浮层确认链路打通（schedule=OK + 真弹通知）。
 // Web 端不显示浮层、不调原生。
 
-const LOCAL_NOTIF_ENABLED = true
-const DEBUG_OVERLAY = true
+// 已确认：local-notifications 原生方法在该用户设备/ROM 上会崩（与最早的崩同根，
+// 之前被动态 import 卡死掩盖）。先停用止血；是否继续（需 adb 抓日志）由用户决定。
+const LOCAL_NOTIF_ENABLED = false
+const DEBUG_OVERLAY = false
 const VERSION = "ln-dbg3"
 
 const NOTIF_TITLES: Record<string, string> = {
