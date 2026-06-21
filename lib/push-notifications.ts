@@ -12,6 +12,12 @@
 import { Capacitor } from "@capacitor/core"
 import { supabase } from "./supabaseClient"
 
+// ⚠️ 临时总开关：真机 App「登录后闪退」排查期间先停用原生推送注册。
+// 现象=App 能开到登录页（启动期 Firebase 初始化没崩）、登录后调 register() 才崩，
+// 疑似设备无 Google Play 服务 / FCM 取 token 抛原生异常（JS try/catch 拦不住原生崩溃）。
+// 排查清楚后改回 true 并重新部署网页即可恢复，无需重打 APK。
+const PUSH_ENABLED = false
+
 let listenersReady = false
 let currentToken: string | null = null
 
@@ -56,6 +62,7 @@ async function ensureListeners(PushNotifications: typeof import("@capacitor/push
 
 // 登录后调用：装监听 + 申请权限 + 注册。可安全重复调用。
 export async function initPushNotifications(): Promise<void> {
+  if (!PUSH_ENABLED) return // 临时停用，排查「登录后闪退」期间不碰原生推送
   if (typeof window === "undefined" || !isNativeApp()) return
 
   let mod: typeof import("@capacitor/push-notifications")
