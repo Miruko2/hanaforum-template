@@ -13,7 +13,8 @@ import { supabase } from "@/lib/supabaseClient"
 //   - 挂载/开机阶段「一个原生调用都不碰」，只建 realtime 订阅（纯 JS，绝不崩）；
 //   - 所有原生操作（插件加载 / 权限 / 弹通知）全部推迟到「真的来消息时」才执行 ——
 //     那时 App 已完全可交互、Capacitor 桥/Activity 就绪，最危险的冷启动窗口已过；
-//   - 去掉 createChannel（用默认渠道）这一最可疑且非必需的调用；
+//   - createChannel（高重要性渠道→顶部横幅）改到「收到消息时」才建：实测收消息时其它原生
+//     调用都不崩，说明原崩点是冷启动时机而非调用本身，故此刻建渠道安全；建失败则降级默认渠道；
 //   - 即使仍有问题，也只会在「收到消息时」出问题、而非一打开就崩（不会再陷入开机崩溃循环）。
 // Web 端整段 no-op。
 //
@@ -39,6 +40,7 @@ const nameCache = new Map<string, string>()
 let pluginPromise: Promise<any> | null = null
 let permRequested = false
 let listenerAdded = false
+let channelReady = false
 
 function isNative(): boolean {
   try {
@@ -92,11 +94,27 @@ async function notify(title: string, body: string, url: string) {
         /* ignore */
       }
     }
+    // 高重要性渠道 → 顶部横幅。只在此刻（收到消息时）建一次，避开冷启动崩溃窗口；
+    // 建失败则降级用插件默认渠道（仍会进通知栏，只是可能不弹横幅）。
+    if (!channelReady) {
+      try {
+        await LN.createChannel({
+          id: "messages",
+          name: "消息通知",
+          description: "私信与站内通知",
+          importance: 5,
+          visibility: 1,
+        })
+        channelReady = true
+      } catch {
+        channelReady = false
+      }
+    }
     notifId = (notifId + 1) & 0x7fffffff
-    // 最简 schedule：不指定 channelId（用插件默认渠道），小图标走 capacitor.config 的 smallIcon
-    await LN.schedule({
-      notifications: [{ id: notifId, title, body: body || "", extra: { url } }],
-    })
+    // 小图标走 capacitor.config 的 smallIcon（ic_stat_notify）
+    const n: any = { id: notifId, title, body: body || "", extra: { url } }
+    if (channelReady) n.channelId = "messages"
+    await LN.schedule({ notifications: [n] })
   } catch (e) {
     console.warn("[local-notif] 弹通知失败", e)
   }
