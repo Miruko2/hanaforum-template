@@ -64,6 +64,7 @@ export default function EmailVerifyGate() {
   const [busy, setBusy] = useState(false)
   const [errMsg, setErrMsg] = useState("") // 验证码错误提示条文案（空=不显示）
   const [errKey, setErrKey] = useState(0)  // 每次报错 +1，强制重挂载重放入场动画
+  const [sendNotice, setSendNotice] = useState("") // 发送步骤的提示条（如配额已满→明天再来）
 
   const check = useCallback(async () => {
     if (!user) {
@@ -130,6 +131,7 @@ export default function EmailVerifyGate() {
   const handleSend = async () => {
     if (busy) return
     setBusy(true)
+    setSendNotice("")
     try {
       const token = await getToken()
       const res = await fetch(apiUrl("/api/send-otp"), {
@@ -146,6 +148,10 @@ export default function EmailVerifyGate() {
       } else if (data.status === "cooldown") {
         setStep("code")
         toast({ title: "验证码已发送", description: data.error || "请查收邮箱后输入", variant: "destructive" })
+      } else if (data.status === "quota_exceeded") {
+        // 配额耗尽 → 不放行，留在发送步骤、给出明确提示（明天再来）
+        setSendNotice(data.error || "今日验证码发送已达上限，请明天再来验证")
+        toast({ title: "今日验证暂时已满", description: "请明天再来验证后发言", variant: "destructive" })
       } else {
         toast({ title: "发送失败", description: data.error || "请稍后再试", variant: "destructive" })
       }
@@ -249,6 +255,15 @@ export default function EmailVerifyGate() {
                     <p className="evg-sub">
                       向 <b>{user?.email}</b> 发送 6 位验证码
                     </p>
+                    {sendNotice && (
+                      <p
+                        className="evg-sub"
+                        role="alert"
+                        style={{ marginTop: 10, color: "#ffb4b4", fontWeight: 600 }}
+                      >
+                        ⚠ {sendNotice}
+                      </p>
+                    )}
                     <button type="button" className="evg-btn" onClick={handleSend} disabled={busy} data-loading={busy || undefined} aria-busy={busy || undefined}>
                       {busy ? null : <><span className="evg-btn-cv" aria-hidden>»</span>发送验证码</>}
                     </button>

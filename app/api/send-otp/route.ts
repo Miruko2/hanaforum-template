@@ -5,7 +5,8 @@ import { sendOtpEmail, hasAnyEmailProvider } from "@/lib/mailer"
 
 // 发送邮箱验证码（OTP）。懒触发：由前端在“需验证用户”要发言时调用。
 // 多通道发信：Resend 满了自动切 SMTP 兜底（见 lib/mailer.ts）。
-// 关键兜底：所有通道都超额/发不出 → 当日全局关闭验证 + 直接放行本用户，绝不把用户卡死。
+// 配额耗尽/发不出 → 【不放行】，返回 quota_exceeded 让前端提示用户明天再来（fail-closed）。
+// 如需邮件全挂时临时全员放行，管理员手动设 verification_state.disabled_until（本路由仍读取）。
 export const dynamic = "force-dynamic"
 
 const supabaseAdmin = createClient(
@@ -22,14 +23,6 @@ function sixDigitCode(): string {
 function sha256(s: string): string {
   return crypto.createHash("sha256").update(s).digest("hex")
 }
-// 下一个 UTC+8 零点（“当日”按中国时区算）
-function endOfDayShanghaiISO(): string {
-  const TZ_MIN = 8 * 60
-  const shifted = new Date(Date.now() + TZ_MIN * 60000)
-  shifted.setUTCHours(24, 0, 0, 0) // 推到 UTC+8 钟面的下一个零点
-  return new Date(shifted.getTime() - TZ_MIN * 60000).toISOString()
-}
-
 async function markVerified(userId: string) {
   await supabaseAdmin
     .from("email_verifications")
@@ -37,12 +30,6 @@ async function markVerified(userId: string) {
       { user_id: userId, verified_at: new Date().toISOString(), code_hash: null },
       { onConflict: "user_id" },
     )
-}
-async function disableVerificationToday() {
-  await supabaseAdmin
-    .from("verification_state")
-    .update({ disabled_until: endOfDayShanghaiISO(), updated_at: new Date().toISOString() })
-    .eq("id", 1)
 }
 
 export async function POST(req: NextRequest) {
@@ -115,11 +102,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ status: "sent" })
     }
 
-    // 所有通道都超额/限流 → 当日兜底放行（这才是“发不出邮件”的预期场景，用户的核心需求）。
+    // 未发出任何信：撤销冷却(last_sent_at)与验证码，避免用户重试时被误判“刚发过”。
+    await supabaseAdmin
+      .from("email_verifications")
+      .update({ last_sent_at: null, code_hash: null })
+      .eq("user_id", user.id)
+
+    // 所有通道都超额/限流 → 【不放行】，拦住并提示明天再来（fail-closed，用户要求）。
+    // 注：disabled_until 仍由本路由读取（兜底窗口），但不再自动设置；
+    //     如需邮件全挂时临时全员放行，管理员手动 UPDATE verification_state.disabled_until 即可。
     if (result.reason === "quota") {
-      await disableVerificationToday()
-      await markVerified(user.id)
-      return NextResponse.json({ status: "skipped" })
+      return NextResponse.json(
+        { status: "quota_exceeded", error: "今日验证码发送已达上限，请明天再来验证后发言" },
+        { status: 429 },
+      )
     }
 
     // 地址无效：如实报错、不放行（避免「随便填个邮箱→发送失败→自动通过」绕过验证）
