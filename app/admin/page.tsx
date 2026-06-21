@@ -5,7 +5,7 @@ import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { apiUrl } from "@/lib/api-base"
-import { Shield, Users, FileText, Trash2, AlertCircle, Bot, Cpu, Save, RefreshCw, Megaphone, Ban, ShieldCheck, MessageSquare, ImageIcon, X } from "lucide-react"
+import { Shield, Users, FileText, Trash2, AlertCircle, Bot, Cpu, Save, RefreshCw, Megaphone, Ban, ShieldCheck, ShieldAlert, MessageSquare, ImageIcon, X, MailCheck } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -26,6 +26,7 @@ import { useToast } from "@/hooks/use-toast"
 import { broadcastAnnouncement } from "@/lib/supabase"
 import { compressImage } from "@/lib/image-compress"
 import MengmegziAgentPanel from "@/components/admin/mengmegzi-agent-panel"
+import ModerationPanel from "@/components/admin/moderation-panel"
 import { motion } from "framer-motion"
 
 // 标签页配置：驱动顶部带「果冻滑动」高亮的标签条（仿首页排序切换的 layoutId 弹簧）
@@ -38,6 +39,7 @@ const ADMIN_TABS: { value: string; label: string; icon: typeof Shield }[] = [
   { value: "dm-ai-config", label: "私信 AI", icon: MessageSquare },
   { value: "announcements", label: "公告", icon: Megaphone },
   { value: "mengmegzi", label: "萌萌子", icon: Bot },
+  { value: "moderation", label: "内容审核", icon: ShieldAlert },
 ]
 
 // ─── 模块级缓存 ────────────────────────────────────────────
@@ -144,6 +146,8 @@ export default function AdminPage() {
   const [banTarget, setBanTarget] = useState<{ id: string; username: string } | null>(null)
   const [banReason, setBanReason] = useState("")
   const [banning, setBanning] = useState(false)
+  // 「标记已验证」进行中的用户 id（防重复点击 + 按钮禁用态）
+  const [markingVerifiedId, setMarkingVerifiedId] = useState<string | null>(null)
 
   // AI 模型配置状态
   const [aiConfig, setAiConfig] = useState<CachedAiConfig | null>(cachedAiConfig)
@@ -1080,6 +1084,36 @@ export default function AdminPage() {
     }
   }
 
+  // 手动把某用户标记为「邮箱已验证」——强制验证(enforce_all)后的解卡阀门。
+  // email_verifications 写入只走 service_role，故经 /api/admin/mark-verified。
+  const handleMarkVerified = async (targetUserId: string, username: string) => {
+    if (markingVerifiedId) return
+    setMarkingVerifiedId(targetUserId)
+    try {
+      const { data: sessionData } = await supabase.auth.getSession()
+      const token = sessionData?.session?.access_token
+      if (!token) {
+        toast({ title: "未登录", description: "请重新登录后再试", variant: "destructive" })
+        return
+      }
+      const res = await fetch(apiUrl("/api/admin/mark-verified"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ userId: targetUserId }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toast({ title: "操作失败", description: data?.error || `HTTP ${res.status}`, variant: "destructive" })
+        return
+      }
+      toast({ title: "已标记验证", description: `${username} 现在可以正常发言了` })
+    } catch (err: any) {
+      toast({ title: "操作失败", description: err?.message || "网络错误", variant: "destructive" })
+    } finally {
+      setMarkingVerifiedId(null)
+    }
+  }
+
   // 只在「认证初始化」阶段短暂等待（getSession 基本读本地存储、很快，且有 1s 超时兜底）。
   // 关键改动：不再为「数据加载」整页转圈——壳层（标题 + 标签页）立刻渲染，
   // 各列表内部用骨架占位，数据到了再填。这样进面板是「秒开 + 渐入」，不再空等半天。
@@ -1340,29 +1374,44 @@ export default function AdminPage() {
                         <div className="text-right">
                           {u.id === user?.id ? (
                             <span className="text-xs text-gray-600">本人</span>
-                          ) : banned ? (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleUnban(u.id, u.username || u.id)}
-                              className="text-lime-400 hover:text-lime-300 hover:bg-lime-900/20"
-                            >
-                              <ShieldCheck className="h-4 w-4 mr-1" />
-                              解封
-                            </Button>
                           ) : (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => {
-                                setBanTarget({ id: u.id, username: u.username || u.id })
-                                setBanReason("")
-                              }}
-                              className="text-red-400 hover:text-red-300 hover:bg-red-900/20"
-                            >
-                              <Ban className="h-4 w-4 mr-1" />
-                              封禁
-                            </Button>
+                            <div className="flex items-center justify-end gap-1">
+                              {/* 标记邮箱已验证：强制验证后，给用死邮箱被卡住的真实用户解卡 */}
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleMarkVerified(u.id, u.username || u.id)}
+                                disabled={markingVerifiedId === u.id}
+                                title="标记该用户邮箱已验证（强制验证后的解卡）"
+                                className="text-emerald-300 hover:text-emerald-200 hover:bg-emerald-900/20 px-2"
+                              >
+                                <MailCheck className="h-4 w-4" />
+                              </Button>
+                              {banned ? (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleUnban(u.id, u.username || u.id)}
+                                  className="text-lime-400 hover:text-lime-300 hover:bg-lime-900/20"
+                                >
+                                  <ShieldCheck className="h-4 w-4 mr-1" />
+                                  解封
+                                </Button>
+                              ) : (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => {
+                                    setBanTarget({ id: u.id, username: u.username || u.id })
+                                    setBanReason("")
+                                  }}
+                                  className="text-red-400 hover:text-red-300 hover:bg-red-900/20"
+                                >
+                                  <Ban className="h-4 w-4 mr-1" />
+                                  封禁
+                                </Button>
+                              )}
+                            </div>
                           )}
                         </div>
                       </div>
@@ -1999,6 +2048,10 @@ export default function AdminPage() {
 
         <TabsContent value="mengmegzi">
           <MengmegziAgentPanel />
+        </TabsContent>
+
+        <TabsContent value="moderation">
+          <ModerationPanel />
         </TabsContent>
       </Tabs>
 

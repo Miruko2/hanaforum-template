@@ -31,8 +31,8 @@ next-env.d.ts
 supabase_apikey.txt
 *.keystore
 
-# ⚠️ 敏感词种子 SQL：含政治敏感词，由 scripts/seed-sensitive-words.mjs 生成，绝不进仓库
-scripts/seed-sensitive-words.generated.sql
+# ⚠️ 敏感词种子 SQL：含敏感词（政治/色情/辱骂/广告/违法），生成产物，绝不进仓库
+scripts/seed-sensitive-words*.generated.sql
 
 # 本地构建/临时产物
 /out/
