@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js"
 import rateLimiter from "@/lib/hanako/rate-limit"
 import { buildSystemPrompt, buildUserMessage } from "@/lib/hanako/prompt"
 import { isWebSearchEnabled, searchWeb, WEB_SEARCH_TOOL } from "@/lib/hanako/web-search"
+import { logPlatformUsage } from "@/lib/platform-usage"
 import {
   HANAKO_USER_ID,
   HANAKO_USERNAME,
@@ -233,6 +234,7 @@ export async function POST(req: NextRequest) {
       }
 
       const aiData = await aiResponse.json()
+      await logPlatformUsage("mimo", "tokens", aiData?.usage?.total_tokens, { source: "hanako" })
       const choice = aiData.choices?.[0]
       const aiMsg = choice?.message
       finishReason = choice?.finish_reason

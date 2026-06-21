@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { loadDmAiConfig, dmSupabaseAdmin, MAX_DM_REPLIES, buildDmSystemPrompt } from "@/lib/hanako/dm-ai"
+import { logPlatformUsage } from "@/lib/platform-usage"
 import {
   MENGMEGZI_USER_ID,
   HANAKO_DM_USERNAME,
@@ -179,6 +180,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "AI 服务暂时不可用" }, { status: 502 })
       }
       const aiData = await aiResponse.json()
+      await logPlatformUsage("mimo", "tokens", aiData?.usage?.total_tokens, { source: "hall" })
       const choice = aiData.choices?.[0]
       const aiMsg = choice?.message
       const toolCalls = aiMsg?.tool_calls

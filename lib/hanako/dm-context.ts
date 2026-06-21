@@ -24,6 +24,7 @@ import {
   normalizeEmotion,
 } from "@/lib/hanako/constants"
 import { estimateTokens } from "@/lib/hanako/token-estimate"
+import { logPlatformUsage } from "@/lib/platform-usage"
 
 const pairKey = (a: string, b: string) => [a, b].sort().join(":")
 
@@ -120,6 +121,7 @@ async function generateSummary(opts: {
     throw new Error(`摘要模型错误 ${res.status}: ${await res.text()}`)
   }
   const data = await res.json()
+  await logPlatformUsage("mimo", "tokens", data?.usage?.total_tokens, { source: "dm-summary" })
   return data.choices?.[0]?.message?.content?.trim() || ""
 }
 

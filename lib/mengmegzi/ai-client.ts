@@ -3,6 +3,8 @@
 // 调文本 AI（OpenAI 兼容 /chat/completions）+ JSON 鲁棒解析。
 // 复用 dm_ai_config 的 base_url/api_key/model/persona（与私信 AI 同一套模型配置）。
 
+import { logPlatformUsage } from "@/lib/platform-usage"
+
 export interface DmAiCfg {
   baseUrl: string
   apiKey: string
@@ -62,6 +64,8 @@ export async function callAi(
     throw new Error(`AI 调用失败 ${res.status}: ${await res.text()}`)
   }
   const data = await res.json()
+  // MiMo 无可用余额 API：自记 token 消耗喂「平台用量」面板（失败不影响调用）
+  await logPlatformUsage("mimo", "tokens", data?.usage?.total_tokens, { source: "agent", model: cfg.model })
   return data.choices?.[0]?.message?.content?.trim() || ""
 }
 

@@ -4,6 +4,7 @@ import { loadDmAiConfig, dmSupabaseAdmin, MAX_DM_REPLIES } from "@/lib/hanako/dm
 import { MENGMEGZI_USER_ID, MAX_REPLY_TOKENS, emotionLabel, normalizeEmotion, DM_COMPRESS_HARD_MSGS, DM_STICKER_INJECT_PROBABILITY } from "@/lib/hanako/constants"
 import { buildDmContext } from "@/lib/hanako/dm-context"
 import { isWebSearchEnabled, searchWeb, WEB_SEARCH_TOOL } from "@/lib/hanako/web-search"
+import { logPlatformUsage } from "@/lib/platform-usage"
 import { splitRepliesIntoRows } from "@/lib/stickers"
 
 // 强制动态渲染
@@ -180,6 +181,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "AI 服务暂时不可用" }, { status: 502 })
       }
       const aiData = await aiResponse.json()
+      await logPlatformUsage("mimo", "tokens", aiData?.usage?.total_tokens, { source: "dm" })
       const choice = aiData.choices?.[0]
       const aiMsg = choice?.message
       const toolCalls = aiMsg?.tool_calls

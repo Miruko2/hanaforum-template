@@ -22,6 +22,7 @@ import {
   resetEmailHtml,
   resetEmailText,
 } from "./email-otp-template"
+import { logPlatformUsage } from "./platform-usage"
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY || ""
 const RESEND_FROM = process.env.RESEND_FROM || ""
@@ -162,7 +163,11 @@ async function runProviders(to: string, mail: Mail): Promise<SendOtpResult> {
   let lastDetail = ""
   for (const p of providers) {
     const outcome = await p.send(to, mail)
-    if (outcome === "sent") return { ok: true, provider: p.name }
+    if (outcome === "sent") {
+      // Resend 无用量查询 API：成功走 Resend 时自记一笔，喂「平台用量」面板
+      if (p.name === "resend") await logPlatformUsage("resend", "email", 1, { kind: "otp" })
+      return { ok: true, provider: p.name }
+    }
     if (outcome === "invalid") {
       // 地址坏，换通道也没用：立即停止并报错（绝不放行）
       return { ok: false, reason: "invalid", detail: `${p.name}:invalid` }
@@ -263,7 +268,10 @@ export async function sendNotifyEmail(opts: {
 }): Promise<{ ok: boolean; provider?: string }> {
   const { to, subject, html, text } = opts
   if (RESEND_API_KEY && RESEND_FROM) {
-    if (await notifyViaResend(to, subject, html, text)) return { ok: true, provider: "resend" }
+    if (await notifyViaResend(to, subject, html, text)) {
+      await logPlatformUsage("resend", "email", 1, { kind: "notify" })
+      return { ok: true, provider: "resend" }
+    }
   }
   for (const cfg of smtpFallbacks) {
     if (await notifyViaSmtp(cfg, to, subject, html, text)) {
