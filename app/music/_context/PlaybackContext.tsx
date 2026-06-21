@@ -40,10 +40,16 @@ export type MusicSource = "mine" | "featured"
 // 播放模式：列表循环 / 单曲循环 / 播完就暂停。
 export type PlayMode = "list" | "one" | "once"
 
-/** 详情页桌面液面背景的自动律动模式（off = 默认，只留鼠标交互）。 */
-// 注：曾加过第 4 态 "spectrum"（音频波形频谱），因视觉不满意已移除、待参考他人实现重做；
-// 数据管线 getAudioFrequencies 与组件 AudioSpectrum.tsx 保留备用（详见 ExpandedCard 注释）。
-export type LiquidFx = "rain" | "center" | "off"
+/**
+ * 详情页桌面背景特效模式（底部播放器切换、持久化、互斥）：
+ *   rain        下雨 —— WebGL 液面 + 雪花飘落。
+ *   center      中间涟漪 —— WebGL 液面，中心持续荡出涟漪。
+ *   off         默认 —— 不挂任何背景特效，只留鼠标与水面交互。
+ *   topography  地形波 —— Three.js 全屏 3D 声波地形（参考 sonic-topography 自研，AudioTopography.tsx）；
+ *               仅本地上传歌有真实 FFT 才显示，在线歌自动回退默认。与液面互斥、不同时跑省性能。
+ * 注：早先的条形频谱 AudioSpectrum.tsx 视觉被否、已被地形波取代（文件保留未挂载）。
+ */
+export type LiquidFx = "rain" | "center" | "off" | "topography"
 
 /** 详情页桌面液面背景的「底图来源」：纯色渐变 / 当前封面 / 个人首页背景。 */
 export type LiquidBg = "gradient" | "cover" | "background"
@@ -551,7 +557,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     try {
       const v = localStorage.getItem(LIQUID_FX_KEY)
-      if (v === "rain" || v === "center" || v === "off") setLiquidFxState(v)
+      if (v === "rain" || v === "center" || v === "off" || v === "topography") setLiquidFxState(v)
     } catch {
       /* ignore */
     }

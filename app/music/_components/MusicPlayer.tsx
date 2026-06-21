@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Pause, Play, SkipBack, SkipForward, History as HistoryIcon, Heart, Repeat, Repeat1, Square, CloudSnow, Target, Droplet, Palette, Image as ImageIcon, Wallpaper } from "lucide-react"
+import { Pause, Play, SkipBack, SkipForward, History as HistoryIcon, Heart, Repeat, Repeat1, Square, CloudSnow, Target, Droplet, Mountain, Palette, Image as ImageIcon, Wallpaper } from "lucide-react"
 import { usePlayback, usePlaybackTime } from "../_context/PlaybackContext"
 import { useDominantHue } from "../_lib/useDominantHue"
 import { useIsAndroidApp } from "../_lib/useIsAndroid"
@@ -295,17 +295,20 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
                 <Repeat size={15} />
               )}
             </button>
-            {/* 详情页液面背景的自动律动切换（仅桌面/iPad；循环 下雨 → 中间冒泡 → 默认）。 */}
+            {/* 详情页背景特效切换（仅桌面/iPad；循环 下雨 → 中间冒泡 → 默认 → 地形波）。
+                地形波是 3D 声波地形，仅本地歌生效、与液面互斥（在线歌在地形模式下自动回退默认）。 */}
             {!isMobile && (
               <button
                 type="button"
-                aria-label="水波效果"
+                aria-label="背景特效"
                 title={
                   liquidFx === "rain"
-                    ? "水波：雪花飘落（点击切中间涟漪）"
+                    ? "特效：雪花飘落（点击切中间涟漪）"
                     : liquidFx === "center"
-                      ? "水波：中间涟漪（点击切默认）"
-                      : "水波：默认（点击切雪花）"
+                      ? "特效：中间涟漪（点击切默认）"
+                      : liquidFx === "off"
+                        ? "特效：默认（点击切地形波）"
+                        : "特效：声波地形（仅本地歌；点击切雪花）"
                 }
                 className="h-8 w-8 grid place-items-center rounded-full hover:bg-white/10 transition-colors"
                 style={{
@@ -314,7 +317,13 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
                 onClick={(e) => {
                   e.stopPropagation()
                   setLiquidFx(
-                    liquidFx === "rain" ? "center" : liquidFx === "center" ? "off" : "rain",
+                    liquidFx === "rain"
+                      ? "center"
+                      : liquidFx === "center"
+                        ? "off"
+                        : liquidFx === "off"
+                          ? "topography"
+                          : "rain",
                   )
                 }}
               >
@@ -322,13 +331,16 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
                   <CloudSnow size={15} />
                 ) : liquidFx === "center" ? (
                   <Target size={15} />
-                ) : (
+                ) : liquidFx === "off" ? (
                   <Droplet size={15} />
+                ) : (
+                  <Mountain size={15} />
                 )}
               </button>
             )}
-            {/* 水波底图来源切换（仅桌面/iPad，且水波开着才有意义；循环 渐变 → 封面 → 首页背景）。 */}
-            {!isMobile && liquidFx !== "off" && (
+            {/* 水波底图来源切换（仅桌面/iPad，且处于液面模式 rain/center 才有意义；
+                循环 渐变 → 封面 → 首页背景）。off/topography 模式无液面、不显示。 */}
+            {!isMobile && (liquidFx === "rain" || liquidFx === "center") && (
               <button
                 type="button"
                 aria-label="水波底图"

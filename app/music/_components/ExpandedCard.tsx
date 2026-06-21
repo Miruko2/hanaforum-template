@@ -16,8 +16,7 @@ import { TrackCover } from "./TrackCover"
 import { LyricsEcho } from "./LyricsEcho"
 import { LiquidRefraction } from "./LiquidRefraction"
 import { SnowOverlay } from "./SnowOverlay"
-// 音频波形频谱暂时移除（视觉不满意、待重做）；组件文件保留备用。
-// import { AudioSpectrum } from "./AudioSpectrum"
+import { AudioTopography } from "./AudioTopography"
 
 /** Screen-space rect of the card that was clicked — used as flight start. */
 export type ExpandRect = { left: number; top: number; width: number; height: number }
@@ -95,7 +94,7 @@ function ExpandedInner({
     setLyricsEnabled,
     volume,
     getAudioIntensity,
-    // getAudioFrequencies, // 波形频谱待重做，暂不消费（数据管线在 PlaybackContext 保留）
+    getAudioFrequencies,
     liquidFx,
     liquidBg,
   } = usePlayback()
@@ -250,8 +249,8 @@ function ExpandedInner({
       className="fixed inset-0 flex items-center justify-center"
       style={{ zIndex: overlayZ }}
       // 桌面液面模式（rain/center）：点击空白处用来跟水面交互（起涟漪），不关闭弹层——
-      // 只有卡片上的 ✕（或 Esc）才关。off=默认（无液面）与移动端无水面交互，保留点空白关闭。
-      onClick={isMobile || liquidFx === "off" ? onClose : undefined}
+      // 只有卡片上的 ✕（或 Esc）才关。off/topography（无水面交互）与移动端，保留点空白关闭。
+      onClick={isMobile || liquidFx === "off" || liquidFx === "topography" ? onClose : undefined}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -261,9 +260,9 @@ function ExpandedInner({
       <div className="absolute inset-0 bg-black/55" />
 
       {/* 详情页背景律动（铺在暗化遮罩之上、卡片之下）：
-          仅桌面/iPad 挂载：液面模式（rain/center）才挂 WebGL 液面；off=默认时不挂。
+          仅桌面/iPad 挂载，且仅液面模式（rain/center）才挂 WebGL 液面；off/topography 不挂。
           安卓/手机不挂任何背景律动（左右声波水纹已移除）。 */}
-      {isMobile || liquidFx === "off" ? null : (
+      {!isMobile && (liquidFx === "rain" || liquidFx === "center") && (
         <>
           <LiquidRefraction
             hue={hue}
@@ -281,18 +280,11 @@ function ExpandedInner({
         </>
       )}
 
-      {/* 音频波形频谱（spectrum）暂时移除：视觉不满意，待参考他人实现重做。
-          数据管线 getAudioFrequencies（PlaybackContext）与组件 AudioSpectrum.tsx 均保留备用。
-          重做时：① 取消上方 import 与 getAudioFrequencies 解构的注释；
-                  ② 决定挂载条件（原方案：本地歌 + 桌面「波形」模式 / 移动端默认）。
-      {shown.local && (
-        <AudioSpectrum
-          getFrequencies={getAudioFrequencies}
-          hue={hue}
-          playing={playing}
-          lite={isMobile}
-        />
-      )} */}
+      {/* 声波地形（3D，铺满全屏、卡片之下）：仅桌面/iPad + 地形模式 + 本地上传歌。
+          本地歌才有真实 FFT；在线歌在地形模式下不挂载 → 自动回退默认暗背景（用户拍板）。 */}
+      {!isMobile && liquidFx === "topography" && shown.local && (
+        <AudioTopography getFrequencies={getAudioFrequencies} hue={hue} playing={playing} />
+      )}
 
       {/* Panel */}
       <motion.div
