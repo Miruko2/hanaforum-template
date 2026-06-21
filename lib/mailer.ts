@@ -1,5 +1,4 @@
-// 多通道发信 + 失败自动切换。目标：薅多家免费额度，一家满了自动切下一家；
-// 全部满了才走「当日兜底放行」。
+// 多通道发信 + 失败自动切换。目标：薅多家免费额度，一家满了自动切下一家。
 //
 // 通道顺序：Resend(REST，主) → 通用 SMTP 兜底们(nodemailer，按 EMAIL_SMTP_FALLBACKS 顺序)。
 // 加邮箱不用改代码，只在 Vercel 配环境变量：
@@ -9,11 +8,20 @@
 //
 // 失败分级（保留「乱填邮箱→发失败→自动过」的防绕过）：
 //   sent    = 成功
-//   quota   = 配额/限流(429 等) → 可切下一家；全是 quota → 路由走当日兜底放行
+//   quota   = 配额/限流(429 等) → 可切下一家；全是 quota → 由调用方决定如何处理
 //   invalid = 收件地址无效(4xx/550 等) → 换家也没用，如实报错、绝不放行
 //   error   = 网络/5xx/未知 → 如实报错、不放行（可重试）
+//
+// OTP（邮箱验证）与重置密码共用同一套通道故障转移，仅邮件模板不同。
 import nodemailer from "nodemailer"
-import { otpEmailSubject, otpEmailHtml, otpEmailText } from "./email-otp-template"
+import {
+  otpEmailSubject,
+  otpEmailHtml,
+  otpEmailText,
+  resetEmailSubject,
+  resetEmailHtml,
+  resetEmailText,
+} from "./email-otp-template"
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY || ""
 const RESEND_FROM = process.env.RESEND_FROM || ""
@@ -60,12 +68,15 @@ export function hasAnyEmailProvider(): boolean {
 
 type Outcome = "sent" | "quota" | "invalid" | "error"
 
+// 一封邮件的内容。OTP 与重置密码复用同一套通道故障转移，仅模板不同 → 把内容抽成参数。
+type Mail = { subject: string; html: string; text: string }
+
 export type SendOtpResult =
   | { ok: true; provider: string }
   | { ok: false; reason: "quota" | "invalid" | "error"; detail: string }
 
 // ── Resend（REST API） ──
-async function sendViaResend(to: string, code: string): Promise<Outcome> {
+async function sendViaResend(to: string, mail: Mail): Promise<Outcome> {
   try {
     const r = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -76,9 +87,9 @@ async function sendViaResend(to: string, code: string): Promise<Outcome> {
       body: JSON.stringify({
         from: RESEND_FROM,
         to: [to],
-        subject: otpEmailSubject(code),
-        html: otpEmailHtml(code),
-        text: otpEmailText(code),
+        subject: mail.subject,
+        html: mail.html,
+        text: mail.text,
       }),
     })
     if (r.status >= 200 && r.status < 300) return "sent"
@@ -94,7 +105,7 @@ async function sendViaResend(to: string, code: string): Promise<Outcome> {
 }
 
 // ── 通用 SMTP（nodemailer） ──
-async function sendViaSmtp(cfg: SmtpFallback, to: string, code: string): Promise<Outcome> {
+async function sendViaSmtp(cfg: SmtpFallback, to: string, mail: Mail): Promise<Outcome> {
   try {
     const transporter = nodemailer.createTransport({
       host: cfg.host,
@@ -105,9 +116,9 @@ async function sendViaSmtp(cfg: SmtpFallback, to: string, code: string): Promise
     await transporter.sendMail({
       from: cfg.from,
       to,
-      subject: otpEmailSubject(code),
-      html: otpEmailHtml(code),
-      text: otpEmailText(code),
+      subject: mail.subject,
+      html: mail.html,
+      text: mail.text,
     })
     return "sent"
   } catch (e: any) {
@@ -122,7 +133,7 @@ async function sendViaSmtp(cfg: SmtpFallback, to: string, code: string): Promise
   }
 }
 
-type Provider = { name: string; send: (to: string, code: string) => Promise<Outcome> }
+type Provider = { name: string; send: (to: string, mail: Mail) => Promise<Outcome> }
 
 function buildProviders(): Provider[] {
   const list: Provider[] = []
@@ -133,16 +144,16 @@ function buildProviders(): Provider[] {
     list.push({ name: "resend", send: sendViaResend })
   }
   for (const cfg of smtpFallbacks) {
-    list.push({ name: cfg.name || cfg.host, send: (to, code) => sendViaSmtp(cfg, to, code) })
+    list.push({ name: cfg.name || cfg.host, send: (to, mail) => sendViaSmtp(cfg, to, mail) })
   }
   return list
 }
 
 /**
- * 依次尝试各通道发送 OTP，第一个成功即返回。全失败时按失败性质归类，
- * 供路由决定「当日兜底放行(quota)」还是「如实报错(invalid/error)」。
+ * 依次尝试各通道发送同一封邮件，第一个成功即返回。全失败时按失败性质归类，
+ * 供调用方决定如何处理（quota / invalid / error）。OTP 与重置密码共用此核心。
  */
-export async function sendOtpEmail(to: string, code: string): Promise<SendOtpResult> {
+async function runProviders(to: string, mail: Mail): Promise<SendOtpResult> {
   const providers = buildProviders()
   if (providers.length === 0) return { ok: false, reason: "error", detail: "no-provider" }
 
@@ -150,7 +161,7 @@ export async function sendOtpEmail(to: string, code: string): Promise<SendOtpRes
   let sawError = false
   let lastDetail = ""
   for (const p of providers) {
-    const outcome = await p.send(to, code)
+    const outcome = await p.send(to, mail)
     if (outcome === "sent") return { ok: true, provider: p.name }
     if (outcome === "invalid") {
       // 地址坏，换通道也没用：立即停止并报错（绝不放行）
@@ -164,9 +175,27 @@ export async function sendOtpEmail(to: string, code: string): Promise<SendOtpRes
       lastDetail = `${p.name}:error`
     }
   }
-  // 全失败：仅当「清一色配额」才放行兜底；掺了网络/5xx 则当可重试错误处理
+  // 全失败：仅当「清一色配额」才归类 quota；掺了网络/5xx 则当可重试错误处理
   if (sawQuota && !sawError) return { ok: false, reason: "quota", detail: lastDetail }
   return { ok: false, reason: "error", detail: lastDetail }
+}
+
+/** 发送邮箱验证 OTP（懒触发验证流程用）。 */
+export async function sendOtpEmail(to: string, code: string): Promise<SendOtpResult> {
+  return runProviders(to, {
+    subject: otpEmailSubject(code),
+    html: otpEmailHtml(code),
+    text: otpEmailText(code),
+  })
+}
+
+/** 发送「重置密码」验证码（忘记密码流程用）。同一套通道故障转移，仅模板不同。 */
+export async function sendResetOtpEmail(to: string, code: string): Promise<SendOtpResult> {
+  return runProviders(to, {
+    subject: resetEmailSubject(code),
+    html: resetEmailHtml(code),
+    text: resetEmailText(code),
+  })
 }
 
 // ── 通用通知邮件（非 OTP）：发任意内容给站长（如「有人申请友链」站务提醒） ──
