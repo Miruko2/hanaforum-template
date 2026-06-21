@@ -5,7 +5,7 @@ import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { apiUrl } from "@/lib/api-base"
-import { Shield, Users, FileText, Trash2, AlertCircle, Bot, Cpu, Save, RefreshCw, Megaphone, Ban, ShieldCheck, ShieldAlert, MessageSquare, ImageIcon, X, MailCheck } from "lucide-react"
+import { Shield, Users, FileText, Trash2, AlertCircle, Bot, Cpu, Save, RefreshCw, Megaphone, Ban, ShieldCheck, ShieldAlert, MessageSquare, ImageIcon, X, MailCheck, Link2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -27,6 +27,7 @@ import { broadcastAnnouncement } from "@/lib/supabase"
 import { compressImage } from "@/lib/image-compress"
 import MengmegziAgentPanel from "@/components/admin/mengmegzi-agent-panel"
 import ModerationPanel from "@/components/admin/moderation-panel"
+import FriendLinksPanel from "@/components/admin/friend-links-panel"
 import { motion } from "framer-motion"
 
 // 标签页配置：驱动顶部带「果冻滑动」高亮的标签条（仿首页排序切换的 layoutId 弹簧）
@@ -40,6 +41,7 @@ const ADMIN_TABS: { value: string; label: string; icon: typeof Shield }[] = [
   { value: "announcements", label: "公告", icon: Megaphone },
   { value: "mengmegzi", label: "萌萌子", icon: Bot },
   { value: "moderation", label: "内容审核", icon: ShieldAlert },
+  { value: "friend-links", label: "友链", icon: Link2 },
 ]
 
 // ─── 模块级缓存 ────────────────────────────────────────────
@@ -2052,6 +2054,10 @@ export default function AdminPage() {
 
         <TabsContent value="moderation">
           <ModerationPanel />
+        </TabsContent>
+
+        <TabsContent value="friend-links">
+          <FriendLinksPanel />
         </TabsContent>
       </Tabs>
 
