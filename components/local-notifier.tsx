@@ -5,11 +5,22 @@ import { Capacitor } from "@capacitor/core"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { supabase } from "@/lib/supabaseClient"
 
-// App 存活（前台、或刚切后台还没被冻结）时，把实时收到的私信 / 站内通知
-// 弹成「手机系统通知」。走安卓本地通知（NotificationManager），不依赖 Google 服务 /
-// 厂商通道，国内全机型可用、不会崩。
-// 局限：仅 App 进程存活时有效；被系统杀掉后不触发（那是 FCM/厂商推送范畴，已放弃）。
-// Web 端整段 no-op（isNative() 为 false 时 effect 直接返回）。
+// App 存活时把实时收到的私信 / 站内通知弹成「手机系统通知」（安卓本地通知，不依赖谷歌/厂商）。
+//
+// 【保守版·2026-06-21】上一版在「已登录冷启动」时于挂载阶段就调原生（checkPermissions/
+// requestPermissions/createChannel），在某些设备/ROM 上直接原生崩溃 → 一打开就闪退。
+// 本版策略：
+//   - 挂载/开机阶段「一个原生调用都不碰」，只建 realtime 订阅（纯 JS，绝不崩）；
+//   - 所有原生操作（插件加载 / 权限 / 弹通知）全部推迟到「真的来消息时」才执行 ——
+//     那时 App 已完全可交互、Capacitor 桥/Activity 就绪，最危险的冷启动窗口已过；
+//   - 去掉 createChannel（用默认渠道）这一最可疑且非必需的调用；
+//   - 即使仍有问题，也只会在「收到消息时」出问题、而非一打开就崩（不会再陷入开机崩溃循环）。
+// Web 端整段 no-op。
+//
+// 局限不变：仅 App 进程存活时有效；被系统杀掉后不触发。
+
+// 临时总开关：万一保守版仍在「收到消息时」崩，把它改回 false 重新部署即可一键停用（不必重打 APK）。
+const LOCAL_NOTIF_ENABLED = true
 
 const NOTIF_TITLES: Record<string, string> = {
   chat_mention: "有人提到了你",
@@ -21,13 +32,13 @@ const NOTIF_TITLES: Record<string, string> = {
   moderation: "内容审核",
 }
 
-// ⚠️ 临时总开关：真机「一打开 App 就闪退」排查期间先停用本地通知。
-// 现象=已登录状态下一开 App，LocalNotifier 调原生 local-notifications 即崩（原生崩溃 JS 拦不住）。
-// 排查清楚（看 logcat 定位是 requestPermissions / createChannel / 插件加载哪一步）后再改回 true。
-const LOCAL_NOTIF_ENABLED = false
-
 let notifId = 1
 const nameCache = new Map<string, string>()
+
+// 懒加载单例：插件、权限、点击监听都只初始化一次，且都在「首条消息到来时」才触发。
+let pluginPromise: Promise<any> | null = null
+let permRequested = false
+let listenerAdded = false
 
 function isNative(): boolean {
   try {
@@ -37,74 +48,69 @@ function isNative(): boolean {
   }
 }
 
-export default function LocalNotifier() {
-  const { user } = useSimpleAuth()
+async function getLN(): Promise<any | null> {
+  if (!pluginPromise) {
+    pluginPromise = import("@capacitor/local-notifications")
+      .then((m) => m.LocalNotifications)
+      .catch(() => null)
+  }
+  return pluginPromise
+}
 
-  useEffect(() => {
-    if (!LOCAL_NOTIF_ENABLED) return // 临时停用，排查「一打开就闪退」期间不碰原生本地通知
-    if (!isNative() || !user?.id) return
-    const myId = user.id
-
-    let LN: typeof import("@capacitor/local-notifications").LocalNotifications | null = null
-
-    const fire = async (title: string, body: string, url: string) => {
-      if (!LN) return
+// 真正弹一条系统通知 —— 仅在「收到消息」时被调用（App 此刻已完全就绪）。
+async function notify(title: string, body: string, url: string) {
+  const LN = await getLN()
+  if (!LN) return
+  try {
+    // 点击通知跳转监听（只装一次）
+    if (!listenerAdded) {
+      listenerAdded = true
       try {
-        notifId = (notifId + 1) & 0x7fffffff
-        await LN.schedule({
-          notifications: [
-            { id: notifId, title, body: body || "", channelId: "messages", extra: { url } },
-          ],
-        })
-      } catch (e) {
-        console.warn("[local-notif] schedule 失败", e)
-      }
-    }
-
-    const setup = async () => {
-      let mod: typeof import("@capacitor/local-notifications")
-      try {
-        mod = await import("@capacitor/local-notifications")
-      } catch {
-        return // 插件未装（旧 APK）→ 静默跳过
-      }
-      LN = mod.LocalNotifications
-      try {
-        let perm = await LN.checkPermissions()
-        if (perm.display === "prompt" || perm.display === "prompt-with-rationale") {
-          perm = await LN.requestPermissions()
-        }
-        if (perm.display !== "granted") {
-          LN = null
-          return // 用户拒绝授权 → 不弹
-        }
-        // 高重要性渠道 → 顶部横幅 + 进通知栏
-        await LN.createChannel({
-          id: "messages",
-          name: "消息通知",
-          description: "私信与站内通知",
-          importance: 5,
-          visibility: 1,
-        })
-        // 点击系统通知 → 跳到对应页面
-        await LN.addListener("localNotificationActionPerformed", (a) => {
-          const url = a?.notification?.extra?.url
-          if (url && typeof url === "string") {
+        await LN.addListener("localNotificationActionPerformed", (a: any) => {
+          const u = a?.notification?.extra?.url
+          if (u && typeof u === "string") {
             try {
-              window.location.assign(url)
+              window.location.assign(u)
             } catch {
               /* ignore */
             }
           }
         })
-      } catch (e) {
-        console.warn("[local-notif] 初始化失败", e)
-        LN = null
+      } catch {
+        /* ignore */
       }
     }
-    setup()
+    // 通知权限：只主动申请一次；失败/被拒也不抛，schedule 弹不出来也不崩
+    if (!permRequested) {
+      permRequested = true
+      try {
+        const p = await LN.checkPermissions()
+        if (p?.display !== "granted") {
+          await LN.requestPermissions()
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    notifId = (notifId + 1) & 0x7fffffff
+    // 最简 schedule：不指定 channelId（用插件默认渠道），小图标走 capacitor.config 的 smallIcon
+    await LN.schedule({
+      notifications: [{ id: notifId, title, body: body || "", extra: { url } }],
+    })
+  } catch (e) {
+    console.warn("[local-notif] 弹通知失败", e)
+  }
+}
 
-    // 私信：别人发给我的新消息 → 弹系统通知
+export default function LocalNotifier() {
+  const { user } = useSimpleAuth()
+
+  useEffect(() => {
+    if (!LOCAL_NOTIF_ENABLED) return
+    if (!isNative() || !user?.id) return
+    const myId = user.id
+
+    // 私信：别人发给我的 → 弹系统通知（原生调用都在 notify() 里、延后到此刻才发生）
     const dmCh = supabase
       .channel(`ln-dm-${myId}`)
       .on(
@@ -130,7 +136,7 @@ export default function LocalNotifier() {
             }
           }
           const body = r.kind === "sticker" ? "[贴纸]" : String(r.content ?? "")
-          fire(name || "新私信", body || "发来一条消息", "/chat")
+          notify(name || "新私信", body || "发来一条消息", "/chat")
         },
       )
       .subscribe()
@@ -144,7 +150,7 @@ export default function LocalNotifier() {
         (payload) => {
           const r = payload.new as { type?: string; message?: string }
           if (!r) return
-          fire(NOTIF_TITLES[r.type ?? ""] ?? "新通知", String(r.message ?? "你有一条新通知"), "/notifications")
+          notify(NOTIF_TITLES[r.type ?? ""] ?? "新通知", String(r.message ?? "你有一条新通知"), "/notifications")
         },
       )
       .subscribe()
