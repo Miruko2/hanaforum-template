@@ -67,3 +67,6 @@ jest-out.log
 
 # 本地记忆库（AI 辅助开发笔记，不入库）
 /memory-bank/
+
+# Supabase CLI 部署副产物（存 project ref 等），不入库
+/supabase/.temp/

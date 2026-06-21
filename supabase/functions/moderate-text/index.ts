@@ -59,11 +59,11 @@ function normalize(s: string): string {
   return s
     .toLowerCase()
     // 全角 ASCII（U+FF01–U+FF5E）→ 半角
-    .replace(/[！-～]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
+    .replace(/[\uFF01-\uFF5E]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
     // 零宽字符(U+200B–200D, FEFF) + 全角空格(U+3000) + 一切空白，统统去掉
-    .replace(/[​-‍﻿　\s]/g, "")
+    .replace(/[\u200B-\u200D\uFEFF\u3000\s]/g, "")
     // 常见分隔 / 装饰符（让 "v★信""微-信""开▲票" 归一到连续串；全角标点已在上一步转半角）
-    .replace(/[-_.*~!?|/\\[\]()<>·•※★☆▲△◆◇●○■□♥♡]/g, "")
+    .replace(/[-_.*~!?|/\\[\]()<>\u00B7\u2022\u203B\u2605\u2606\u25B2\u25B3\u25C6\u25C7\u25CF\u25CB\u25A0\u25A1\u2665\u2661]/g, "")
 }
 
 // ── 词库 + 白名单缓存 ────────────────────────────────────────────────────────
