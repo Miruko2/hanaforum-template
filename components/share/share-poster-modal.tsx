@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { memo, useCallback, useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { motion, AnimatePresence } from "framer-motion"
 import { X, Download, Link2, Loader2, RefreshCw } from "lucide-react"
@@ -44,7 +44,15 @@ async function copyText(text: string): Promise<boolean> {
   }
 }
 
-export default function SharePosterModal({ open, onClose, input }: SharePosterModalProps) {
+// 内容签名：既作「打开/内容变化才重新生成海报」的 effect 依赖，也用于下方 memo 比较，
+// 避免父组件（音乐页 ExpandedCard 随播放进度每帧重渲）每帧新建 input 对象导致弹窗每帧重渲。
+function sigOf(input: ShareInput): string {
+  return input.kind === "music"
+    ? `m|${input.url}|${input.title}|${input.artist}|${input.coverUrl ?? ""}|${input.hue ?? ""}`
+    : `p|${input.url}|${input.title ?? ""}|${input.author}|${input.imageUrl ?? ""}|${(input.content || "").slice(0, 100)}`
+}
+
+function SharePosterModal({ open, onClose, input }: SharePosterModalProps) {
   const { toast } = useToast()
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading")
   const [poster, setPoster] = useState<string | null>(null)
@@ -76,10 +84,7 @@ export default function SharePosterModal({ open, onClose, input }: SharePosterMo
   }, [])
 
   // 仅在「打开」或「内容签名变化」时重新生成（不受 input 对象引用抖动影响）。
-  const sig =
-    input.kind === "music"
-      ? `m|${input.url}|${input.title}|${input.artist}|${input.coverUrl ?? ""}|${input.hue ?? ""}`
-      : `p|${input.url}|${input.title ?? ""}|${input.author}|${input.imageUrl ?? ""}|${(input.content || "").slice(0, 100)}`
+  const sig = sigOf(input)
 
   // 打开时生成海报；关闭时不清理（保留给退场动画），下次打开重新生成
   useEffect(() => {
@@ -169,20 +174,24 @@ export default function SharePosterModal({ open, onClose, input }: SharePosterMo
             transition={{ duration: 0.2 }}
           />
 
-          {/* 面板：毛玻璃（安卓 WebView 降级实底）。opacity/scale 动画挂毛玻璃元素自身=安全。 */}
+          {/* 面板：毛玻璃（安卓 WebView 降级实底）。
+              安卓去 scale 动画 + 用小阴影：scale 改渲染尺寸→每帧重光栅化圆角 + 重绘 90px 大模糊阴影
+              =撕裂闪屏（项目老坑 FLIP 大形变闪屏）；安卓只留 opacity 淡入 + 轻微位移，桌面/iOS 维持原动画。 */}
           <motion.div
             className="relative z-10 flex w-full max-w-[420px] flex-col overflow-hidden rounded-3xl border border-white/15"
             style={{
               background: IS_ANDROID ? "rgba(20,22,20,0.97)" : "rgba(24,26,24,0.52)",
               backdropFilter: IS_ANDROID ? undefined : "blur(44px) saturate(160%)",
               WebkitBackdropFilter: IS_ANDROID ? undefined : "blur(44px) saturate(160%)",
-              boxShadow: "0 30px 90px -20px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.14)",
+              boxShadow: IS_ANDROID
+                ? "0 10px 30px -10px rgba(0,0,0,0.55)"
+                : "0 30px 90px -20px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.14)",
               maxHeight: "92vh",
             }}
-            initial={{ opacity: 0, scale: 0.94, y: 16 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.96, y: 8 }}
-            transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+            initial={IS_ANDROID ? { opacity: 0, y: 16 } : { opacity: 0, scale: 0.94, y: 16 }}
+            animate={IS_ANDROID ? { opacity: 1, y: 0 } : { opacity: 1, scale: 1, y: 0 }}
+            exit={IS_ANDROID ? { opacity: 0, y: 8 } : { opacity: 0, scale: 0.96, y: 8 }}
+            transition={{ duration: IS_ANDROID ? 0.22 : 0.28, ease: [0.16, 1, 0.3, 1] }}
             onClick={(e) => e.stopPropagation()}
           >
             {/* 标题栏 */}
@@ -226,6 +235,7 @@ export default function SharePosterModal({ open, onClose, input }: SharePosterMo
                   className="w-full rounded-2xl shadow-lg"
                   style={{ maxHeight: "62vh", objectFit: "contain" }}
                   draggable={false}
+                  decoding="async"
                 />
               )}
             </div>
@@ -260,3 +270,10 @@ export default function SharePosterModal({ open, onClose, input }: SharePosterMo
     document.body,
   )
 }
+
+// memo：仅当 open 或内容签名变化才重渲，挡掉音乐页父组件每帧重渲透传的新 input 对象。
+// 否则弹窗在进/出场动画期间被每帧重渲，安卓 WebView 上会放大闪烁。
+export default memo(
+  SharePosterModal,
+  (a, b) => a.open === b.open && sigOf(a.input) === sigOf(b.input),
+)
