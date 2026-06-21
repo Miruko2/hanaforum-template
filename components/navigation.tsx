@@ -31,7 +31,7 @@ import {
   navigateWithTransition,
   ringDirection,
 } from "@/lib/view-transition-nav"
-import { Clapperboard, Zap, Music, Link2 } from "lucide-react"
+import { Clapperboard, Zap, Music, Link2, Download } from "lucide-react"
 
 // Navigation 内用 useSearchParams 读 ?category=xxx 高亮分类；
 // output:'export' 静态构建下必须包 Suspense（见底部 default export）。
@@ -246,6 +246,8 @@ function NavigationContent() {
     { key: "cinema", icon: <Clapperboard className="h-5 w-5" />, zh: inCinema ? "退出影院" : "影院模式", en: "CINEMA", tone: "pink", active: inCinema, onClick: () => { toggleCinemaMode(); closeMobileMenu() } },
     { key: "music", icon: <Music className="h-5 w-5" />, zh: "音乐", en: "MUSIC", tone: "pink", active: pathname === "/music", onClick: () => { flipNav("/music"); closeMobileMenu() } },
     { key: "links", icon: <Link2 className="h-5 w-5" />, zh: "友情链接", en: "FRIENDS", tone: "lime", active: pathname === "/links", onClick: () => { flipNav("/links"); closeMobileMenu() } },
+    // App 下载入口：/download 不在主导航环内，与 admin/login 同走普通 router.push
+    { key: "download", icon: <Download className="h-5 w-5" />, zh: "下载应用", en: "DOWNLOAD", tone: "lime", active: pathname === "/download", onClick: () => { router.push("/download"); closeMobileMenu() } },
   ]
   if (user) {
     actionCards.push({ key: "profile", icon: <User className="h-5 w-5" />, zh: "个人中心", en: "PROFILE", tone: "lime", active: pathname === "/profile", onClick: () => { flipNav("/profile"); closeMobileMenu() } })
