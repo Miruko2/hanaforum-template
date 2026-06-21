@@ -21,6 +21,11 @@ const NOTIF_TITLES: Record<string, string> = {
   moderation: "内容审核",
 }
 
+// ⚠️ 临时总开关：真机「一打开 App 就闪退」排查期间先停用本地通知。
+// 现象=已登录状态下一开 App，LocalNotifier 调原生 local-notifications 即崩（原生崩溃 JS 拦不住）。
+// 排查清楚（看 logcat 定位是 requestPermissions / createChannel / 插件加载哪一步）后再改回 true。
+const LOCAL_NOTIF_ENABLED = false
+
 let notifId = 1
 const nameCache = new Map<string, string>()
 
@@ -36,6 +41,7 @@ export default function LocalNotifier() {
   const { user } = useSimpleAuth()
 
   useEffect(() => {
+    if (!LOCAL_NOTIF_ENABLED) return // 临时停用，排查「一打开就闪退」期间不碰原生本地通知
     if (!isNative() || !user?.id) return
     const myId = user.id
 
