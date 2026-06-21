@@ -274,7 +274,7 @@ export default function FriendLinksPanel() {
       </div>
 
       {/* —— 待处理申请 —— */}
-      <section className="admin-tab-enter space-y-3 rounded-2xl border border-lime-500/25 bg-black/30 p-5 backdrop-blur-xl">
+      <section className="admin-panel-glass admin-tab-enter space-y-3 p-5">
         <div className="flex items-center gap-2">
           <Inbox className="h-5 w-5 text-lime-400" />
           <h2 className="text-lg font-bold">待处理申请</h2>
@@ -287,7 +287,7 @@ export default function FriendLinksPanel() {
         ) : (
           <div className="space-y-3">
             {subs.map((s) => (
-              <div key={s.id} className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+              <div key={s.id} className="admin-inset-glass p-4">
                 <div className="min-w-0 flex-1 space-y-1">
                   <p className="font-bold text-white/90">{s.site_name}</p>
                   <a
@@ -332,7 +332,7 @@ export default function FriendLinksPanel() {
       </section>
 
       {/* —— 新增友链 —— */}
-      <section className="admin-tab-enter space-y-3 rounded-2xl border border-white/10 bg-black/30 p-5 backdrop-blur-xl">
+      <section className="admin-panel-glass admin-tab-enter space-y-3 p-5">
         <div className="flex items-center gap-2">
           <Plus className="h-5 w-5 text-lime-400" />
           <h2 className="text-lg font-bold">手动添加友链</h2>
@@ -368,7 +368,7 @@ export default function FriendLinksPanel() {
       {(["friend", "nav"] as const).map((cat) => {
         const items = links.filter((l) => l.category === cat).sort((a, b) => a.sort_order - b.sort_order)
         return (
-          <section key={cat} className="admin-tab-enter space-y-3">
+          <section key={cat} className="admin-panel-glass admin-tab-enter space-y-3 p-5">
             <div className="flex items-baseline gap-2">
               <h2 className="text-lg font-bold">{CAT_LABEL[cat]}</h2>
               <span className="text-xs text-white/30">{loading ? "…" : `${items.length} 条`}</span>
@@ -406,7 +406,7 @@ export default function FriendLinksPanel() {
                     <div
                       key={link.id}
                       className={cn(
-                        "flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-3",
+                        "admin-inset-glass flex items-center gap-3 p-3",
                         !link.is_visible && "opacity-50",
                       )}
                     >
