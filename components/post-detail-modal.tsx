@@ -432,13 +432,18 @@ export default function PostDetailModal({
               原来用 framer-motion 把 backdrop-filter 从 blur(0)→blur(15) 逐帧插值，
               等于每帧把整个全屏背景重做一次高斯模糊 —— 移动端打开卡顿的头号原因。
               改为半径恒定（移动端 10px / 桌面 15px）、整层 opacity 0→1 淡入，
-              GPU 只需合成一个已缓存的模糊层，视觉几乎一致、全平台受益。 */}
+              GPU 只需合成一个已缓存的模糊层，视觉几乎一致、全平台受益。
+              安卓降级实底（与 GlassMorph 的 solid={IS_ANDROID} 一致）：灯箱是 portal 到
+              body 的全屏 fixed 层、盖在本遮罩之上，灯箱遮罩做 opacity 进出场时本层
+              backdrop-filter 会被迫每帧重采样（上面盖的半透明层在变），安卓 WebView
+              合成器撕裂 → 灯箱开/关闪屏。去 backdrop-filter 后本层是纯实底合成、不重采样，
+              灯箱开关不再触发底下撕裂。底下已有 bg-black/40，实底观感差异极小。 */}
           <motion.div
             className="absolute inset-0 bg-black/40"
             style={{
               pointerEvents: "none",
-              backdropFilter: isMobile ? "blur(10px)" : "blur(15px)",
-              WebkitBackdropFilter: isMobile ? "blur(10px)" : "blur(15px)",
+              backdropFilter: IS_ANDROID ? undefined : isMobile ? "blur(10px)" : "blur(15px)",
+              WebkitBackdropFilter: IS_ANDROID ? undefined : isMobile ? "blur(10px)" : "blur(15px)",
             }}
             initial={{ opacity: 0 }}
             animate={{ opacity: closing ? 0 : 1 }}
