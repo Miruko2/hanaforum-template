@@ -88,20 +88,34 @@ export default function SharePosterModal({ open, onClose, input }: SharePosterMo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, sig, runGenerate])
 
-  // Esc 关闭 + 锁滚动
+  // Esc 关闭
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose()
     }
     window.addEventListener("keydown", onKey)
-    const prev = document.body.style.overflow
-    document.body.style.overflow = "hidden"
-    return () => {
-      window.removeEventListener("keydown", onKey)
-      document.body.style.overflow = prev
-    }
+    return () => window.removeEventListener("keydown", onKey)
   }, [open, onClose])
+
+  // 锁滚动：打开即锁；解锁推迟到退场动画结束（见 AnimatePresence onExitComplete）。
+  // 安卓 WebView 上，关闭瞬间立即恢复 body.overflow 会触发整页 reflow、抢掉退场动画 → 闪屏。
+  // 恢复「之前的值」而非强制清空：本弹窗常开在帖子详情弹窗之上，后者也锁了滚动，强制清空会误把它解锁。
+  const prevOverflowRef = useRef("")
+  useEffect(() => {
+    if (!open) return
+    prevOverflowRef.current = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+  }, [open])
+  const unlockScroll = useCallback(() => {
+    document.body.style.overflow = prevOverflowRef.current
+  }, [])
+  // 组件真正卸载时兜底恢复（如整页跳转），避免滚动锁泄漏。
+  useEffect(() => {
+    return () => {
+      document.body.style.overflow = prevOverflowRef.current
+    }
+  }, [])
 
   const handleSave = useCallback(() => {
     if (!poster) return
@@ -128,7 +142,7 @@ export default function SharePosterModal({ open, onClose, input }: SharePosterMo
   if (typeof window === "undefined") return null
 
   return createPortal(
-    <AnimatePresence>
+    <AnimatePresence onExitComplete={unlockScroll}>
       {open && (
         <motion.div
           className="fixed inset-0 z-[80] flex items-center justify-center p-4"
@@ -139,10 +153,16 @@ export default function SharePosterModal({ open, onClose, input }: SharePosterMo
           exit={{ pointerEvents: "none" as const }}
           onClick={onClose}
         >
-          {/* 遮罩：暗化 + 固定模糊，自身做 opacity 淡入（兄弟节点，不影响面板毛玻璃） */}
+          {/* 遮罩：暗化 +（非安卓）固定模糊，自身做 opacity 淡入（兄弟节点，不影响面板毛玻璃）。
+              安卓 WebView 对 backdrop-filter 脆弱：模糊层在 opacity 进/出场时会撕裂碎闪
+              （即用户反馈的「开/关弹窗闪屏」），故安卓降级纯实底、去掉 backdrop-filter，仅留安全的 opacity 淡入。 */}
           <motion.div
-            className="absolute inset-0 bg-black/55"
-            style={{ backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)" }}
+            className="absolute inset-0"
+            style={{
+              background: IS_ANDROID ? "rgba(6,8,6,0.8)" : "rgba(0,0,0,0.55)",
+              backdropFilter: IS_ANDROID ? undefined : "blur(10px)",
+              WebkitBackdropFilter: IS_ANDROID ? undefined : "blur(10px)",
+            }}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
