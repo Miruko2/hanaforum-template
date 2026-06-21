@@ -35,6 +35,7 @@ const ENFORCE_ON_ERROR = false
 const NOTIFY_POST = true
 const NOTIFY_COMMENT = true
 const NOTIFY_DANMU = false
+const NOTIFY_CHAT = false
 // 词库 / 白名单内存缓存时长：管理员增删后最多这么久全网生效
 const CACHE_TTL = 60_000 // 60 秒
 // ────────────────────────────────────────────────────────────────────────────
@@ -42,6 +43,7 @@ const CACHE_TTL = 60_000 // 60 秒
 const MSG_POST_REMOVED = "你发布的帖子因包含敏感内容，已被系统自动移除。"
 const MSG_COMMENT_REMOVED = "你发表的评论因包含敏感内容，已被系统自动移除。"
 const MSG_DANMU_REMOVED = "你发送的弹幕因包含敏感内容，已被移除。"
+const MSG_CHAT_REMOVED = "你在聊天室的消息因包含敏感内容，已被移除。"
 
 const POST_IMAGES_PREFIX = `${SUPABASE_URL}/storage/v1/object/public/post-images/`
 
@@ -175,7 +177,7 @@ Deno.serve(async (req) => {
   if (table === "posts") {
     text = `${str(record.title)}\n${str(record.content)}`
     oldText = `${str(oldRecord?.title)}\n${str(oldRecord?.content)}`
-  } else if (table === "comments" || table === "live_comments") {
+  } else if (table === "comments" || table === "live_comments" || table === "chat_messages") {
     text = str(record.content)
     oldText = str(oldRecord?.content)
   } else {
@@ -264,6 +266,8 @@ async function enforceRemove(
     await removeComment(admin, id, userId)
   } else if (table === "live_comments") {
     await removeDanmu(admin, id, userId)
+  } else if (table === "chat_messages") {
+    await removeChat(admin, id, userId)
   }
 }
 
@@ -298,6 +302,14 @@ async function removeDanmu(admin: SupabaseClient, id: string, userId: string): P
   const { error } = await admin.from("live_comments").delete().eq("id", id)
   if (error) console.error("[moderate-text] 删弹幕失败:", error)
   if (NOTIFY_DANMU) await notifyUser(admin, userId, MSG_DANMU_REMOVED)
+}
+
+// 删大厅聊天消息。默认不通知（与弹幕一致：量大、转瞬即逝）。
+async function removeChat(admin: SupabaseClient, id: string, userId: string): Promise<void> {
+  if (!id) return
+  const { error } = await admin.from("chat_messages").delete().eq("id", id)
+  if (error) console.error("[moderate-text] 删聊天消息失败:", error)
+  if (NOTIFY_CHAT) await notifyUser(admin, userId, MSG_CHAT_REMOVED)
 }
 
 // 删存储里的图（仅当确属本项目 post-images 桶；路径从 URL 反解，不接受外部任意路径）。

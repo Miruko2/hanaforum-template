@@ -37,6 +37,7 @@ const TABLE_LABEL: Record<string, string> = {
   posts: "帖子",
   comments: "评论",
   live_comments: "弹幕",
+  chat_messages: "聊天",
 }
 
 type SubTab = "queue" | "words" | "allowlist"

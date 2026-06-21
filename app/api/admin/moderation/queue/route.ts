@@ -54,6 +54,8 @@ async function removeOriginalContent(table: string, recordId: string): Promise<v
     await supabaseAdmin.from("comments").delete().eq("id", recordId)
   } else if (table === "live_comments") {
     await supabaseAdmin.from("live_comments").delete().eq("id", recordId)
+  } else if (table === "chat_messages") {
+    await supabaseAdmin.from("chat_messages").delete().eq("id", recordId)
   }
 }
 
