@@ -188,12 +188,18 @@ export default function ImageLightbox({
   if (typeof window === "undefined") return null
 
   // 单图入场动画：安卓 app 去几何动画，其余 spring 弹跳
+  // 安卓 app 用极短 opacity 过渡（150ms）而非 duration:0 瞬切：
+  // decode() 只保证 CPU 解码完成，但大图首次进入灯箱时 WebView 还要把位图上传成
+  // GPU 纹理 + 建立合成层。duration:0 的瞬切会让「纹理化」与「可见性切换」撞在同一帧，
+  // 合成器来不及稳定 backing buffer → 首次放大撕裂闪屏（第二次点击因纹理已缓存故不闪）。
+  // 改成 150ms 渐显：纹理化在过渡期间完成，不再与瞬切并发；时长极短、视觉上几乎无感，
+  // 仍保留「app 内无弹跳」的设计意图。exit 同样给 120ms 过渡，关闭时图片淡出而非硬切。
   const imgAnim = isAndroidApp
     ? {
         initial: { opacity: 0 },
         animate: loaded ? { opacity: 1 } : { opacity: 0 },
         exit: { opacity: 0 },
-        transition: { duration: 0 },
+        transition: { duration: 0.15, ease: "easeOut" as const },
       }
     : {
         initial: { scale: 0.6, opacity: 0 },
