@@ -20,6 +20,8 @@ import { CATEGORIES } from "@/lib/categories"
 import { postImageList } from "@/lib/post-images"
 import { useMengmegziCommand } from "@/hooks/use-mengmegzi-command"
 import { useToast } from "@/hooks/use-toast"
+import ShareButton from "@/components/share/share-button"
+import { SITE_URL } from "@/lib/site-url"
 
 // 安卓（含 Capacitor WebView）：合成器对 backdrop-filter 的逐帧重采样远弱于
 // iOS/桌面，开/关帖动画期间的玻璃面板与渐进模糊带在安卓上降级（实底/纯渐变）。
@@ -360,6 +362,19 @@ export default function PostDetailModal({
             <span>{post.comments_count || 0}</span>
           </div>
         </div>
+        {/* 分享：生成带二维码的精美海报，保存后发微信/QQ */}
+        <ShareButton
+          variant="pill"
+          input={{
+            kind: "post",
+            title: post.title,
+            content: post.description || post.content,
+            author: username,
+            avatarUrl,
+            imageUrl: post.image_url,
+            url: SITE_URL,
+          }}
+        />
       </motion.div>
 
       {/* Comments 挂载时机：

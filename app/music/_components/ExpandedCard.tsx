@@ -17,6 +17,8 @@ import { LyricsEcho } from "./LyricsEcho"
 import { LiquidRefraction } from "./LiquidRefraction"
 import { SnowOverlay } from "./SnowOverlay"
 import { AudioTopography } from "./AudioTopography"
+import ShareButton from "@/components/share/share-button"
+import { SITE_URL } from "@/lib/site-url"
 
 /** Screen-space rect of the card that was clicked — used as flight start. */
 export type ExpandRect = { left: number; top: number; width: number; height: number }
@@ -444,19 +446,35 @@ function ExpandedInner({
                 <SkipForward size={compact ? 16 : 18} />
               </button>
             </div>
-            <button
-              type="button"
-              aria-label="歌词"
-              aria-pressed={lyricsEnabled}
-              title={lyricsEnabled ? "关闭歌词" : "开启歌词"}
-              onClick={() => setLyricsEnabled(!lyricsEnabled)}
-              className="grid h-8 w-8 place-items-center rounded-full transition-colors hover:bg-white/10 sm:h-9 sm:w-9"
-              style={{
-                color: lyricsEnabled ? `hsl(${hue} 80% 65%)` : "rgba(255,255,255,0.55)",
-              }}
-            >
-              <Mic2 size={compact ? 16 : 18} />
-            </button>
+            <div className="flex items-center gap-1">
+              {/* 分享：生成带二维码的精美海报，保存后发微信/QQ */}
+              <ShareButton
+                variant="icon"
+                label="分享歌曲"
+                className="h-8 w-8 sm:h-9 sm:w-9"
+                input={{
+                  kind: "music",
+                  title: shown.title,
+                  artist: shown.artist,
+                  coverUrl: shown.cover ?? null,
+                  hue,
+                  url: `${SITE_URL}/music`,
+                }}
+              />
+              <button
+                type="button"
+                aria-label="歌词"
+                aria-pressed={lyricsEnabled}
+                title={lyricsEnabled ? "关闭歌词" : "开启歌词"}
+                onClick={() => setLyricsEnabled(!lyricsEnabled)}
+                className="grid h-8 w-8 place-items-center rounded-full transition-colors hover:bg-white/10 sm:h-9 sm:w-9"
+                style={{
+                  color: lyricsEnabled ? `hsl(${hue} 80% 65%)` : "rgba(255,255,255,0.55)",
+                }}
+              >
+                <Mic2 size={compact ? 16 : 18} />
+              </button>
+            </div>
           </div>
         </div>
 
