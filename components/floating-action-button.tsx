@@ -95,6 +95,9 @@ export default function FloatingActionButton({ onPostCreated }: FloatingActionBu
     openRef.current = false
     setOpen(false)
     setFlying(false)
+    // 关闭即收起表单：果冻皮渐入回绿的过程中是半透明的，若表单仍 visible 会随面板缩放
+    // 扭曲透出。提前 visibility:hidden 让面板以深色空盒缩回，由回绿的果冻皮盖住。
+    setFormLit(false)
     window.setTimeout(() => {
       if (!openRef.current) unlockScroll()
     }, 900)
@@ -213,7 +216,7 @@ export default function FloatingActionButton({ onPostCreated }: FloatingActionBu
                 key="fab"
                 className="pointer-events-auto absolute bottom-6 right-6 flex h-14 w-14 items-center justify-center rounded-full border border-lime-300/40 bg-gradient-to-br from-lime-400 to-lime-500 text-black shadow-lg"
                 initial={{ opacity: 0, scale: 0.6 }}
-                animate={{ opacity: 1, scale: 1, transition: { delay: 0.22, duration: 0.16 } }}
+                animate={{ opacity: 1, scale: 1, transition: { delay: 0.3, duration: 0.16 } }}
                 exit={{ opacity: 0, scale: 0.6, transition: { duration: 0.12 } }}
                 onClick={handleButtonClick}
                 aria-label="发布新帖子"
@@ -261,7 +264,9 @@ export default function FloatingActionButton({ onPostCreated }: FloatingActionBu
                     x: CLOSE_SPRING,
                     y: CLOSE_SPRING,
                     scale: CLOSE_SPRING,
-                    opacity: { delay: 0.18, duration: 0.18, ease: "easeIn" },
+                    // 面板淡出推到缩回尾声：此前由回绿的果冻皮盖住深色面板底，
+                    // 缩到位时面板再淡出、FAB 接力淡入，绿色全程连续无第二下突跳。
+                    opacity: { delay: 0.28, duration: 0.14, ease: "easeIn" },
                   },
                 }}
               >
@@ -281,7 +286,10 @@ export default function FloatingActionButton({ onPostCreated }: FloatingActionBu
                       ? { opacity: 0, transition: { duration: 0.3, ease: "easeOut" } }
                       : { opacity: 1, transition: { duration: 0 } }
                   }
-                  exit={{ opacity: 1, transition: { delay: 0.1, duration: 0.16, ease: "easeOut" } }}
+                  // 关闭时果冻皮从第 0 帧平滑渐入回绿、duration 拉到 0.3 覆盖整个缩回过程：
+                  // 去掉原 delay 0.1 的「延迟后突跳」，回绿随面板缩回同步推进；面板缩到位时
+                  // FAB 再淡入接力，绿色全程连续，不再「闪两下绿」。
+                  exit={{ opacity: 1, transition: { duration: 0.3, ease: "easeOut" } }}
                 />
               </motion.div>
             )}
