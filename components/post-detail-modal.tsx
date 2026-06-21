@@ -85,6 +85,8 @@ export default function PostDetailModal({
   const [lightboxOpen, setLightboxOpen] = useState(false)
   // 多图：详情页轮播当前页 / 灯箱起始页（两者共享，点开即看同一张）
   const [imageIndex, setImageIndex] = useState(0)
+  // 上一帧 lightboxOpen，用于侦测「关灯箱」这一跳变 → 触发详情图淡入遮掩重绘（见下方 effect）
+  const prevLightboxOpenRef = useRef(false)
 
   // 帖子全部图片（封面在首位）。单图老帖回退 [image_url]。
   const images = postImageList(post)
@@ -197,6 +199,22 @@ export default function PostDetailModal({
       setImageIndex(0)
     }
   }, [isOpen])
+
+  // 安卓：关灯箱瞬间，给详情图区做一次快速淡入，把「图层揭开时的重绘」藏进淡入里。
+  // 残留根因：详情大图被全屏灯箱遮挡期间纹理被 WebView 丢弃，关灯箱揭开时冷重栅格 → 轻微抖动/闪。
+  // 对被遮挡层「保活」无效（已证伪）；改为「接受重绘但用 opacity 遮掩」——重绘发生在 opacity≈0
+  // 的首帧（不可见），随后淡到 1 时位图已栅格完成（已暖）。用 WAAPI 一次性播放、fill 默认不持久
+  // （结束自动回到 style 的 opacity:1），不影响 hero 转场对 heroRef 的测量。时长与灯箱 exit(0.25s)
+  // 同步：两者都由 lightboxOpen→false 触发，淡入与遮罩退场齐步，揭开即暖。仅安卓（桌面/iOS 无此问题）。
+  React.useEffect(() => {
+    const justClosed = prevLightboxOpenRef.current && !lightboxOpen
+    prevLightboxOpenRef.current = lightboxOpen
+    if (!justClosed || !IS_ANDROID) return
+    const el = heroRef.current
+    if (el && typeof el.animate === "function") {
+      el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 240, easing: "ease-out" })
+    }
+  }, [lightboxOpen])
 
   // 打开瞬间预取评论：网络请求与入场动画并行，评论区挂载（移动端 350ms 后 /
   // 桌面 hero 飞入后）时数据多半已在缓存 → 直接带内容出现，不闪「加载评论中」。
