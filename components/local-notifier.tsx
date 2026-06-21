@@ -2,16 +2,19 @@
 
 import { useEffect, useState } from "react"
 import { Capacitor } from "@capacitor/core"
+// 静态 import：插件打进主包随 App 一起加载，不再单独联网拉分块（动态 import 在弱网+VPN 下会卡死）。
+import { LocalNotifications } from "@capacitor/local-notifications"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { supabase } from "@/lib/supabaseClient"
 
-// 【调试版2·2026-06-21·ln-dbg2】系统通知不弹，且 alert 没出现。改用「屏幕底部常驻浮层」
-// 显示：版本号 + 订阅状态 + 收到的事件 + notify 每步结果。比 alert 可靠（不被 ROM 拦）。
-// 看到底部绿色调试条=新代码已生效；据条里内容定位卡点。定位后整段移除。Web 端不显示。
+// 【调试版3·2026-06-21·ln-dbg3】上一版定位到：订阅成功、dm事件已到，但 notify 卡在
+// 「await import(插件)」动态分块加载（弱网 29.8KB/s + VPN 拉不下来）。本版改静态 import +
+// 查名字改后台不阻塞，并保留底部调试浮层确认链路打通（schedule=OK + 真弹通知）。
+// Web 端不显示浮层、不调原生。
 
 const LOCAL_NOTIF_ENABLED = true
 const DEBUG_OVERLAY = true
-const VERSION = "ln-dbg2"
+const VERSION = "ln-dbg3"
 
 const NOTIF_TITLES: Record<string, string> = {
   chat_mention: "有人提到了你",
@@ -25,7 +28,6 @@ const NOTIF_TITLES: Record<string, string> = {
 
 let notifId = 1
 const nameCache = new Map<string, string>()
-let pluginPromise: Promise<any> | null = null
 let permRequested = false
 let listenerAdded = false
 let channelReady = false
@@ -36,15 +38,6 @@ function isNative(): boolean {
   } catch {
     return false
   }
-}
-
-async function getLN(): Promise<any | null> {
-  if (!pluginPromise) {
-    pluginPromise = import("@capacitor/local-notifications")
-      .then((m) => m.LocalNotifications)
-      .catch(() => null)
-  }
-  return pluginPromise
 }
 
 export default function LocalNotifier() {
@@ -59,10 +52,9 @@ export default function LocalNotifier() {
     push(`mounted uid=${myId.slice(0, 6)}`)
 
     const notify = async (title: string, body: string, url: string) => {
+      push("notify进入")
       try {
-        const LN = await getLN()
-        push(LN ? "plugin=OK" : "plugin=NULL")
-        if (!LN) return
+        const LN = LocalNotifications
         if (!listenerAdded) {
           listenerAdded = true
           try {
@@ -123,25 +115,26 @@ export default function LocalNotifier() {
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "dm_messages", filter: `recipient_id=eq.${myId}` },
-        async (payload) => {
+        (payload) => {
           const r = payload.new as { sender_id?: string; kind?: string; content?: string }
           push("dm事件 from=" + String(r?.sender_id ?? "").slice(0, 6))
           if (!r || r.sender_id === myId) return
-          let name = (r.sender_id && nameCache.get(r.sender_id)) || ""
-          if (!name && r.sender_id) {
-            try {
-              const { data } = await supabase
-                .from("profiles")
-                .select("username")
-                .eq("id", r.sender_id)
-                .maybeSingle()
-              if (data?.username) {
-                name = String(data.username)
-                nameCache.set(r.sender_id, name)
+          const sid = r.sender_id
+          const name = (sid && nameCache.get(sid)) || ""
+          // 后台补名字进缓存（fire-and-forget，绝不阻塞通知）
+          if (!name && sid) {
+            void (async () => {
+              try {
+                const { data } = await supabase
+                  .from("profiles")
+                  .select("username")
+                  .eq("id", sid)
+                  .maybeSingle()
+                if (data?.username) nameCache.set(sid, String(data.username))
+              } catch {
+                /* ignore */
               }
-            } catch {
-              /* ignore */
-            }
+            })()
           }
           const body = r.kind === "sticker" ? "[贴纸]" : String(r.content ?? "")
           notify(name || "新私信", body || "发来一条消息", "/chat")
