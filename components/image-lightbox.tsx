@@ -257,8 +257,8 @@ export default function ImageLightbox({
         animate: loaded ? { opacity: 1 } : { opacity: 0 },
         exit: { opacity: 0 },
         // 安卓 app：入场 250ms 渐显（给首次 GPU 纹理化充足过渡帧，避免与可见性切换撞帧；
-        // 150ms 对大图不够、仍会小幅闪）；退场 0.2s 与遮罩同步淡出。
-        transition: { duration: 0.25, ease: "easeOut" as const, exit: { duration: 0.2 } },
+        // 150ms 对大图不够、仍会小幅闪）；退场 0.25s 与遮罩 background 过渡同步。
+        transition: { duration: 0.25, ease: "easeOut" as const, exit: { duration: 0.25 } },
       }
     : {
         initial: { scale: 0.6, opacity: 0 },
@@ -273,25 +273,20 @@ export default function ImageLightbox({
         <motion.div
           className="fixed inset-0 z-[80] flex items-center justify-center"
           onClick={onClose}
-          // 安卓 app：遮罩入场瞬切 opacity:1（不做 0→1 淡入动画）。
-          // 根因：遮罩做 opacity 0→1 时它是半透明的，背后整个详情模态（多层合成：GlassMorph、
-          // PostCardImage 大图、背景遮罩…）每帧都要重新合成到这个半透明遮罩之下。安卓 WebView
-          // 合成器扛不住首次建立全屏合成层 + 同时每帧重合成背后复杂场景 → 撕裂闪屏（第一次
-          // 冷启动尤甚，因背后合成层刚建立、纹理未缓存；之后纹理缓存命中故不闪；详情页关再开
-          // 后纹理销毁、又回到冷启动态故又闪）。瞬切后遮罩一次性建立合成层、无半透明过渡帧，
-          // 背后无需逐帧重合成 → 不闪。观感：黑屏后 240ms 图片淡入（=「黑屏→图片浮现」），可接受。
-          // 关闭：遮罩与图片同时淡出（无 delay），同速 0.2s。
-          // 之前「图片先淡出→遮罩再淡出」会在遮罩单独淡出时透出完整详情模态+首页，
-          // 首页合成层重新可见时撕裂（帖子外闪）。同时淡出时，遮罩半透明期间透出的是
-          // 同步淡出的图片（也半透明），视觉更柔和；且遮罩从 0.82 黑淡到 0 的过程与
-          // 详情模态背景（0.4 黑）的亮度差被图片淡出掩盖，无明显突变。
-          // 打开仍瞬切（已验证不闪）。桌面/iOS 维持原 0.22s 淡入淡出。
-          initial={isAndroidApp ? { opacity: 1 } : { opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
+          // 安卓 app 遮罩策略：
+          // 打开：瞬切 opacity:1（不做 0→1 淡入）——半透明淡入会触发背后整屏逐帧重合成撕裂。
+          // 关闭：opacity 保持 1 不变，改为 background 从 rgba(0,0,0,0.82) 过渡到 rgba(0,0,0,0)。
+          //   关键：opacity 淡出（无论快慢）都会让整层变半透明 → 背后详情模态+首页逐帧重合成
+          //   → 帖子外闪（第一次尤甚，合成层从「被盖住」恢复撕裂）。background 过渡只改背景色、
+          //   层本身始终 opacity:1，合成层状态稳定不销毁，背后逐渐变可见而非「半透明重合成」。
+          //   background 透明后元素才卸载，此时视觉已不可见，卸载无突变。
+          // 桌面/iOS 维持原 opacity 淡入淡出（WebKit 合成器无此问题）。
+          initial={isAndroidApp ? { opacity: 1, background: "rgba(0,0,0,0.82)" } : { opacity: 0 }}
+          animate={{ opacity: 1, background: "rgba(0,0,0,0.82)" }}
+          exit={isAndroidApp ? { opacity: 1, background: "rgba(0,0,0,0)" } : { opacity: 0 }}
           transition={
             isAndroidApp
-              ? { duration: 0, exit: { duration: 0.2 } }
+              ? { duration: 0, exit: { duration: 0.25 } }
               : { duration: 0.22 }
           }
           style={{
