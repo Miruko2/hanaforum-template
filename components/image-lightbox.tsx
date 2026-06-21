@@ -48,6 +48,11 @@ export default function ImageLightbox({
 
   // 原图是否加载完成 —— 决定单图何时触发弹入动画
   const [loaded, setLoaded] = useState(false)
+  // 安卓 app：延迟挂载图片元素本身（不只是 reveal）。motion.img 一 mount 就建合成层，
+  // 若与遮罩 mount 的 opacity 动画并发会撕裂（即使图片 opacity:0 不可见，合成层建立
+  // 本身就撕裂）。imgReady=true 后才渲染 <motion.img>，确保图片合成层在遮罩淡入完成、
+  // 稳定后才建立。桌面/iOS 立即 true（WebKit 不存在此问题）。
+  const [imgReady, setImgReady] = useState(!isAndroidApp)
   const imgRef = useRef<HTMLImageElement>(null)
   // 多图轮播容器与当前索引
   const trackRef = useRef<HTMLDivElement>(null)
@@ -74,17 +79,31 @@ export default function ImageLightbox({
   const [isAndroidApp] = useState(detectIsAndroidApp)
 
   // ── 单图：解码后再弹入 ───────────────────────────────────────────────
+  // 安卓 app 两阶段：① 延迟挂载 motion.img（imgReady）——避免图片合成层与遮罩 mount 的
+  // opacity 动画并发撕裂（即使图片 opacity:0 不可见，合成层建立本身就撕裂 backing buffer，
+  // 这是「每次冷启动第一次开都闪、详情页关再开后又闪」的根因）。② 挂载后等 decode 完再
+  // reveal（loaded）——避免首次 GPU 纹理化与 opacity 切换撞帧。桌面/iOS 跳过阶段①（imgReady
+  // 初始即 true），仅走阶段②。
   useEffect(() => {
     if (!open || isMulti) return
     setLoaded(false)
     let cancelled = false
-    // 安卓 app：命中预加载缓存时 decode() 几乎立即 resolve，图片 reveal 与遮罩 mount 的
-    // opacity 动画并发（同帧建立两个动画层）→ WebView 合成器撕裂闪屏。未命中缓存时图片
-    // reveal 天然延后（等下载）、与遮罩错开故不闪 —— 这正是用户观察到的「立马出现就闪、
-    // 先转圈再出现不闪」。故安卓 app 强制让 reveal 至少延后到遮罩淡入基本完成（~0.24s），
-    // 统一两种情况的时序：图片总在遮罩稳定后才出现，不再并发。期间显示已有的 loading
-    // spinner，0.24s 视觉上只是「快速加载」，无突兀感。桌面/iOS 不受影响（overlayMinDelay=0）。
-    const overlayMinDelay = isAndroidApp ? 240 : 0
+
+    // 阶段①：安卓 app 延迟到遮罩淡入完成（~0.24s）才挂载图片元素
+    if (isAndroidApp) {
+      setImgReady(false)
+      const mountTimer = window.setTimeout(() => {
+        if (!cancelled) setImgReady(true)
+      }, 240)
+      // 阶段②在 imgReady 变化后由下面的 effect 接管；这里先返回清理
+      return () => {
+        cancelled = true
+        clearTimeout(mountTimer)
+      }
+    }
+
+    // 桌面/iOS：图片已挂载（imgReady 初始 true），直接走 decode→reveal
+    const overlayMinDelay = 0
     const reveal = () => {
       if (cancelled) return
       if (overlayMinDelay > 0) {
@@ -111,6 +130,30 @@ export default function ImageLightbox({
       cancelAnimationFrame(raf)
     }
   }, [open, isMulti, list[0], isAndroidApp])
+
+  // 阶段②（安卓 app）：imgReady 翻 true 后（图片元素刚挂载），等 decode 完再 reveal
+  useEffect(() => {
+    if (!open || isMulti || !isAndroidApp || !imgReady) return
+    let cancelled = false
+    const reveal = () => {
+      if (!cancelled) setLoaded(true)
+    }
+    const raf = requestAnimationFrame(() => {
+      const el = imgRef.current
+      if (!el) return
+      if (typeof el.decode === "function") {
+        el.decode().then(reveal).catch(reveal)
+      } else if (el.complete && el.naturalWidth > 0) {
+        reveal()
+      } else {
+        el.addEventListener("load", reveal, { once: true })
+      }
+    })
+    return () => {
+      cancelled = true
+      cancelAnimationFrame(raf)
+    }
+  }, [open, isMulti, imgReady, isAndroidApp])
 
   // 打开时把内部索引同步到受控 index，并把轮播滚到对应页（无动画，避免开场滑动）
   useLayoutEffect(() => {
@@ -231,9 +274,10 @@ export default function ImageLightbox({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          // 安卓 app：关闭时遮罩 exit 稍延后（0.12s），让图片先淡出、合成层先销毁，
+          // 安卓 app：关闭时遮罩 exit 延后 0.12s，让图片先淡出销毁、遮罩后淡出，
           // 避免图片层与全屏遮罩层同时销毁/动画并发撕裂 backing buffer（关闭第一次闪的根因）。
-          // 打开时不延后（打开的并发已由 reveal 延迟解决）。桌面/iOS 维持原 0.22s。
+          // 打开的并发由下方 reveal 延迟（240ms）解决：遮罩 0.22s 淡入完成、合成层稳定后
+          // 图片才 reveal，两者不再撞帧。桌面/iOS 维持原 0.22s 淡入淡出。
           transition={
             isAndroidApp
               ? { duration: 0.22, exit: { delay: 0.12, duration: 0.22 } }
@@ -395,20 +439,24 @@ export default function ImageLightbox({
               {!loaded && (
                 <Loader2 className="pointer-events-none absolute h-8 w-8 animate-spin text-white/70" />
               )}
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <motion.img
-                ref={imgRef}
-                src={list[0]}
-                alt={alt}
-                draggable={false}
-                decoding="async"
-                onClick={(e) => e.stopPropagation()}
-                className="max-h-full max-w-full select-none rounded-2xl object-contain p-4 shadow-[0_30px_90px_-20px_rgba(0,0,0,0.8)] cursor-zoom-out sm:p-10"
-                initial={imgAnim.initial}
-                animate={imgAnim.animate}
-                exit={imgAnim.exit}
-                transition={imgAnim.transition}
-              />
+              {/* 安卓 app：imgReady=false 时不挂载 motion.img（避免合成层与遮罩 mount 并发撕裂）。
+                  遮罩淡入完成（~0.24s）后 imgReady 翻 true 才挂载，再 decode→reveal。 */}
+              {imgReady && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <motion.img
+                  ref={imgRef}
+                  src={list[0]}
+                  alt={alt}
+                  draggable={false}
+                  decoding="async"
+                  onClick={(e) => e.stopPropagation()}
+                  className="max-h-full max-w-full select-none rounded-2xl object-contain p-4 shadow-[0_30px_90px_-20px_rgba(0,0,0,0.8)] cursor-zoom-out sm:p-10"
+                  initial={imgAnim.initial}
+                  animate={imgAnim.animate}
+                  exit={imgAnim.exit}
+                  transition={imgAnim.transition}
+                />
+              )}
             </>
           )}
         </motion.div>
