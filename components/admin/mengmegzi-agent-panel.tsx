@@ -78,25 +78,35 @@ export default function MengmegziAgentPanel() {
   const [sending, setSending] = useState(false)
   const { toast } = useToast()
 
-  const refreshAll = useCallback(async () => {
+  // 实时数据（状态 + 日志）：可安全地每 10s 轮询。
+  // ⚠️ 这里绝不刷新 config——否则会用服务端旧值覆盖用户正在编辑、尚未点「保存配置」的输入框（自动改回去的根因）。
+  const refreshLive = useCallback(async () => {
     const h = await authHeaders()
-    const [s, c, l] = await Promise.all([
+    const [s, l] = await Promise.all([
       fetch(apiUrl("/api/admin/mengmegzi-agent/state"), { headers: h }).then((r) => r.json()),
-      fetch(apiUrl("/api/admin/mengmegzi-agent/config"), { headers: h }).then((r) => r.json()),
       fetch(apiUrl("/api/admin/mengmegzi-agent/log?limit=50"), { headers: h }).then((r) =>
         r.json(),
       ),
     ])
     setState(s)
-    setConfig(c)
     setLogs(Array.isArray(l) ? l : [])
   }, [])
 
+  // config 只在挂载时加载一次；之后由用户编辑→点「保存配置」提交，开关类走乐观更新，不再被轮询重拉覆盖。
+  const loadConfig = useCallback(async () => {
+    const h = await authHeaders()
+    const c = await fetch(apiUrl("/api/admin/mengmegzi-agent/config"), { headers: h }).then((r) =>
+      r.json(),
+    )
+    setConfig(c)
+  }, [])
+
   useEffect(() => {
-    refreshAll()
-    const t = setInterval(refreshAll, 10000)
+    loadConfig()
+    refreshLive()
+    const t = setInterval(refreshLive, 10000)
     return () => clearInterval(t)
-  }, [refreshAll])
+  }, [loadConfig, refreshLive])
 
   async function sendCommand(body: any) {
     setSending(true)
@@ -110,7 +120,7 @@ export default function MengmegziAgentPanel() {
       if (!res.ok)
         toast({ title: "指令失败", description: data.error || "请重试", variant: "destructive" })
       else toast({ title: "已受理", description: "等待 tick 执行" })
-      await refreshAll()
+      await refreshLive()
     } finally {
       setSending(false)
     }
@@ -122,7 +132,7 @@ export default function MengmegziAgentPanel() {
       headers: { "Content-Type": "application/json", ...(await authHeaders()) },
       body: JSON.stringify({ action: "reset" }),
     })
-    await refreshAll()
+    await refreshLive()
   }
 
   async function saveConfig() {
@@ -136,14 +146,15 @@ export default function MengmegziAgentPanel() {
     else toast({ title: "保存失败", description: "请重试", variant: "destructive" })
   }
 
-  /** 即时存一项配置（开关类用，免点保存） */
+  /** 即时存一项配置（开关类用，免点保存）。先乐观更新本地 config，避免重拉覆盖用户未保存的输入框。 */
   async function patchConfig(partial: Record<string, any>) {
+    setConfig((c) => (c ? { ...c, ...partial } : c))
     await fetch(apiUrl("/api/admin/mengmegzi-agent/config"), {
       method: "PATCH",
       headers: { "Content-Type": "application/json", ...(await authHeaders()) },
       body: JSON.stringify(partial),
     })
-    await refreshAll()
+    await refreshLive()
   }
 
   const disabled = state?.status === "dead"
@@ -168,7 +179,7 @@ export default function MengmegziAgentPanel() {
             <Button
               variant="outline"
               size="sm"
-              onClick={refreshAll}
+              onClick={refreshLive}
               className="border-white/15 bg-white/5 text-white hover:bg-white/10 hover:text-white"
             >
               <RefreshCw className="h-4 w-4" />
@@ -280,9 +291,11 @@ export default function MengmegziAgentPanel() {
             <span className="text-sm text-white/80">留言+回复轮询</span>
             <Switch
               checked={config?.comment_polling_enabled || false}
-              onCheckedChange={(v) =>
+              onCheckedChange={(v) => {
+                // 乐观更新：sendCommand 不再整体重拉 config，靠这里让开关即时反映
+                setConfig((c) => (c ? { ...c, comment_polling_enabled: v } : c))
                 sendCommand({ action: v ? "start_comment_polling" : "stop_comment_polling" })
-              }
+              }}
               className="data-[state=checked]:bg-lime-500 data-[state=unchecked]:bg-white/20"
             />
             {config?.comment_polling_enabled && (
@@ -413,7 +426,7 @@ export default function MengmegziAgentPanel() {
           <Button
             variant="outline"
             size="sm"
-            onClick={refreshAll}
+            onClick={refreshLive}
             className="ml-auto border-white/15 bg-white/5 text-white hover:bg-white/10 hover:text-white"
           >
             <RefreshCw className="h-4 w-4" />
