@@ -78,8 +78,22 @@ export default function ImageLightbox({
     if (!open || isMulti) return
     setLoaded(false)
     let cancelled = false
+    // 安卓 app：命中预加载缓存时 decode() 几乎立即 resolve，图片 reveal 与遮罩 mount 的
+    // opacity 动画并发（同帧建立两个动画层）→ WebView 合成器撕裂闪屏。未命中缓存时图片
+    // reveal 天然延后（等下载）、与遮罩错开故不闪 —— 这正是用户观察到的「立马出现就闪、
+    // 先转圈再出现不闪」。故安卓 app 强制让 reveal 至少延后到遮罩淡入基本完成（~0.24s），
+    // 统一两种情况的时序：图片总在遮罩稳定后才出现，不再并发。期间显示已有的 loading
+    // spinner，0.24s 视觉上只是「快速加载」，无突兀感。桌面/iOS 不受影响（overlayMinDelay=0）。
+    const overlayMinDelay = isAndroidApp ? 240 : 0
     const reveal = () => {
-      if (!cancelled) setLoaded(true)
+      if (cancelled) return
+      if (overlayMinDelay > 0) {
+        window.setTimeout(() => {
+          if (!cancelled) setLoaded(true)
+        }, overlayMinDelay)
+      } else {
+        setLoaded(true)
+      }
     }
     const raf = requestAnimationFrame(() => {
       const el = imgRef.current
@@ -96,7 +110,7 @@ export default function ImageLightbox({
       cancelled = true
       cancelAnimationFrame(raf)
     }
-  }, [open, isMulti, list[0]])
+  }, [open, isMulti, list[0], isAndroidApp])
 
   // 打开时把内部索引同步到受控 index，并把轮播滚到对应页（无动画，避免开场滑动）
   useLayoutEffect(() => {
@@ -217,7 +231,14 @@ export default function ImageLightbox({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.22 }}
+          // 安卓 app：关闭时遮罩 exit 稍延后（0.12s），让图片先淡出、合成层先销毁，
+          // 避免图片层与全屏遮罩层同时销毁/动画并发撕裂 backing buffer（关闭第一次闪的根因）。
+          // 打开时不延后（打开的并发已由 reveal 延迟解决）。桌面/iOS 维持原 0.22s。
+          transition={
+            isAndroidApp
+              ? { duration: 0.22, exit: { delay: 0.12, duration: 0.22 } }
+              : { duration: 0.22 }
+          }
           style={{
             background: "rgba(0,0,0,0.82)",
             backdropFilter: isAndroid ? undefined : "blur(10px)",
