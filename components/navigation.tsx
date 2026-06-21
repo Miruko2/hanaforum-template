@@ -32,6 +32,17 @@ import {
   ringDirection,
 } from "@/lib/view-transition-nav"
 import { Clapperboard, Zap, Music, Link2, Download } from "lucide-react"
+import { useIsAndroidApp } from "@/app/music/_lib/useIsAndroid"
+
+// 是否以「独立应用」形态运行：PWA 已添加到主屏 / standalone 全屏（iOS 用 navigator.standalone）。
+// 与 app/download/page.tsx 的 isStandalone 判定保持一致。
+function isStandaloneDisplay(): boolean {
+  if (typeof window === "undefined") return false
+  return (
+    window.matchMedia("(display-mode: standalone)").matches ||
+    (navigator as { standalone?: boolean }).standalone === true
+  )
+}
 
 // Navigation 内用 useSearchParams 读 ?category=xxx 高亮分类；
 // output:'export' 静态构建下必须包 Suspense（见底部 default export）。
@@ -58,6 +69,9 @@ function NavigationContent() {
   const { setOpen: setChatOpen, unread: chatUnread } = useChatUI()
   // 用户头像
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
+  // 是否运行在安卓 Capacitor 壳（APK）里。配合下方 standalone 判定，
+  // 用于在 App 内隐藏「下载应用」入口（已经装了就不必再下载）。
+  const isAndroidApp = useIsAndroidApp()
 
   // 确保组件在客户端渲染
   useEffect(() => {
@@ -230,6 +244,10 @@ function NavigationContent() {
     )
   }
 
+  // 已经在 App 内（安卓 APK 或已添加到主屏的 PWA）就隐藏「下载应用」入口。
+  // 此处在 mounted 之后才执行，window/navigator 已可用。
+  const isInApp = isAndroidApp || isStandaloneDisplay()
+
   // 移动端浮层菜单的卡片配置（galgame 卡片网格）。
   // 绿卡=站内导航，粉卡=ACG 功能（弹幕墙/影院/音乐）。
   const actionCards: {
@@ -246,9 +264,12 @@ function NavigationContent() {
     { key: "cinema", icon: <Clapperboard className="h-5 w-5" />, zh: inCinema ? "退出影院" : "影院模式", en: "CINEMA", tone: "pink", active: inCinema, onClick: () => { toggleCinemaMode(); closeMobileMenu() } },
     { key: "music", icon: <Music className="h-5 w-5" />, zh: "音乐", en: "MUSIC", tone: "pink", active: pathname === "/music", onClick: () => { flipNav("/music"); closeMobileMenu() } },
     { key: "links", icon: <Link2 className="h-5 w-5" />, zh: "友情链接", en: "FRIENDS", tone: "lime", active: pathname === "/links", onClick: () => { flipNav("/links"); closeMobileMenu() } },
-    // App 下载入口：/download 不在主导航环内，与 admin/login 同走普通 router.push
-    { key: "download", icon: <Download className="h-5 w-5" />, zh: "下载应用", en: "DOWNLOAD", tone: "lime", active: pathname === "/download", onClick: () => { router.push("/download"); closeMobileMenu() } },
   ]
+  // App 下载入口：只在普通浏览器里出现；已经在 App 内（APK / 主屏 PWA）就不再需要。
+  // /download 不在主导航环内，与 admin/login 同走普通 router.push。
+  if (!isInApp) {
+    actionCards.push({ key: "download", icon: <Download className="h-5 w-5" />, zh: "下载应用", en: "DOWNLOAD", tone: "lime", active: pathname === "/download", onClick: () => { router.push("/download"); closeMobileMenu() } })
+  }
   if (user) {
     actionCards.push({ key: "profile", icon: <User className="h-5 w-5" />, zh: "个人中心", en: "PROFILE", tone: "lime", active: pathname === "/profile", onClick: () => { flipNav("/profile"); closeMobileMenu() } })
   }
