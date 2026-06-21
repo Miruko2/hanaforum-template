@@ -14,6 +14,7 @@ import { LoadingAnimation } from "./ui/loading-animation"
 import NotificationCard from "@/components/notification-card"
 import PostDetailModal from "@/components/post-detail-modal"
 import AnnouncementModal from "@/components/announcement-modal"
+import FriendLinkDetailModal from "@/components/friend-link-detail-modal"
 import { getPost, likePost, unlikePost, checkUserLiked, getAnnouncement } from "@/lib/supabase"
 import { useRouter } from "next/navigation"
 import type { Notification, Post } from "@/lib/types"
@@ -41,6 +42,8 @@ export default function NotificationBell({ mobileView = false }: NotificationBel
   const [activeAnnouncement, setActiveAnnouncement] = useState<
     { title: string; content: string; image_url?: string | null; created_at: string } | null
   >(null)
+  // 友链申请详情弹窗（点击 friend_link_apply 通知时弹出）
+  const [activeFriendLink, setActiveFriendLink] = useState<Notification | null>(null)
   const [modalLiked, setModalLiked] = useState(false)
   const [modalLikeCount, setModalLikeCount] = useState(0)
   const [modalIsLiking, setModalIsLiking] = useState(false)
@@ -99,6 +102,13 @@ export default function NotificationBell({ mobileView = false }: NotificationBel
           } finally {
             setLoadingPostId(null)
           }
+          return
+        }
+
+        // 友链申请：弹出详情弹窗（先关铃铛弹窗），完整展示申请内容
+        if (notification.type === "friend_link_apply") {
+          setActiveFriendLink(notification)
+          setIsOpen(false)
           return
         }
 
@@ -325,6 +335,15 @@ export default function NotificationBell({ mobileView = false }: NotificationBel
         content={activeAnnouncement?.content ?? null}
         imageUrl={activeAnnouncement?.image_url ?? null}
         createdAt={activeAnnouncement?.created_at}
+      />
+
+      {/* 友链申请详情弹窗（从通知弹出） */}
+      <FriendLinkDetailModal
+        isOpen={!!activeFriendLink}
+        onClose={() => setActiveFriendLink(null)}
+        data={activeFriendLink?.meta ?? null}
+        fallbackMessage={activeFriendLink?.message ?? null}
+        createdAt={activeFriendLink?.created_at}
       />
     </>
   )

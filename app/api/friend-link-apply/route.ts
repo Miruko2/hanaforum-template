@@ -115,7 +115,7 @@ export async function POST(req: NextRequest) {
         submitter_ip: ip === "unknown" ? null : ip,
         user_agent: ua || null,
       })
-      .select("id")
+      .select("id, created_at")
       .single()
 
     if (insErr) {
@@ -127,9 +127,18 @@ export async function POST(req: NextRequest) {
     try {
       const { data: admins } = await supabaseAdmin.from("admin_users").select("user_id")
 
-      // ① 站内通知：给每个管理员各写一条 friend_link_apply（铃铛红点 + 通知页）
+      // ① 站内通知：给每个管理员各写一条 friend_link_apply（铃铛红点 + 通知页）。
+      //    meta 存整条申请快照——点击通知即弹「公告同款」详情弹窗、完整展示，无需回查表。
       if (admins?.length) {
         const summary = `🔗 新友链申请：${siteName}（${siteUrl}）｜联系：${contact}`
+        const meta = {
+          site_name: siteName,
+          site_url: siteUrl,
+          icon_url: iconUrl || null,
+          description: description || null,
+          contact,
+          created_at: inserted.created_at,
+        }
         const { error: notifyErr } = await supabaseAdmin.from("notifications").insert(
           admins.map((a: { user_id: string }) => ({
             user_id: a.user_id,
@@ -139,6 +148,7 @@ export async function POST(req: NextRequest) {
             actor_id: null,
             message: summary,
             is_read: false,
+            meta,
           })),
         )
         if (notifyErr) console.error("[friend-link-apply] 写站内通知失败:", notifyErr)

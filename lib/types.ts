@@ -66,6 +66,16 @@ export interface Comment {
 // 通知类型
 export type NotificationType = 'like_post' | 'comment_post' | 'like_comment' | 'post_removed' | 'announcement' | 'follow' | 'chat_mention' | 'friend_link_apply';
 
+// 友链申请通知（type=friend_link_apply）携带的结构化快照，点击通知后在弹窗里完整展示。
+export interface FriendLinkMeta {
+  site_name?: string
+  site_url?: string
+  icon_url?: string | null
+  description?: string | null
+  contact?: string
+  created_at?: string
+}
+
 // 通知接口
 export interface Notification {
   id: string
@@ -78,6 +88,7 @@ export interface Notification {
   message: string      // 通知内容
   is_read: boolean     // 是否已读
   created_at: string
+  meta?: Record<string, any> | null // 结构化附加数据（friend_link_apply 存申请快照，见 FriendLinkMeta）
   // 关联数据
   actor?: {
     username: string

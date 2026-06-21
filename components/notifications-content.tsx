@@ -13,6 +13,7 @@ import Container from "@/components/container"
 import PostDetailModal from "@/components/post-detail-modal"
 import NotificationCard from "@/components/notification-card"
 import AnnouncementModal from "@/components/announcement-modal"
+import FriendLinkDetailModal from "@/components/friend-link-detail-modal"
 import { getPost, likePost, unlikePost, checkUserLiked, getAnnouncement } from "@/lib/supabase"
 import { useToast } from "@/hooks/use-toast"
 import { useIsMobile } from "@/hooks/use-mobile"
@@ -38,6 +39,8 @@ export default function NotificationsContent() {
   const [activeAnnouncement, setActiveAnnouncement] = useState<
     { title: string; content: string; image_url?: string | null; created_at: string } | null
   >(null)
+  // 友链申请详情弹窗（点击 friend_link_apply 通知时弹出）
+  const [activeFriendLink, setActiveFriendLink] = useState<Notification | null>(null)
   const [modalLiked, setModalLiked] = useState(false)
   const [modalLikeCount, setModalLikeCount] = useState(0)
   const [modalIsLiking, setModalIsLiking] = useState(false)
@@ -82,6 +85,12 @@ export default function NotificationsContent() {
           } finally {
             setLoadingPostId(null)
           }
+          return
+        }
+
+        // 友链申请：弹出详情弹窗，完整展示申请内容（meta 里有快照）
+        if (notification.type === "friend_link_apply") {
+          setActiveFriendLink(notification)
           return
         }
 
@@ -278,6 +287,15 @@ export default function NotificationsContent() {
         content={activeAnnouncement?.content ?? null}
         imageUrl={activeAnnouncement?.image_url ?? null}
         createdAt={activeAnnouncement?.created_at}
+      />
+
+      {/* 友链申请详情弹窗 */}
+      <FriendLinkDetailModal
+        isOpen={!!activeFriendLink}
+        onClose={() => setActiveFriendLink(null)}
+        data={activeFriendLink?.meta ?? null}
+        fallbackMessage={activeFriendLink?.message ?? null}
+        createdAt={activeFriendLink?.created_at}
       />
     </Container>
   )
