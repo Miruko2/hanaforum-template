@@ -48,11 +48,6 @@ export default function ImageLightbox({
 
   // 原图是否加载完成 —— 决定单图何时触发弹入动画
   const [loaded, setLoaded] = useState(false)
-  // 安卓 app：延迟挂载图片元素本身（不只是 reveal）。motion.img 一 mount 就建合成层，
-  // 若与遮罩 mount 的 opacity 动画并发会撕裂（即使图片 opacity:0 不可见，合成层建立
-  // 本身就撕裂）。imgReady=true 后才渲染 <motion.img>，确保图片合成层在遮罩淡入完成、
-  // 稳定后才建立。桌面/iOS 立即 true（WebKit 不存在此问题）。
-  const [imgReady, setImgReady] = useState(!isAndroidApp)
   const imgRef = useRef<HTMLImageElement>(null)
   // 多图轮播容器与当前索引
   const trackRef = useRef<HTMLDivElement>(null)
@@ -77,6 +72,11 @@ export default function ImageLightbox({
   // （灯箱视差一直不出现的真因）。detectIsAndroidApp 用 Capacitor.getPlatform()==='android'
   // 判定，桌面/iOS/安卓 Chrome 均为 false，仅真·APK 为 true。
   const [isAndroidApp] = useState(detectIsAndroidApp)
+  // 安卓 app：延迟挂载图片元素本身（不只是 reveal）。motion.img 一 mount 就建合成层，
+  // 若与遮罩 mount 的 opacity 动画并发会撕裂（即使图片 opacity:0 不可见，合成层建立
+  // 本身就撕裂）。imgReady=true 后才渲染 <motion.img>，确保图片合成层在遮罩淡入完成、
+  // 稳定后才建立。桌面/iOS 立即 true（WebKit 不存在此问题）。
+  const [imgReady, setImgReady] = useState(!isAndroidApp)
 
   // ── 单图：解码后再弹入 ───────────────────────────────────────────────
   // 安卓 app 两阶段：① 延迟挂载 motion.img（imgReady）——避免图片合成层与遮罩 mount 的
