@@ -437,9 +437,16 @@ export default function PostDetailModal({
               body 的全屏 fixed 层、盖在本遮罩之上，灯箱遮罩做 opacity 进出场时本层
               backdrop-filter 会被迫每帧重采样（上面盖的半透明层在变），安卓 WebView
               合成器撕裂 → 灯箱开/关闪屏。去 backdrop-filter 后本层是纯实底合成、不重采样，
-              灯箱开关不再触发底下撕裂。底下已有 bg-black/40，实底观感差异极小。 */}
+              灯箱开关不再触发底下撕裂。底下已有 bg-black/40，实底观感差异极小。
+              ⚠️ 安卓再进一步「实底不透明」(非 0.40 半透明)：「关灯箱时帖子以外闪」的根因是
+              本遮罩半透明 → 背后整屏论坛网格(一堆卡片大图,复杂层)透出;灯箱全屏遮挡期间该网格
+              纹理被 WebView 丢弃,关灯箱揭开时冷重栅格整屏 → 撕裂(对被遮挡的复杂层做「保活」无效,
+              已验证)。改不透明后:① 模态期间论坛网格被完全挡住,关灯箱只揭开「本纯色遮罩」(重栅格
+              平凡、不撕裂);② 论坛网格只在「关详情页」时才露出,而那时有 hero 回飞动画掩护、不显眼。
+              代价:安卓详情页四周从「暗淡透出网格」变「纯深色」——安卓本就无毛玻璃模糊,观感更干净。
+              桌面/iOS 维持 0.40+模糊不变(WebKit 合成器无此问题)。 */}
           <motion.div
-            className="absolute inset-0 bg-black/40"
+            className={`absolute inset-0 ${IS_ANDROID ? "bg-[#0a0a0e]" : "bg-black/40"}`}
             style={{
               pointerEvents: "none",
               backdropFilter: IS_ANDROID ? undefined : isMobile ? "blur(10px)" : "blur(15px)",
@@ -530,15 +537,8 @@ export default function PostDetailModal({
               {useHorizontalLayout ? (
                 /* 横版：左图/文字Hero + 右滚动内容，整体高度由外层 maxHeight 控制 */
                 <div className="flex flex-row" style={{ height: "min(90vh, 840px)" }}>
-                  {/* 左：图片区或文字 Hero，占 45%。ref 供 hero 转场测量目标矩形。
-                      lb-keep-warm：灯箱打开时给图片区合成层「保活」，防安卓 WebView 丢弃其纹理
-                      → 消除「首次关闭灯箱图片揭开时冷重栅格化」的撕裂闪屏（见 globals.css 注释）。 */}
-                  <div
-                    ref={heroRef}
-                    className={`relative w-[45%] shrink-0 bg-black/20${
-                      lightboxOpen && IS_ANDROID ? " lb-keep-warm" : ""
-                    }`}
-                  >
+                  {/* 左：图片区或文字 Hero，占 45%。ref 供 hero 转场测量目标矩形。 */}
+                  <div ref={heroRef} className="relative w-[45%] shrink-0 bg-black/20">
                     {post.image_url ? (
                       hasMultipleImages ? (
                         // 多图：轮播（飞入期间隐藏，交接给飞行图）
@@ -610,15 +610,8 @@ export default function PostDetailModal({
                     overscrollBehavior: "contain",
                   }}
                 >
-                  {/* 图片区：随滚动上移，滚出顶部即消失。
-                      lb-keep-warm：灯箱打开时给图片区合成层「保活」，防安卓 WebView 丢弃其纹理
-                      → 消除「首次关闭灯箱图片揭开时冷重栅格化」的撕裂闪屏（见 globals.css 注释）。 */}
-                  <div
-                    ref={heroRef}
-                    className={`relative w-full overflow-hidden${
-                      lightboxOpen && IS_ANDROID ? " lb-keep-warm" : ""
-                    }`}
-                  >
+                  {/* 图片区：随滚动上移，滚出顶部即消失 */}
+                  <div ref={heroRef} className="relative w-full overflow-hidden">
                     {post.image_url ? (
                       hasMultipleImages ? (
                         // 多图（手机竖版）：轮播。飞入期间不隐藏（详情图缓存秒出做兜底），仅回飞时隐藏。

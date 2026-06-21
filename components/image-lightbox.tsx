@@ -6,7 +6,6 @@ import { motion, AnimatePresence } from "framer-motion"
 import { X, Loader2, ChevronLeft, ChevronRight } from "lucide-react"
 import { cn } from "@/lib/utils"
 import SubjectParallax from "./subject-parallax"
-import { detectIsAndroidApp } from "@/app/music/_lib/useIsAndroid"
 
 interface ImageLightboxProps {
   /** 单图直链；为 null/空时不展示灯箱（向后兼容） */
@@ -62,21 +61,19 @@ export default function ImageLightbox({
   // 记录按下位置，区分「轻点空白/图片（关闭）」与「滑动翻页（不关闭）」
   const tapStart = useRef<{ x: number; y: number } | null>(null)
 
-  // 安卓 WebView：backdrop-filter 叠加父级 opacity 动画会撕裂 backing buffer。同步判定。
+  // 安卓（含 Capacitor app 与 Android Chrome 网页端）：WebView/Blink 合成器对 backdrop-filter
+  // 叠加父级 opacity 动画、以及「大图首次 GPU 纹理化与几何动画并发」都会撕裂 backing buffer。
+  // ⚠️ 开/关灯箱的闪屏「安卓 app 和安卓网页端都犯」（同为 Blink 合成器）——早先只 gate
+  // Capacitor app（isAndroid）导致网页端第一次打开图片仍闪。故所有降级一律按 UA 的
+  // /Android/ 判定（app+web 统一处理），不再区分是否 Capacitor app。
   const [isAndroid] = useState(
     () => typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent),
   )
-  // 安卓 app（Capacitor WebView）：单图入场去掉 scale 几何动画（首次大图栅格化 + 动画并发会撕裂）。
-  // 安卓 app 判定走 canonical 的 detectIsAndroidApp：朴素的 `"Capacitor" in window` 在桌面
-  // web 也为真（Capacitor web 运行时会注入该全局），会把桌面误判成安卓 app → 跳过主体视差
-  // （灯箱视差一直不出现的真因）。detectIsAndroidApp 用 Capacitor.getPlatform()==='android'
-  // 判定，桌面/iOS/安卓 Chrome 均为 false，仅真·APK 为 true。
-  const [isAndroidApp] = useState(detectIsAndroidApp)
   // 安卓 app：延迟挂载图片元素本身（不只是 reveal）。motion.img 一 mount 就建合成层，
   // 若与遮罩 mount 的 opacity 动画并发会撕裂（即使图片 opacity:0 不可见，合成层建立
   // 本身就撕裂）。imgReady=true 后才渲染 <motion.img>，确保图片合成层在遮罩淡入完成、
   // 稳定后才建立。桌面/iOS 立即 true（WebKit 不存在此问题）。
-  const [imgReady, setImgReady] = useState(!isAndroidApp)
+  const [imgReady, setImgReady] = useState(!isAndroid)
 
   // ── 单图：解码后再弹入 ───────────────────────────────────────────────
   // 安卓 app 两阶段：① 延迟挂载 motion.img（imgReady）——避免图片合成层与遮罩 mount 的
@@ -90,7 +87,7 @@ export default function ImageLightbox({
     let cancelled = false
 
     // 阶段①：安卓 app 延迟到遮罩淡入完成（~0.24s）才挂载图片元素
-    if (isAndroidApp) {
+    if (isAndroid) {
       setImgReady(false)
       const mountTimer = window.setTimeout(() => {
         if (!cancelled) setImgReady(true)
@@ -129,11 +126,11 @@ export default function ImageLightbox({
       cancelled = true
       cancelAnimationFrame(raf)
     }
-  }, [open, isMulti, list[0], isAndroidApp])
+  }, [open, isMulti, list[0], isAndroid])
 
   // 阶段②（安卓 app）：imgReady 翻 true 后（图片元素刚挂载），等 decode 完再 reveal
   useEffect(() => {
-    if (!open || isMulti || !isAndroidApp || !imgReady) return
+    if (!open || isMulti || !isAndroid || !imgReady) return
     let cancelled = false
     const reveal = () => {
       if (!cancelled) setLoaded(true)
@@ -153,7 +150,7 @@ export default function ImageLightbox({
       cancelled = true
       cancelAnimationFrame(raf)
     }
-  }, [open, isMulti, imgReady, isAndroidApp])
+  }, [open, isMulti, imgReady, isAndroid])
 
   // 打开时把内部索引同步到受控 index，并把轮播滚到对应页（无动画，避免开场滑动）
   useLayoutEffect(() => {
@@ -251,7 +248,7 @@ export default function ImageLightbox({
   // 合成器来不及稳定 backing buffer → 首次放大撕裂闪屏（第二次点击因纹理已缓存故不闪）。
   // 改成 150ms 渐显：纹理化在过渡期间完成，不再与瞬切并发；时长极短、视觉上几乎无感，
   // 仍保留「app 内无弹跳」的设计意图。exit 同样给 120ms 过渡，关闭时图片淡出而非硬切。
-  const imgAnim = isAndroidApp
+  const imgAnim = isAndroid
     ? {
         initial: { opacity: 0 },
         animate: loaded ? { opacity: 1 } : { opacity: 0 },
@@ -281,11 +278,11 @@ export default function ImageLightbox({
           //   层本身始终 opacity:1，合成层状态稳定不销毁，背后逐渐变可见而非「半透明重合成」。
           //   background 透明后元素才卸载，此时视觉已不可见，卸载无突变。
           // 桌面/iOS 维持原 opacity 淡入淡出（WebKit 合成器无此问题）。
-          initial={isAndroidApp ? { opacity: 1, background: "rgba(0,0,0,0.82)" } : { opacity: 0 }}
+          initial={isAndroid ? { opacity: 1, background: "rgba(0,0,0,0.82)" } : { opacity: 0 }}
           animate={{ opacity: 1, background: "rgba(0,0,0,0.82)" }}
-          exit={isAndroidApp ? { opacity: 1, background: "rgba(0,0,0,0)" } : { opacity: 0 }}
+          exit={isAndroid ? { opacity: 1, background: "rgba(0,0,0,0)" } : { opacity: 0 }}
           transition={
-            isAndroidApp
+            isAndroid
               ? { duration: 0, exit: { duration: 0.25 } }
               : { duration: 0.22 }
           }
@@ -418,10 +415,10 @@ export default function ImageLightbox({
             <motion.div
               className="relative"
               onClick={(e) => e.stopPropagation()}
-              initial={isAndroidApp ? { opacity: 0 } : { scale: 0.85, opacity: 0 }}
-              animate={isAndroidApp ? { opacity: 1 } : { scale: 1, opacity: 1 }}
-              exit={isAndroidApp ? { opacity: 0 } : { scale: 0.7, opacity: 0 }}
-              transition={isAndroidApp ? { duration: 0.2 } : { type: "spring", stiffness: 300, damping: 26, mass: 0.7 }}
+              initial={isAndroid ? { opacity: 0 } : { scale: 0.85, opacity: 0 }}
+              animate={isAndroid ? { opacity: 1 } : { scale: 1, opacity: 1 }}
+              exit={isAndroid ? { opacity: 0 } : { scale: 0.7, opacity: 0 }}
+              transition={isAndroid ? { duration: 0.2 } : { type: "spring", stiffness: 300, damping: 26, mass: 0.7 }}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img

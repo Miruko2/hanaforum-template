@@ -111,29 +111,6 @@
   }
 }
 
-/* 灯箱打开期间「保活」详情图所在合成层。
-   根因：安卓 WebView 在该层被全屏灯箱遮挡时，会把它的合成纹理（backing store）丢弃以省内存；
-   首次关闭灯箱、详情图重新揭开时需冷重栅格化整张大图 → 来不及稳定 backing buffer → 撕裂闪屏。
-   「首次闪、之后不闪」=纹理首揭后被缓存；「关详情页再开又闪」=模态重建换了新图层、纹理又变冷。
-   （这也是为何只改灯箱遮罩的淡入淡出/瞬切始终治不好——揭开时背后那层本身是冷的，遮罩怎么淡都没用。）
-   解法：给该层挂一个肉眼不可见的持续 transform 动画，使其始终处于「活跃合成」状态，
-   WebView 便不会丢弃其纹理 → 揭开时无需重栅格化 → 不再闪。
-   仅在「安卓 + 灯箱打开」时由 JS 挂载本类、关闭即撤；位移 0.02px 不可见、合成线程开销可忽略。 */
-@keyframes lbKeepWarm {
-  0%,
-  100% {
-    transform: translate3d(0, 0, 0);
-  }
-  50% {
-    transform: translate3d(0, 0.02px, 0);
-  }
-}
-.lb-keep-warm {
-  animation: lbKeepWarm 0.9s linear infinite;
-  will-change: transform;
-  backface-visibility: hidden;
-}
-
 /* 固定背景图片设置 - 增强背景图片可见性 */
 body::before {
   content: "";
