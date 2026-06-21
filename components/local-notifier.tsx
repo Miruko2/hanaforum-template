@@ -7,20 +7,11 @@ import { supabase } from "@/lib/supabaseClient"
 
 // App 存活时把实时收到的私信 / 站内通知弹成「手机系统通知」（安卓本地通知，不依赖谷歌/厂商）。
 //
-// 【保守版·2026-06-21】上一版在「已登录冷启动」时于挂载阶段就调原生（checkPermissions/
-// requestPermissions/createChannel），在某些设备/ROM 上直接原生崩溃 → 一打开就闪退。
-// 本版策略：
-//   - 挂载/开机阶段「一个原生调用都不碰」，只建 realtime 订阅（纯 JS，绝不崩）；
-//   - 所有原生操作（插件加载 / 权限 / 弹通知）全部推迟到「真的来消息时」才执行 ——
-//     那时 App 已完全可交互、Capacitor 桥/Activity 就绪，最危险的冷启动窗口已过；
-//   - createChannel（高重要性渠道→顶部横幅）改到「收到消息时」才建：实测收消息时其它原生
-//     调用都不崩，说明原崩点是冷启动时机而非调用本身，故此刻建渠道安全；建失败则降级默认渠道；
-//   - 即使仍有问题，也只会在「收到消息时」出问题、而非一打开就崩（不会再陷入开机崩溃循环）。
+// 【调试版·2026-06-21】系统通知一直不弹（App 内通知正常），原生链路隐形看不到。
+// 本版在 notify() 每步打 alert（最多 3 次），把"插件/权限/建渠道/schedule"的结果暴露出来，
+// 收到私信时弹框显示，便于定位卡点。定位后会移除这些 alert。
 // Web 端整段 no-op。
-//
-// 局限不变：仅 App 进程存活时有效；被系统杀掉后不触发。
 
-// 临时总开关：万一保守版仍在「收到消息时」崩，把它改回 false 重新部署即可一键停用（不必重打 APK）。
 const LOCAL_NOTIF_ENABLED = true
 
 const NOTIF_TITLES: Record<string, string> = {
@@ -36,11 +27,23 @@ const NOTIF_TITLES: Record<string, string> = {
 let notifId = 1
 const nameCache = new Map<string, string>()
 
-// 懒加载单例：插件、权限、点击监听都只初始化一次，且都在「首条消息到来时」才触发。
 let pluginPromise: Promise<any> | null = null
 let permRequested = false
 let listenerAdded = false
 let channelReady = false
+
+// 临时可见调试：把隐形的原生链路结果用弹框显示出来（最多 3 次，避免刷屏）
+let dbgCount = 0
+function dbg(msg: string) {
+  try {
+    if (dbgCount < 3) {
+      dbgCount++
+      window.alert("[通知调试] " + msg)
+    }
+  } catch {
+    /* ignore */
+  }
+}
 
 function isNative(): boolean {
   try {
@@ -59,12 +62,16 @@ async function getLN(): Promise<any | null> {
   return pluginPromise
 }
 
-// 真正弹一条系统通知 —— 仅在「收到消息」时被调用（App 此刻已完全就绪）。
 async function notify(title: string, body: string, url: string) {
-  const LN = await getLN()
-  if (!LN) return
+  const steps: string[] = []
   try {
-    // 点击通知跳转监听（只装一次）
+    const LN = await getLN()
+    steps.push(LN ? "plugin=OK" : "plugin=NULL")
+    if (!LN) {
+      dbg(steps.join(" | "))
+      return
+    }
+
     if (!listenerAdded) {
       listenerAdded = true
       try {
@@ -82,20 +89,21 @@ async function notify(title: string, body: string, url: string) {
         /* ignore */
       }
     }
-    // 通知权限：只主动申请一次；失败/被拒也不抛，schedule 弹不出来也不崩
+
     if (!permRequested) {
       permRequested = true
       try {
         const p = await LN.checkPermissions()
+        steps.push("perm=" + (p?.display ?? "?"))
         if (p?.display !== "granted") {
-          await LN.requestPermissions()
+          const r = await LN.requestPermissions()
+          steps.push("req=" + (r?.display ?? "?"))
         }
-      } catch {
-        /* ignore */
+      } catch (e: any) {
+        steps.push("permERR=" + (e?.message ?? e))
       }
     }
-    // 高重要性渠道 → 顶部横幅。只在此刻（收到消息时）建一次，避开冷启动崩溃窗口；
-    // 建失败则降级用插件默认渠道（仍会进通知栏，只是可能不弹横幅）。
+
     if (!channelReady) {
       try {
         await LN.createChannel({
@@ -106,17 +114,22 @@ async function notify(title: string, body: string, url: string) {
           visibility: 1,
         })
         channelReady = true
-      } catch {
+        steps.push("channel=OK")
+      } catch (e: any) {
         channelReady = false
+        steps.push("channelERR=" + (e?.message ?? e))
       }
     }
+
     notifId = (notifId + 1) & 0x7fffffff
-    // 小图标走 capacitor.config 的 smallIcon（ic_stat_notify）
     const n: any = { id: notifId, title, body: body || "", extra: { url } }
     if (channelReady) n.channelId = "messages"
     await LN.schedule({ notifications: [n] })
-  } catch (e) {
-    console.warn("[local-notif] 弹通知失败", e)
+    steps.push("schedule=OK")
+    dbg(steps.join(" | "))
+  } catch (e: any) {
+    steps.push("scheduleERR=" + (e?.message ?? e))
+    dbg(steps.join(" | "))
   }
 }
 
@@ -128,7 +141,6 @@ export default function LocalNotifier() {
     if (!isNative() || !user?.id) return
     const myId = user.id
 
-    // 私信：别人发给我的 → 弹系统通知（原生调用都在 notify() 里、延后到此刻才发生）
     const dmCh = supabase
       .channel(`ln-dm-${myId}`)
       .on(
@@ -159,7 +171,6 @@ export default function LocalNotifier() {
       )
       .subscribe()
 
-    // 站内通知：发给我的新通知 → 弹系统通知
     const ntCh = supabase
       .channel(`ln-nt-${myId}`)
       .on(
