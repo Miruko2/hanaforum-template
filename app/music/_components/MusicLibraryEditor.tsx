@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react"
 import { createPortal } from "react-dom"
 import { motion, AnimatePresence } from "framer-motion"
-import { X, Trash2, Plus, Music2, Play, Square, Loader2, Download } from "lucide-react"
+import { X, Trash2, Plus, Music2, Play, Square, Loader2, Download, Upload } from "lucide-react"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useToast } from "@/hooks/use-toast"
 import {
@@ -16,6 +16,17 @@ import {
 } from "@/lib/supabase"
 import { usePlayback } from "../_context/PlaybackContext"
 import { parseMusicUrl, fetchMetingTracks, platformLabel } from "../_lib/musicImport"
+import {
+  listLocalTracks,
+  addLocalTrack,
+  deleteLocalTrack,
+  clearLocalTracks,
+  fileToLocalRecord,
+  estimateStorage,
+  MAX_LOCAL_TRACKS,
+  MAX_LOCAL_FILE_BYTES,
+  type LocalTrackRecord,
+} from "../_lib/localTracks"
 
 const MAX_TRACKS = 100
 // 导入冷却：两次歌单解析至少间隔这么久，降低对 injahow 的抓取频率。
@@ -65,6 +76,12 @@ export function MusicLibraryEditor({
   const [rows, setRows] = useState<UserMusicTrackRow[]>([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+
+  // 本地上传曲目（IndexedDB，仅本设备 / 本浏览器；游客也可用）。
+  const [localRows, setLocalRows] = useState<LocalTrackRecord[]>([])
+  const [uploading, setUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const totalCount = rows.length + localRows.length
 
   // 表单
   const [title, setTitle] = useState("")
@@ -135,6 +152,22 @@ export function MusicLibraryEditor({
       cancelled = true
     }
   }, [open, user?.id, stopPreview])
+
+  // 打开时载入本地上传曲目（IndexedDB，与登录无关）。
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    listLocalTracks()
+      .then((r) => {
+        if (!cancelled) setLocalRows(r)
+      })
+      .catch(() => {
+        if (!cancelled) setLocalRows([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [open])
 
   // 卸载兜底：别让试听音频在后台继续响
   useEffect(() => () => stopPreview(), [stopPreview])
@@ -253,18 +286,97 @@ export function MusicLibraryEditor({
   )
 
   const handleClear = useCallback(async () => {
-    if (!user?.id || rows.length === 0) return
-    if (!window.confirm(`确定清空全部 ${rows.length} 首自定义曲目？删光后墙会回到精选默认墙，此操作不可撤销。`))
+    if (totalCount === 0) return
+    if (
+      !window.confirm(
+        `确定清空全部 ${totalCount} 首（含本地上传）？删光后墙会回到精选默认墙，此操作不可撤销。`,
+      )
+    )
       return
     try {
-      await clearUserMusicTracks(user.id)
+      if (user?.id && rows.length > 0) await clearUserMusicTracks(user.id)
+      if (localRows.length > 0) await clearLocalTracks()
       setRows([])
+      setLocalRows([])
       await refreshTracks()
       toast({ description: "已清空" })
     } catch (e) {
       toast({ description: (e as Error)?.message ?? "清空失败" })
     }
-  }, [user?.id, rows.length, refreshTracks, toast])
+  }, [user?.id, rows.length, localRows.length, totalCount, refreshTracks, toast])
+
+  // 上传本地音频：逐个解析标签/封面 → 存 IndexedDB。游客也可用（不依赖登录）。
+  const handleFiles = useCallback(
+    async (files: FileList | null) => {
+      if (!files || files.length === 0 || uploading) return
+      const remaining = MAX_LOCAL_TRACKS - localRows.length
+      if (remaining <= 0) {
+        toast({ description: `本地歌最多 ${MAX_LOCAL_TRACKS} 首` })
+        return
+      }
+      const slice = Array.from(files).slice(0, remaining)
+      setUploading(true)
+      let added = 0
+      let startIndex = localRows.length
+      try {
+        for (const file of slice) {
+          if (file.size > MAX_LOCAL_FILE_BYTES) {
+            toast({
+              description: `「${file.name}」超过 ${Math.round(MAX_LOCAL_FILE_BYTES / 1048576)}MB，已跳过`,
+            })
+            continue
+          }
+          // 配额预检：估算用量 + 本文件超过 95% 配额则停手。
+          const est = await estimateStorage()
+          if (est && est.quota > 0 && est.usage + file.size > est.quota * 0.95) {
+            toast({ description: "浏览器存储空间不足，已停止上传" })
+            break
+          }
+          try {
+            await addLocalTrack(await fileToLocalRecord(file, startIndex))
+            startIndex++
+            added++
+          } catch (e) {
+            toast({
+              description:
+                (e as Error)?.name === "QuotaExceededError"
+                  ? "浏览器存储空间已满"
+                  : `「${file.name}」保存失败`,
+            })
+            break
+          }
+        }
+        if (added > 0) {
+          setLocalRows(await listLocalTracks())
+          await refreshTracks()
+          // best-effort 申请持久化存储，降低被浏览器回收的概率。
+          try {
+            await navigator.storage?.persist?.()
+          } catch {
+            /* ignore */
+          }
+          toast({ description: `已添加 ${added} 首本地歌曲` })
+        }
+      } finally {
+        setUploading(false)
+        if (fileInputRef.current) fileInputRef.current.value = "" // 允许重选同名文件
+      }
+    },
+    [uploading, localRows.length, refreshTracks, toast],
+  )
+
+  const handleDeleteLocal = useCallback(
+    async (id: string) => {
+      try {
+        await deleteLocalTrack(id)
+        setLocalRows((prev) => prev.filter((r) => r.id !== id))
+        await refreshTracks()
+      } catch (e) {
+        toast({ description: (e as Error)?.message ?? "删除失败" })
+      }
+    },
+    [refreshTracks, toast],
+  )
 
   if (!mounted) return null
 
@@ -311,9 +423,7 @@ export function MusicLibraryEditor({
               <div className="flex items-center gap-2">
                 <Music2 size={16} className="text-white/70" />
                 <h2 className="text-[14px] font-semibold tracking-wide">我的音乐</h2>
-                <span className="text-[11px] text-white/40">
-                  {rows.length}/{MAX_TRACKS}
-                </span>
+                <span className="text-[11px] text-white/40">{totalCount} 首</span>
               </div>
               <button
                 type="button"
@@ -324,6 +434,42 @@ export function MusicLibraryEditor({
                 <X size={15} />
               </button>
             </div>
+
+            {/* 上传本地歌曲（存于本设备浏览器，不上传服务器；游客也可用） */}
+            <div className="shrink-0 px-5 pt-1 pb-3">
+              <div className="mb-1.5 text-[11px] tracking-wide text-white/45">
+                上传本地歌曲（存于本设备浏览器，不上传服务器）
+              </div>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  void handleFiles(e.dataTransfer.files)
+                }}
+                disabled={uploading}
+                className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-white/25 bg-white/[0.04] px-4 py-3 text-[12px] font-medium text-white/80 transition-all hover:border-white/40 hover:bg-white/[0.08] hover:text-white active:scale-[0.99] disabled:opacity-50"
+              >
+                {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                {uploading ? "解析中…" : "选择 / 拖入音频文件"}
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="audio/*"
+                multiple
+                className="hidden"
+                onChange={(e) => void handleFiles(e.target.files)}
+              />
+              <div className="mt-2 text-[10px] leading-snug text-white/30">
+                支持 mp3 / flac / m4a 等；自动读取标题 / 歌手 / 封面。单文件 ≤
+                {Math.round(MAX_LOCAL_FILE_BYTES / 1048576)}MB、最多 {MAX_LOCAL_TRACKS} 首。
+                本地歌支持真实音频可视化（背景与频谱跟拍）。
+              </div>
+            </div>
+
+            <div className="mx-5 shrink-0 border-t border-white/10" />
 
             {/* 网易歌单 / 单曲导入 */}
             <div className="shrink-0 px-5 pt-1 pb-3">
@@ -400,10 +546,10 @@ export function MusicLibraryEditor({
             <div className="mx-5 shrink-0 border-t border-white/10" />
 
             {/* 列表头：已添加数量 + 清空（移到歌曲区这边） */}
-            {rows.length > 0 && (
+            {totalCount > 0 && (
               <div className="flex shrink-0 items-center justify-between px-5 pt-3 pb-1">
                 <span className="text-[11px] tracking-wide text-white/45">
-                  已添加 {rows.length} 首
+                  已添加 {totalCount} 首
                 </span>
                 <button
                   type="button"
@@ -422,12 +568,35 @@ export function MusicLibraryEditor({
                 <div className="grid place-items-center py-8 text-white/40">
                   <Loader2 size={18} className="animate-spin" />
                 </div>
-              ) : rows.length === 0 ? (
+              ) : totalCount === 0 ? (
                 <div className="px-3 py-8 text-center text-[12px] text-white/35">
-                  还没有自定义曲目。填好上面的链接，点「添加」即可。
+                  还没有曲目。上传本地歌曲，或填链接 / 导入歌单。
                 </div>
               ) : (
                 <div className="space-y-0.5">
+                  {/* 本地上传歌（在前，与「我的」墙顺序一致） */}
+                  {localRows.map((r) => (
+                    <div
+                      key={r.id}
+                      className="flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-white/5"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-[13px] text-white/90">{r.title}</div>
+                        <div className="truncate text-[10px] text-white/45">
+                          {r.artist || "—"} · 本地
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        aria-label="delete"
+                        onClick={() => handleDeleteLocal(r.id)}
+                        className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-white/40 hover:bg-white/10 hover:text-rose-300"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  ))}
+                  {/* 链接 / 导入歌（存 Supabase） */}
                   {rows.map((r) => (
                     <div
                       key={r.id}

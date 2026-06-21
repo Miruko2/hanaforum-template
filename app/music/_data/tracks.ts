@@ -17,6 +17,13 @@ export type Track = {
    * img-proxy 的服务端取色（避免 fetch 任意 URL，SSRF 安全）。
    */
   userProvided?: boolean
+  /**
+   * 本地上传曲目（字节存浏览器 IndexedDB，见 _lib/localTracks.ts）。
+   * 置 true 时：audio 字段为空，播放时按 id 从 IndexedDB 取 Blob 经
+   * URL.createObjectURL 播放；且因是同源 blob，走专用 <audio>+Web Audio
+   * AnalyserNode 拿真实频谱（跨域网易源做不到）。cover 是 data URL 或空。
+   */
+  local?: boolean
 }
 
 export const TRACKS: Track[] = playlistJson as Track[]

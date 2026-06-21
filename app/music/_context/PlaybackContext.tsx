@@ -16,6 +16,7 @@ import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useToast } from "@/hooks/use-toast"
 import { getUserMusicTracks, type UserMusicTrackRow } from "@/lib/supabase"
 import { userRowsToTracks } from "../_lib/userTracks"
+import { listLocalTracks, localRecordsToTracks, getLocalTrackBlob } from "../_lib/localTracks"
 import { metingAlternatives, pickHealthyMetingBase, rewriteMetingBase, METING_INSTANCES } from "../_lib/metingInstances"
 
 const HISTORY_KEY = "music-history-v1"
@@ -40,6 +41,8 @@ export type MusicSource = "mine" | "featured"
 export type PlayMode = "list" | "one" | "once"
 
 /** 详情页桌面液面背景的自动律动模式（off = 默认，只留鼠标交互）。 */
+// 注：曾加过第 4 态 "spectrum"（音频波形频谱），因视觉不满意已移除、待参考他人实现重做；
+// 数据管线 getAudioFrequencies 与组件 AudioSpectrum.tsx 保留备用（详见 ExpandedCard 注释）。
 export type LiquidFx = "rain" | "center" | "off"
 
 /** 详情页桌面液面背景的「底图来源」：纯色渐变 / 当前封面 / 个人首页背景。 */
@@ -104,6 +107,13 @@ export type PlaybackState = {
    * trigger React re-renders.
    */
   getAudioIntensity: () => number
+  /**
+   * 填充传入的 Uint8Array 为当前的频谱字节（getByteFrequencyData）。
+   * 仅当前曲为本地歌（同源 blob，接了 AnalyserNode）且在播时有真实数据、返回 true；
+   * 否则不写入、返回 false（调用方渲染空闲/模拟态）。调用方持有 buffer、零每帧分配。
+   * 跨域网易源拿不到频谱（接 Web Audio 会被静音），故只对本地歌有效。
+   */
+  getAudioFrequencies: (out: Uint8Array) => boolean
   /** 重新拉取当前用户的自定义曲目并刷新墙（编辑器增删改后调用）。 */
   refreshTracks: () => Promise<void>
 }
@@ -148,6 +158,7 @@ export type PlaybackWallState = {
   isFavorite: (id: string) => boolean
   toggleFavorite: (id: string) => void
   getAudioIntensity: () => number
+  getAudioFrequencies: (out: Uint8Array) => boolean
 }
 const PlaybackWallCtx = createContext<PlaybackWallState | null>(null)
 export function usePlaybackWall(): PlaybackWallState {
@@ -163,13 +174,14 @@ type TrackSourceCtx = {
   tracks: Track[]
   source: MusicSource
   setSource: (s: MusicSource) => void
-  hasUserTracks: boolean
+  /** 「我的」是否非空（本地歌 + 链接歌任一存在）。控制「我的/精选」切换的显隐。 */
+  hasMine: boolean
 }
 const PlaybackTracksCtx = createContext<TrackSourceCtx>({
   tracks: DEFAULT_TRACKS,
   source: "mine",
   setSource: () => {},
-  hasUserTracks: false,
+  hasMine: false,
 })
 // 只取曲目列表（MusicCanvas / ExpandedCard 用，避免被高频 value 波及）。
 export function useTracks(): Track[] {
@@ -192,16 +204,25 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   // source = 墙当前显示「我的」还是「精选」，持久化；有自定义曲目时才有意义。
   // 实际渲染的 tracks 由两者派生：选「我的」且有曲目 → 用户的，否则精选默认墙。
   const [userTracks, setUserTracks] = useState<Track[]>([])
+  // 本地上传曲目（IndexedDB，仅本设备 / 本浏览器；与登录无关，游客也有）。
+  const [localTracks, setLocalTracks] = useState<Track[]>([])
   const [source, setSourceState] = useState<MusicSource>("mine")
-  const hasUserTracks = userTracks.length > 0
+  // 「我的」= 本地歌 + 链接歌（本地在前，最近上传的更易找到）。
+  const mine = useMemo<Track[]>(() => [...localTracks, ...userTracks], [localTracks, userTracks])
+  const hasMine = mine.length > 0
   const tracks = useMemo<Track[]>(
-    () => (source === "mine" && userTracks.length > 0 ? userTracks : DEFAULT_TRACKS),
-    [source, userTracks],
+    () => (source === "mine" && mine.length > 0 ? mine : DEFAULT_TRACKS),
+    [source, mine],
   )
   const tracksRef = useRef<Track[]>(tracks)
   useEffect(() => {
     tracksRef.current = tracks
   }, [tracks])
+  // localTracksRef：play() 解析本地歌时用（即便当前墙是「精选」也能按 id 找到本地歌）。
+  const localTracksRef = useRef<Track[]>(localTracks)
+  useEffect(() => {
+    localTracksRef.current = localTracks
+  }, [localTracks])
 
   const setSource = useCallback((s: MusicSource) => {
     setSourceState(s)
@@ -313,25 +334,80 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   const smoothedIntensityRef = useRef(0)
   const isPlayingRef = useRef(false)
 
+  // ---- 本地歌专用第二 <audio> + Web Audio 实时频谱 ----
+  // 现有 audioRef 绝不接 Web Audio（跨域网易源经 createMediaElementSource 会被永久静音）；
+  // 本地歌是同源 blob，走这条独立链路接 AnalyserNode 拿真实频谱。任一时刻只一个元素在播。
+  const localAudioRef = useRef<HTMLAudioElement | null>(null)
+  const audioCtxRef = useRef<AudioContext | null>(null)
+  const mediaSrcRef = useRef<MediaElementAudioSourceNode | null>(null)
+  const analyserRef = useRef<AnalyserNode | null>(null)
+  const freqBufRef = useRef<Uint8Array | null>(null)
+  // 当前在播的元素（流媒体 audioRef / 本地 localAudioRef）。transport 操作都走它。
+  const activeAudioRef = useRef<HTMLAudioElement | null>(null)
+  // 当前本地歌的 objectURL（换源 / 卸载时 revoke）。
+  const currentObjectUrlRef = useRef<string | null>(null)
+  // 当前曲是否本地歌（getAudioIntensity / getAudioFrequencies 据此决定走真实 FFT）。
+  const currentIsLocalRef = useRef(false)
+
+  // 懒建 Web Audio 图（首次本地播放时、在用户手势内调用以解锁 AudioContext）。
+  // createMediaElementSource 每元素仅可调一次，靠 analyserRef 去重。
+  const ensureAudioGraph = useCallback((): AnalyserNode | null => {
+    if (analyserRef.current) return analyserRef.current
+    const local = localAudioRef.current
+    if (!local) return null
+    try {
+      const Ctor =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+      if (!Ctor) return null
+      const ctx = audioCtxRef.current ?? new Ctor()
+      audioCtxRef.current = ctx
+      const srcNode = ctx.createMediaElementSource(local)
+      const analyser = ctx.createAnalyser()
+      analyser.fftSize = 512 // → frequencyBinCount = 256
+      analyser.smoothingTimeConstant = 0.8
+      srcNode.connect(analyser)
+      analyser.connect(ctx.destination)
+      mediaSrcRef.current = srcNode
+      analyserRef.current = analyser
+      freqBufRef.current = new Uint8Array(analyser.frequencyBinCount)
+      return analyser
+    } catch {
+      // AudioContext 不可用 → 本地歌仍能经元素自身输出播放，只是没有可视化数据。
+      return null
+    }
+  }, [])
+
   // 解析当前曲目：先在当前墙找，找不到再到用户库 / 精选库找 ——
   // 这样切换「我的/精选」时，正在播放的那首仍能被解析、播放器不消失。
   const currentTrack = useMemo(() => {
     if (!currentTrackId) return null
     return (
       tracks.find((t) => t.id === currentTrackId) ??
+      localTracks.find((t) => t.id === currentTrackId) ??
       userTracks.find((t) => t.id === currentTrackId) ??
       DEFAULT_TRACKS.find((t) => t.id === currentTrackId) ??
       null
     )
-  }, [currentTrackId, tracks, userTracks])
+  }, [currentTrackId, tracks, localTracks, userTracks])
 
   // 把 DB 行套进用户库（是否显示由 source 派生决定）。
   const applyUserTracks = useCallback((rows: UserMusicTrackRow[]) => {
     setUserTracks(userRowsToTracks(rows))
   }, [])
 
-  // 手动刷新：编辑器增删改后调用，让墙立即同步。
+  // 刷新本地上传曲目（IndexedDB；与登录无关，游客也有）。
+  const refreshLocalTracks = useCallback(async () => {
+    try {
+      setLocalTracks(localRecordsToTracks(await listLocalTracks()))
+    } catch {
+      /* 保持当前 */
+    }
+  }, [])
+
+  // 手动刷新：编辑器增删改后调用，让墙立即同步（链接歌 + 本地歌一起刷）。
   const refreshTracks = useCallback(async () => {
+    await refreshLocalTracks()
     if (!user?.id) {
       setUserTracks([])
       return
@@ -341,7 +417,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     } catch {
       /* 保持当前，不打断播放 */
     }
-  }, [user?.id, applyUserTracks])
+  }, [user?.id, applyUserTracks, refreshLocalTracks])
 
   // 拉取当前用户的自定义曲目。按 user_id 一次性查询（单分区索引命中），不订阅 realtime。
   useEffect(() => {
@@ -361,6 +437,21 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       cancelled = true
     }
   }, [user?.id, applyUserTracks])
+
+  // 挂载即载入本地上传曲目（IndexedDB，与登录无关、游客也有）。
+  useEffect(() => {
+    let cancelled = false
+    listLocalTracks()
+      .then((recs) => {
+        if (!cancelled) setLocalTracks(localRecordsToTracks(recs))
+      })
+      .catch(() => {
+        if (!cancelled) setLocalTracks([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // ---- Load history from localStorage on mount ----
   useEffect(() => {
@@ -490,8 +581,9 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   const setVolume = useCallback((v: number) => {
     const clamped = Math.max(0, Math.min(1, v))
     setVolumeState(clamped)
-    const el = audioRef.current
-    if (el) el.volume = clamped // 立即生效，拖动手感不延迟
+    // 两个元素都同步，切换音源时音量不跳。
+    if (audioRef.current) audioRef.current.volume = clamped // 立即生效，拖动手感不延迟
+    if (localAudioRef.current) localAudioRef.current.volume = clamped
     try {
       localStorage.setItem(VOLUME_KEY, String(clamped))
     } catch {
@@ -514,135 +606,180 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
 
   // ---- 驱动原生 loop：单曲循环用 <audio> 内建 loop（无缝、不走 ended 往返）----
   useEffect(() => {
-    const el = audioRef.current
-    if (el) el.loop = playMode === "one"
+    const one = playMode === "one"
+    if (audioRef.current) audioRef.current.loop = one
+    if (localAudioRef.current) localAudioRef.current.loop = one
   }, [playMode])
 
-  // ---- Init audio element + bind listeners once ----
+  // ---- Init audio elements + bind listeners once ----
+  // 两个 <audio>：el = 流媒体/链接歌（绝不接 Web Audio）；localEl = 本地歌（同源 blob，
+  // 经 ensureAudioGraph 接 AnalyserNode）。监听用同一套 attach（带 active-element 守卫，
+  // 非活动元素的事件一律忽略），仅 onError 分流：流媒体走 meting 实例回退、本地仅提示。
   useEffect(() => {
     const el = new Audio()
     el.preload = "metadata"
     el.volume = volumeRef.current // 套用持久化音量初值（后续变化由独立 effect 同步）
     audioRef.current = el
 
-    // 已缓冲时长 = 最后一段 buffered 区间的末端（顺序下载时即"从头加载到哪"）。
-    const updateBuffered = () => {
-      const b = el.buffered
-      setBuffered(b.length > 0 ? b.end(b.length - 1) : 0)
-    }
-    // timeupdate 在浏览器里 4–66Hz 触发，每次 setCurrentTime 会让所有 usePlayback 消费者
-    // 重渲染（含 MusicPlayer 的 backdrop-filter 面板）。人眼看进度条 4Hz 已足够顺滑，
-    // 故节流到 ~240ms。但"大跳变"（>1s，代表切歌/seek/循环结束）必须立即同步，
-    // 否则会看到进度条停在旧值一瞬间再跳。
-    let lastSetAt = 0
-    let lastSetVal = 0
-    const onTime = () => {
-      const now = performance.now()
-      const t = el.currentTime
-      const big = Math.abs(t - lastSetVal) > 1
-      if (big || now - lastSetAt >= 240) {
-        lastSetAt = now
-        lastSetVal = t
-        setCurrentTime(t)
+    const localEl = new Audio()
+    localEl.preload = "metadata"
+    localEl.volume = volumeRef.current
+    localAudioRef.current = localEl
+
+    // 默认活动元素 = 流媒体；首次本地播放时由 doResolveLocal 切到 localEl。
+    activeAudioRef.current = el
+
+    const attach = (target: HTMLAudioElement, isLocal: boolean) => {
+      // 已缓冲时长 = 最后一段 buffered 区间的末端（顺序下载时即"从头加载到哪"）。
+      const updateBuffered = () => {
+        if (target !== activeAudioRef.current) return
+        const b = target.buffered
+        setBuffered(b.length > 0 ? b.end(b.length - 1) : 0)
       }
-      updateBuffered()
-    }
-    // 流媒体跨缓冲 seek 时，部分浏览器会让 duration 瞬间变 Infinity/NaN，
-    // 而进度条是 currentTime/duration —— 时长一塌成无效值进度条就归零。
-    // 故只接受有效时长，否则保留上一次的好值。
-    const onDuration = () => {
-      const d = el.duration
-      if (isFinite(d) && d > 0) setDuration(d)
-    }
-    const onPlay = () => setIsPlaying(true)
-    const onPause = () => setIsPlaying(false)
-    const onEnded = () => {
-      // 防伪 ended：跨越缓冲区/末端的 seek 在部分浏览器会触发 ended，但此时并未真正
-      // 播到结尾 —— 仅当确实接近结尾才处理，避免进度条/播放被错误重置回开头。
-      const d = el.duration
-      if (isFinite(d) && d > 0 && el.currentTime < d - 1.5) return
-      // 单曲循环走原生 el.loop，根本不触发 ended。
-      if (playModeRef.current === "list") {
-        // 列表循环：自动下一首（next 内部对末尾取模、回到开头）。
+      // timeupdate 4–66Hz：节流到 ~240ms（人眼 4Hz 足够顺滑），大跳变（>1s）立即同步。
+      let lastSetAt = 0
+      let lastSetVal = 0
+      const onTime = () => {
+        if (target !== activeAudioRef.current) return
+        const now = performance.now()
+        const t = target.currentTime
+        const big = Math.abs(t - lastSetVal) > 1
+        if (big || now - lastSetAt >= 240) {
+          lastSetAt = now
+          lastSetVal = t
+          setCurrentTime(t)
+        }
+        updateBuffered()
+      }
+      // 流媒体跨缓冲 seek 时 duration 可能瞬变 Infinity/NaN，只接受有效时长。
+      const onDuration = () => {
+        if (target !== activeAudioRef.current) return
+        const d = target.duration
+        if (isFinite(d) && d > 0) setDuration(d)
+      }
+      const onPlay = () => {
+        if (target === activeAudioRef.current) setIsPlaying(true)
+      }
+      const onPause = () => {
+        if (target === activeAudioRef.current) setIsPlaying(false)
+      }
+      const onEnded = () => {
+        if (target !== activeAudioRef.current) return
+        // 防伪 ended：跨越缓冲区/末端的 seek 在部分浏览器会触发 ended，但此时并未真正播到结尾。
+        const d = target.duration
+        if (isFinite(d) && d > 0 && target.currentTime < d - 1.5) return
+        // 单曲循环走原生 loop，不触发 ended。
+        if (playModeRef.current === "list") {
+          setCurrentTime(0)
+          nextRef.current()
+          return
+        }
+        setIsPlaying(false)
+        isPlayingRef.current = false
         setCurrentTime(0)
-        nextRef.current()
-        return
       }
-      // 播完就暂停（once）：停在原地。
-      setIsPlaying(false)
-      isPlayingRef.current = false
-      setCurrentTime(0)
+      const onError = () => {
+        if (target !== activeAudioRef.current) return
+        if (isLocal) {
+          // 本地文件无外部实例可回退：直接判不可用。
+          setIsFallback(true)
+          setIsPlaying(false)
+          isPlayingRef.current = false
+          toast({ description: "本地文件无法播放（格式不支持？）" })
+          return
+        }
+        // ↓↓ 流媒体 meting 实例回退（逻辑与原单元素版一致）↓↓
+        // 先做实例回退——src 若是已知 meting 实例的 URL，把域名换到下一个实例重试；
+        // 所有实例都试完仍失败，才标记"音源不可用"提示一次。判死按 playSeq 去重。
+        const seq = playSeqRef.current
+        if (fallbackTriedRef.current.has(seq)) return
+        if (!metingRetryRef.current || metingRetryRef.current.seq !== seq) {
+          metingRetryRef.current = { seq, alts: metingAlternatives(target.src), next: 0 }
+        }
+        const retry = metingRetryRef.current
+        if (retry.next < retry.alts.length) {
+          const alt = retry.alts[retry.next]
+          retry.next += 1
+          target.src = alt
+          target.play().catch(() => {
+            // 播放被拒/再次加载失败 → 下一次 error 事件继续走回退或判死
+          })
+          return
+        }
+        fallbackTriedRef.current.add(seq)
+        setIsFallback(true)
+        setIsPlaying(false)
+        isPlayingRef.current = false
+        toast({ description: "音源暂不可用，换一首试试" })
+      }
+      // isPlaying 的 ref 镜像，供 rAF 里的 getAudioIntensity 无重渲染读取。
+      const onPlayMirror = () => {
+        if (target === activeAudioRef.current) isPlayingRef.current = true
+      }
+      const onPauseMirror = () => {
+        if (target === activeAudioRef.current) isPlayingRef.current = false
+      }
+
+      target.addEventListener("timeupdate", onTime)
+      target.addEventListener("progress", updateBuffered)
+      target.addEventListener("loadedmetadata", onDuration)
+      target.addEventListener("durationchange", onDuration)
+      target.addEventListener("play", onPlay)
+      target.addEventListener("pause", onPause)
+      target.addEventListener("ended", onEnded)
+      target.addEventListener("error", onError)
+      target.addEventListener("play", onPlayMirror)
+      target.addEventListener("pause", onPauseMirror)
+      target.addEventListener("ended", onPauseMirror)
+
+      return () => {
+        target.removeEventListener("timeupdate", onTime)
+        target.removeEventListener("progress", updateBuffered)
+        target.removeEventListener("loadedmetadata", onDuration)
+        target.removeEventListener("durationchange", onDuration)
+        target.removeEventListener("play", onPlay)
+        target.removeEventListener("pause", onPause)
+        target.removeEventListener("ended", onEnded)
+        target.removeEventListener("error", onError)
+        target.removeEventListener("play", onPlayMirror)
+        target.removeEventListener("pause", onPauseMirror)
+        target.removeEventListener("ended", onPauseMirror)
+      }
     }
-    // 音源解析失败（实例挂 / 404 / CORS / 区域 / VIP / 链接失效）：
-    // 先做实例回退——src 若是已知 meting 实例的 URL，把域名换到下一个实例重试
-    // （存库的 audio_url 钉死在导入时用的实例上，该实例挂掉时其它实例往往是好的）；
-    // 所有实例都试完仍失败，才标记"音源不可用"提示一次，由用户换一首。
-    // 判死按 playSeq 去重，避免重复弹提示。
-    const onError = () => {
-      const seq = playSeqRef.current
-      if (fallbackTriedRef.current.has(seq)) return
 
-      // 本次播放第一次报错时算出备选列表（基于报错时的 src，含原实例之外的全部实例）
-      if (!metingRetryRef.current || metingRetryRef.current.seq !== seq) {
-        metingRetryRef.current = { seq, alts: metingAlternatives(el.src), next: 0 }
-      }
-      const retry = metingRetryRef.current
-      if (retry.next < retry.alts.length) {
-        const alt = retry.alts[retry.next]
-        retry.next += 1
-        el.src = alt
-        el.play().catch(() => {
-          // 播放被拒/再次加载失败 → 下一次 error 事件继续走回退或判死
-        })
-        return
-      }
-
-      fallbackTriedRef.current.add(seq)
-      setIsFallback(true)
-      setIsPlaying(false)
-      isPlayingRef.current = false
-      toast({ description: "音源暂不可用，换一首试试" })
-    }
-
-    el.addEventListener("timeupdate", onTime)
-    el.addEventListener("progress", updateBuffered)
-    el.addEventListener("loadedmetadata", onDuration)
-    el.addEventListener("durationchange", onDuration)
-    el.addEventListener("play", onPlay)
-    el.addEventListener("pause", onPause)
-    el.addEventListener("ended", onEnded)
-    el.addEventListener("error", onError)
-
-    // Keep a ref-side mirror of isPlaying so getAudioIntensity (which is
-    // called from rAF) can read it without triggering re-renders.
-    const onPlayMirror = () => { isPlayingRef.current = true }
-    const onPauseMirror = () => { isPlayingRef.current = false }
-    el.addEventListener("play", onPlayMirror)
-    el.addEventListener("pause", onPauseMirror)
-    el.addEventListener("ended", onPauseMirror)
+    const detachStream = attach(el, false)
+    const detachLocal = attach(localEl, true)
 
     return () => {
       el.pause()
-      el.removeEventListener("timeupdate", onTime)
-      el.removeEventListener("progress", updateBuffered)
-      el.removeEventListener("loadedmetadata", onDuration)
-      el.removeEventListener("durationchange", onDuration)
-      el.removeEventListener("play", onPlay)
-      el.removeEventListener("pause", onPause)
-      el.removeEventListener("ended", onEnded)
-      el.removeEventListener("error", onError)
-      el.removeEventListener("play", onPlayMirror)
-      el.removeEventListener("pause", onPauseMirror)
-      el.removeEventListener("ended", onPauseMirror)
+      localEl.pause()
+      detachStream()
+      detachLocal()
+      if (currentObjectUrlRef.current) {
+        URL.revokeObjectURL(currentObjectUrlRef.current)
+        currentObjectUrlRef.current = null
+      }
+      try {
+        mediaSrcRef.current?.disconnect()
+        analyserRef.current?.disconnect()
+        audioCtxRef.current?.close()
+      } catch {
+        /* ignore */
+      }
+      audioCtxRef.current = null
+      analyserRef.current = null
+      mediaSrcRef.current = null
       audioRef.current = null
+      localAudioRef.current = null
+      activeAudioRef.current = null
     }
   }, [])
 
-  // ---- 音量：同步 ref（供 init effect 取初值）+ 写入 <audio>（后续变化兜底）----
+  // ---- 音量：同步 ref（供 init effect 取初值）+ 写入两个 <audio>（后续变化兜底）----
   useEffect(() => {
     volumeRef.current = volume
-    const el = audioRef.current
-    if (el) el.volume = volume
+    if (audioRef.current) audioRef.current.volume = volume
+    if (localAudioRef.current) localAudioRef.current.volume = volume
   }, [volume])
 
   // Lazily create the AudioContext on the first play (user gesture is
@@ -666,6 +803,10 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       // (allows fallback to run again for this new track).
       playSeqRef.current += 1
       setIsFallback(false)
+      // 切活动元素到流媒体：先设 active、再暂停本地（本地的 pause 事件会被守卫忽略）。
+      activeAudioRef.current = el
+      currentIsLocalRef.current = false
+      localAudioRef.current?.pause()
       // 改写到健康实例：把烘焙/存库里钉死在某实例上的 audio_url 换到当前可用实例，
       // 保证手势内首次 play() 命中可用源（iOS 关键路径）。healthyBaseRef 永不为空
       // （初值=实例表首位，再被 localStorage 缓存 / 探测结果覆盖）。
@@ -685,18 +826,99 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     [pushHistory],
   )
 
+  // 本地歌解析：从 IndexedDB 取字节 → objectURL → 经接了 AnalyserNode 的 localEl 播放。
+  // 不走 meting 改写 / 冷却记账（本地零外部请求）。
+  const doResolveLocal = useCallback(
+    (track: Track) => {
+      const local = localAudioRef.current
+      if (!local) return
+      playSeqRef.current += 1
+      setIsFallback(false)
+      // 在用户手势内解锁 AudioContext + 建图（首次本地播放）。
+      ensureAudioGraph()
+      const ctx = audioCtxRef.current
+      if (ctx && ctx.state === "suspended") ctx.resume().catch(() => {})
+      // 切活动元素到本地：先设 active、再暂停流媒体（流媒体的 pause 事件会被守卫忽略）。
+      activeAudioRef.current = local
+      currentIsLocalRef.current = true
+      audioRef.current?.pause()
+      loadedIdRef.current = track.id
+      setBuffered(0)
+      pushHistory(track.id)
+      // 异步取字节（IndexedDB）。seq 守卫：返回前若又点了别的歌就丢弃本次。
+      const seq = playSeqRef.current
+      getLocalTrackBlob(track.id)
+        .then((blob) => {
+          if (seq !== playSeqRef.current) return
+          if (!blob) {
+            setIsFallback(true)
+            setIsPlaying(false)
+            isPlayingRef.current = false
+            toast({ description: "本地文件已丢失，请重新上传" })
+            return
+          }
+          if (currentObjectUrlRef.current) {
+            URL.revokeObjectURL(currentObjectUrlRef.current)
+            currentObjectUrlRef.current = null
+          }
+          const url = URL.createObjectURL(blob)
+          currentObjectUrlRef.current = url
+          local.src = url
+          local.currentTime = 0
+          local.play().catch(() => {})
+        })
+        .catch(() => {
+          if (seq !== playSeqRef.current) return
+          setIsFallback(true)
+          setIsPlaying(false)
+          isPlayingRef.current = false
+          toast({ description: "本地文件读取失败" })
+        })
+    },
+    [pushHistory, toast, ensureAudioGraph],
+  )
+
   const play = useCallback(
     (id: string) => {
-      const track = tracksRef.current.find((t) => t.id === id)
+      const track =
+        tracksRef.current.find((t) => t.id === id) ??
+        localTracksRef.current.find((t) => t.id === id)
+      if (!track) return
+
+      // ---- 本地歌：无外部源，跳过冷却/防抖；已加载则直接续播，否则解析 ----
+      if (track.local) {
+        const local = localAudioRef.current
+        if (!local) return
+        setCurrentTrackId(id)
+        if (loadedIdRef.current === id && local.src && activeAudioRef.current === local) {
+          const ctx = audioCtxRef.current
+          if (ctx && ctx.state === "suspended") ctx.resume().catch(() => {})
+          local.play().catch(() => {})
+          return
+        }
+        if (pendingTimerRef.current) {
+          clearTimeout(pendingTimerRef.current)
+          pendingTimerRef.current = null
+        }
+        doResolveLocal(track)
+        return
+      }
+
+      // ---- 流媒体/链接歌：原冷却 / 复用 / 防抖逻辑 ----
       const el = audioRef.current
-      if (!track || !el) return
+      if (!el) return
 
       const now = Date.now()
 
-      // ① 复用窗口：当前已 load 的就是这首、且窗口内已拉过 → 直接续播，
+      // ① 复用窗口：当前已 load 的就是这首、活动元素是流媒体、且窗口内已拉过 → 直接续播，
       //    不重置 src、不再打外部源（"多久前已拉过就先用着"）。
       const lastResolve = lastResolveAtRef.current.get(id) ?? 0
-      if (loadedIdRef.current === id && el.src && now - lastResolve < REUSE_TTL) {
+      if (
+        loadedIdRef.current === id &&
+        el.src &&
+        activeAudioRef.current === el &&
+        now - lastResolve < REUSE_TTL
+      ) {
         if (pendingTimerRef.current) {
           clearTimeout(pendingTimerRef.current)
           pendingTimerRef.current = null
@@ -729,16 +951,16 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
 
       doResolve(track)
     },
-    [doResolve, toast],
+    [doResolve, doResolveLocal, toast],
   )
 
   const pause = useCallback(() => {
-    audioRef.current?.pause()
+    activeAudioRef.current?.pause()
   }, [])
 
   const togglePlay = useCallback(
     (id?: string) => {
-      const el = audioRef.current
+      const el = activeAudioRef.current
       if (!el) return
       // If id given and not current, switch to that track.
       if (id && id !== currentTrackId) {
@@ -748,6 +970,11 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       // Otherwise toggle the current.
       if (el.paused) {
         if (currentTrackId) {
+          // 续播本地歌时 AudioContext 可能被挂起（如切后台），best-effort 恢复。
+          if (el === localAudioRef.current) {
+            const ctx = audioCtxRef.current
+            if (ctx && ctx.state === "suspended") ctx.resume().catch(() => {})
+          }
           el.play().catch(() => {})
         }
       } else {
@@ -758,7 +985,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   )
 
   const seek = useCallback((t: number) => {
-    const el = audioRef.current
+    const el = activeAudioRef.current
     if (!el) return
     if (!isFinite(t) || t < 0) return
     el.currentTime = t
@@ -853,6 +1080,21 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       smoothedIntensityRef.current = 1
       return 1
     }
+    // 本地歌：真实低频能量（同源 blob 接了 AnalyserNode）。所有现有特效（液面/封面/
+    // 视频/遮罩背景）轮询这里 → 本地歌自动变成真·跟拍，消费端零改动。
+    const analyser = analyserRef.current
+    const buf = freqBufRef.current
+    if (currentIsLocalRef.current && analyser && buf) {
+      analyser.getByteFrequencyData(buf)
+      const n = Math.max(1, Math.floor(buf.length / 4)) // 取低频 1/4 段（鼓 / 贝斯）
+      let sum = 0
+      for (let i = 0; i < n; i++) sum += buf[i]
+      const raw = sum / (n * 255) // 0..1
+      const shaped = Math.min(1, raw * 1.8) // 多数歌低频均值偏低，略放大更悦目
+      smoothedIntensityRef.current = smoothedIntensityRef.current * 0.6 + shaped * 0.4
+      return smoothedIntensityRef.current
+    }
+    // 否则（流媒体/跨域，拿不到频谱）：模拟正弦呼吸（保留原逻辑）。
     // Layered sine pulse: a ~0.5 Hz beat shaped by a slower 0.09 Hz envelope.
     // ~2s per breath in, 2s out — relaxed "ambient breathing" rather than
     // a metronomic dance pulse.
@@ -863,6 +1105,14 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     smoothedIntensityRef.current =
       smoothedIntensityRef.current * 0.55 + raw * 0.45
     return smoothedIntensityRef.current
+  }, [])
+
+  // 填充频谱字节供专属可视化器用。仅本地歌 + 在播时有真实数据。详见 PlaybackState 注释。
+  const getAudioFrequencies = useCallback((out: Uint8Array): boolean => {
+    const analyser = analyserRef.current
+    if (!currentIsLocalRef.current || !analyser || !isPlayingRef.current) return false
+    analyser.getByteFrequencyData(out)
+    return true
   }, [])
 
   const timeValue = useMemo<PlaybackTimeState>(
@@ -898,14 +1148,15 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       liquidBg,
       setLiquidBg,
       getAudioIntensity,
+      getAudioFrequencies,
       refreshTracks,
     }),
-    [currentTrack, isPlaying, isFallback, playMode, history, favorites, tracks, play, pause, togglePlay, seek, next, prev, clearHistory, isFavorite, toggleFavorite, setPlayMode, volume, setVolume, lyricsEnabled, setLyricsEnabled, liquidFx, setLiquidFx, liquidBg, setLiquidBg, getAudioIntensity, refreshTracks],
+    [currentTrack, isPlaying, isFallback, playMode, history, favorites, tracks, play, pause, togglePlay, seek, next, prev, clearHistory, isFavorite, toggleFavorite, setPlayMode, volume, setVolume, lyricsEnabled, setLyricsEnabled, liquidFx, setLiquidFx, liquidBg, setLiquidBg, getAudioIntensity, getAudioFrequencies, refreshTracks],
   )
 
   const tracksCtxValue = useMemo<TrackSourceCtx>(
-    () => ({ tracks, source, setSource, hasUserTracks }),
-    [tracks, source, setSource, hasUserTracks],
+    () => ({ tracks, source, setSource, hasMine }),
+    [tracks, source, setSource, hasMine],
   )
 
   // 墙专用 value：依赖刻意收窄（见 PlaybackWallCtx 注释）。volume/history/
@@ -920,8 +1171,9 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       isFavorite,
       toggleFavorite,
       getAudioIntensity,
+      getAudioFrequencies,
     }),
-    [currentTrack, isPlaying, togglePlay, prev, next, isFavorite, toggleFavorite, getAudioIntensity],
+    [currentTrack, isPlaying, togglePlay, prev, next, isFavorite, toggleFavorite, getAudioIntensity, getAudioFrequencies],
   )
 
   return (

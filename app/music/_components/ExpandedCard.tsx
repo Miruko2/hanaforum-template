@@ -16,6 +16,8 @@ import { TrackCover } from "./TrackCover"
 import { LyricsEcho } from "./LyricsEcho"
 import { LiquidRefraction } from "./LiquidRefraction"
 import { SnowOverlay } from "./SnowOverlay"
+// 音频波形频谱暂时移除（视觉不满意、待重做）；组件文件保留备用。
+// import { AudioSpectrum } from "./AudioSpectrum"
 
 /** Screen-space rect of the card that was clicked — used as flight start. */
 export type ExpandRect = { left: number; top: number; width: number; height: number }
@@ -93,6 +95,7 @@ function ExpandedInner({
     setLyricsEnabled,
     volume,
     getAudioIntensity,
+    // getAudioFrequencies, // 波形频谱待重做，暂不消费（数据管线在 PlaybackContext 保留）
     liquidFx,
     liquidBg,
   } = usePlayback()
@@ -277,6 +280,19 @@ function ExpandedInner({
           {liquidFx === "rain" && <SnowOverlay />}
         </>
       )}
+
+      {/* 音频波形频谱（spectrum）暂时移除：视觉不满意，待参考他人实现重做。
+          数据管线 getAudioFrequencies（PlaybackContext）与组件 AudioSpectrum.tsx 均保留备用。
+          重做时：① 取消上方 import 与 getAudioFrequencies 解构的注释；
+                  ② 决定挂载条件（原方案：本地歌 + 桌面「波形」模式 / 移动端默认）。
+      {shown.local && (
+        <AudioSpectrum
+          getFrequencies={getAudioFrequencies}
+          hue={hue}
+          playing={playing}
+          lite={isMobile}
+        />
+      )} */}
 
       {/* Panel */}
       <motion.div

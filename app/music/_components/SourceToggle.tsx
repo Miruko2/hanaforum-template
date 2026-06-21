@@ -3,12 +3,12 @@
 import { useTrackSource } from "../_context/PlaybackContext"
 
 /**
- * 「我的 / 精选」切换。仅当用户有自定义曲目时出现（否则只有精选墙、无可切换）。
+ * 「我的 / 精选」切换。仅当「我的」非空（本地上传歌 + 链接歌任一存在）时出现。
  * 磨砂玻璃分段控件，与音乐页整体毛玻璃语言一致。
  */
 export function SourceToggle() {
-  const { source, setSource, hasUserTracks } = useTrackSource()
-  if (!hasUserTracks) return null
+  const { source, setSource, hasMine } = useTrackSource()
+  if (!hasMine) return null
   return (
     <div
       className="flex items-center gap-0.5 rounded-full p-0.5 text-[12px]"
