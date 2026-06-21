@@ -1,10 +1,13 @@
 // app/links/page.tsx
 // 「友情链接」页 —— 与二次元 / ACG 导航站互相推荐、彼此引流。
 //
-// ⚠️ 本页刻意做成「服务端组件」(没有 "use client")：友链作为真实 <a> 渲染进初始 HTML，
+// ⚠️ 本页是「服务端组件」(没有 "use client")：友链作为真实 <a> 渲染进初始 HTML，
 //    导航站的收录检查程序和搜索引擎都能直接读到（客户端 JS 动态插入的链接它们读不到，
-//    这正是友链互换能被对方核实到的关键）。新增/删除友链 = 改下面的数组即可。
+//    这正是友链互换能被对方核实到的关键）。
+// 友链数据来自数据库表 friend_links（不再硬编码）：在 /admin/friend-links 后台可视化
+//    增删改 + 一键审核申请上墙。force-dynamic 保证后台改完、下次访问即时生效。
 import type { Metadata } from "next"
+import { createClient } from "@supabase/supabase-js"
 import { Link2, ExternalLink, Heart } from "lucide-react"
 import { SITE_NAME, SITE_URL, SITE_DESCRIPTION } from "@/lib/site-url"
 import FriendLinkApplyForm from "./_components/friend-link-apply-form"
@@ -15,29 +18,40 @@ export const metadata: Metadata = {
   alternates: { canonical: "/links" },
 }
 
-type FriendLink = { name: string; url: string; desc?: string; tag?: string }
+// 友链改库后须实时反映后台改动，故每次请求都拉最新（本页小、查询轻，开销可忽略；仍是 SSR、收录无碍）。
+export const dynamic = "force-dynamic"
 
-// 真朋友的个人站 —— 平等互链、彼此推荐，和「申请收录」性质的导航站完全分开。
-// 新增一位朋友 = 往这里加一条。
-const FRIEND_SITES: FriendLink[] = [
-  { name: "Ar-Sr-Na 主站", url: "https://arsrna.cn/", desc: "创意，从一条时间轴开始", tag: "科技 · 官网" },
-  { name: "Ar-Sr-Na", url: "https://www.arirs.cn/", desc: "就是放文章的地方", tag: "前端 · 技术博客" },
-]
+type FriendLink = {
+  id: string
+  name: string
+  url: string
+  description: string | null
+  icon_url: string | null
+  tag: string | null
+  category: "friend" | "nav"
+  sort_order: number
+}
 
-// 二次元 / ACG 导航站。想申请收录的站点往这里加一条即可。
-const ACG_NAV_SITES: FriendLink[] = [
-  { name: "萌站·次元导航", url: "https://www.moe321.com/", desc: "ACG 二次元网址导航之门" },
-  { name: "ACG 盒子", url: "https://www.acgbox.link/", desc: "专注 ACG 的导航盒子" },
-  { name: "ACGN 导航", url: "https://nav.acgn.city/", desc: "AcgN·City 二次元导航" },
-  { name: "动漫世界导航", url: "https://nav.acgsq.com/", desc: "一起探索二次元动漫" },
-  { name: "终极导航", url: "https://www.zjnav.com/acg", desc: "动漫 · 漫画网站大全" },
-  { name: "快导航网", url: "https://www.hifast.cn/acg", desc: "ACG 二次元导航" },
-  { name: "AcgnHub 萌导航", url: "https://www.acgfans.me/", desc: "你的二次元萌导航姬" },
-  { name: "二次元宝藏导航", url: "https://acg.baozangdh.com/", desc: "可能是国内最好的二次元导航" },
-  { name: "万萌导航", url: "https://hao.wanmoe.cn/", desc: "ACG · 二次元导航" },
-  { name: "ACG导航站", url: "https://www.acgdhz.com/", desc: "专注 ACG 动漫 · 游戏 · 漫画" },
-  { name: "Moe48 萌导航", url: "https://www.moe48.com/", desc: "二次元 · ACG 网址导航" },
-]
+// 服务端用 anon key 读「可见」友链；公开 RLS 策略只放行 is_visible=true 的行。读失败降级为空列表（页面结构照常）。
+async function getFriendLinks(): Promise<FriendLink[]> {
+  try {
+    const sb = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL || "",
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
+    )
+    const { data, error } = await sb
+      .from("friend_links")
+      .select("id, name, url, description, icon_url, tag, category, sort_order")
+      .eq("is_visible", true)
+      .order("sort_order", { ascending: true })
+      .order("created_at", { ascending: true })
+    if (error) throw error
+    return (data ?? []) as FriendLink[]
+  } catch (e) {
+    console.error("[/links] 读取友链失败，降级为空列表:", e)
+    return []
+  }
+}
 
 // 本站信息：方便对方站长一键复制，加到他们的友链页
 const SELF_INFO: { label: string; value: string }[] = [
@@ -55,7 +69,11 @@ function hostOf(url: string): string {
   }
 }
 
-export default function LinksPage() {
+export default async function LinksPage() {
+  const links = await getFriendLinks()
+  const friendSites = links.filter((l) => l.category === "friend")
+  const navSites = links.filter((l) => l.category === "nav")
+
   return (
     <main className="min-h-screen text-white">
       <div className="container mx-auto max-w-4xl px-4 pt-24 pb-16 space-y-8">
@@ -103,8 +121,8 @@ export default function LinksPage() {
             <span className="text-xs text-white/30">私交友链</span>
           </div>
           <div className="friend-grid grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {FRIEND_SITES.map((link, i) => (
-              <div key={link.url} className="friend-card-wrap h-full">
+            {friendSites.map((link, i) => (
+              <div key={link.id} className="friend-card-wrap h-full">
                 <a
                   href={link.url}
                   target="_blank"
@@ -126,7 +144,7 @@ export default function LinksPage() {
                         </span>
                       )}
                     </div>
-                    {link.desc && <p className="mt-0.5 truncate text-xs text-white/50">{link.desc}</p>}
+                    {link.description && <p className="mt-0.5 truncate text-xs text-white/50">{link.description}</p>}
                     <p className="mt-1 truncate text-[11px] text-white/30">{hostOf(link.url)}</p>
                   </div>
                   <ExternalLink className="h-4 w-4 flex-shrink-0 text-white/20 transition-colors group-hover:text-lime-400/70" />
@@ -140,11 +158,11 @@ export default function LinksPage() {
         <section className="space-y-4">
           <div className="links-enter flex items-baseline justify-between" style={{ animationDelay: "320ms" }}>
             <h2 className="text-xl font-bold">二次元 · ACG 导航</h2>
-            <span className="text-xs text-white/30">{ACG_NAV_SITES.length} 个站点</span>
+            <span className="text-xs text-white/30">{navSites.length} 个站点</span>
           </div>
           <div className="friend-grid grid grid-cols-2 gap-3 sm:grid-cols-3">
-            {ACG_NAV_SITES.map((link, i) => (
-              <div key={link.url} className="friend-card-wrap h-full">
+            {navSites.map((link, i) => (
+              <div key={link.id} className="friend-card-wrap h-full">
                 <a
                   href={link.url}
                   target="_blank"
@@ -158,8 +176,8 @@ export default function LinksPage() {
                     </span>
                     <ExternalLink className="h-3.5 w-3.5 flex-shrink-0 text-white/20 transition-colors group-hover:text-lime-400/70" />
                   </div>
-                  {link.desc && (
-                    <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-white/50">{link.desc}</p>
+                  {link.description && (
+                    <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-white/50">{link.description}</p>
                   )}
                   <p className="mt-auto pt-2 truncate text-[11px] text-white/30">{hostOf(link.url)}</p>
                 </a>
