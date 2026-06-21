@@ -137,16 +137,22 @@ function SharePosterModal({ open, onClose, input }: SharePosterModalProps) {
       {open && (
         <motion.div
           className="fixed inset-0 z-[80] flex items-center justify-center p-4"
-          // 最外层只切 pointerEvents、绝不动画 opacity：它是面板(backdrop-filter)的祖先，
-          // 祖先 opacity<1 会废掉子级毛玻璃（先透明、动画结束才突然糊上）。淡入下放给遮罩层 + 面板各自。
-          initial={{ pointerEvents: "none" as const }}
-          animate={{ pointerEvents: "auto" as const }}
-          exit={{ pointerEvents: "none" as const }}
           onClick={onClose}
+          // 安卓 WebView：最外层直接做单层 opacity 淡入淡出（对标项目抗闪标杆 image-lightbox）。
+          // 原来的「最外层不动画 opacity + 遮罩/面板各自 opacity 动画」三层结构，是为了让祖先 opacity<1
+          // 不废掉子级毛玻璃；但安卓已降级掉 backdrop-filter（实底），该约束在安卓上不成立——
+          // 三层独立 opacity 动画反而让进/出场时多个合成层并发创建/销毁，正是「开/关弹窗整屏闪」的根因
+          // （即便砍了 scale 与毛玻璃仍闪，因为多 opacity 层撕裂 backing buffer）。
+          // 改成单层 opacity 后，开/关各只有一个合成层做透明度过渡，与 image-lightbox 同构、不闪。
+          // 桌面/iOS 保留毛玻璃，故维持「外层不动画 + 子层各自 opacity」结构（祖先 opacity 会废毛玻璃）。
+          initial={IS_ANDROID ? { opacity: 0 } : { pointerEvents: "none" as const }}
+          animate={IS_ANDROID ? { opacity: 1 } : { pointerEvents: "auto" as const }}
+          exit={IS_ANDROID ? { opacity: 0 } : { pointerEvents: "none" as const }}
+          transition={IS_ANDROID ? { duration: 0.2 } : undefined}
         >
-          {/* 遮罩：暗化 +（非安卓）固定模糊，自身做 opacity 淡入（兄弟节点，不影响面板毛玻璃）。
-              安卓 WebView 对 backdrop-filter 脆弱：模糊层在 opacity 进/出场时会撕裂碎闪
-              （即用户反馈的「开/关弹窗闪屏」），故安卓降级纯实底、去掉 backdrop-filter，仅留安全的 opacity 淡入。 */}
+          {/* 遮罩：暗化 +（非安卓）固定模糊。
+              非安卓：自身做 opacity 淡入（兄弟节点，不影响面板毛玻璃）。
+              安卓：opacity 已由最外层统一驱动，此处静态、不再独立动画（避免多层 opacity 并发撕裂）。 */}
           <motion.div
             className="absolute inset-0"
             style={{
@@ -154,15 +160,17 @@ function SharePosterModal({ open, onClose, input }: SharePosterModalProps) {
               backdropFilter: IS_ANDROID ? undefined : "blur(10px)",
               WebkitBackdropFilter: IS_ANDROID ? undefined : "blur(10px)",
             }}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
+            initial={IS_ANDROID ? false : { opacity: 0 }}
+            animate={IS_ANDROID ? undefined : { opacity: 1 }}
+            exit={IS_ANDROID ? undefined : { opacity: 0 }}
+            transition={IS_ANDROID ? undefined : { duration: 0.2 }}
           />
 
           {/* 面板：毛玻璃（安卓 WebView 降级实底）。
-              安卓去 scale 动画 + 用小阴影：scale 改渲染尺寸→每帧重光栅化圆角 + 重绘 90px 大模糊阴影
-              =撕裂闪屏（项目老坑 FLIP 大形变闪屏）；安卓只留 opacity 淡入 + 轻微位移，桌面/iOS 维持原动画。 */}
+              桌面/iOS：opacity + scale + y 入场（毛玻璃在同元素、CSS 允许共存，不闪）。
+              安卓：完全静态——opacity 由最外层统一接管，不再做任何几何/透明度动画
+              （scale 改渲染尺寸→重光栅化圆角+阴影=撕裂；y 位移虽合成器友好，但与多层 opacity 并发仍撕裂）。
+              安卓路径即「外层 opacity 淡入 + 面板静态」，与 image-lightbox 安卓路径同构。 */}
           <motion.div
             className="relative z-10 flex w-full max-w-[420px] flex-col overflow-hidden rounded-3xl border border-white/15"
             style={{
@@ -174,10 +182,10 @@ function SharePosterModal({ open, onClose, input }: SharePosterModalProps) {
                 : "0 30px 90px -20px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.14)",
               maxHeight: "92vh",
             }}
-            initial={IS_ANDROID ? { opacity: 0, y: 16 } : { opacity: 0, scale: 0.94, y: 16 }}
-            animate={IS_ANDROID ? { opacity: 1, y: 0 } : { opacity: 1, scale: 1, y: 0 }}
-            exit={IS_ANDROID ? { opacity: 0, y: 8 } : { opacity: 0, scale: 0.96, y: 8 }}
-            transition={{ duration: IS_ANDROID ? 0.22 : 0.28, ease: [0.16, 1, 0.3, 1] }}
+            initial={IS_ANDROID ? false : { opacity: 0, scale: 0.94, y: 16 }}
+            animate={IS_ANDROID ? undefined : { opacity: 1, scale: 1, y: 0 }}
+            exit={IS_ANDROID ? undefined : { opacity: 0, scale: 0.96, y: 8 }}
+            transition={IS_ANDROID ? undefined : { duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
             onClick={(e) => e.stopPropagation()}
           >
             {/* 标题栏 */}
