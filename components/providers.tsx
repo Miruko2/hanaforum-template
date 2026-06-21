@@ -42,6 +42,8 @@ const EmailVerifyGate = dynamic(() => import("@/components/email-verify-gate"), 
 const AnnouncementPopup = dynamic(() => import("@/components/announcement-popup"), { ssr: false })
 // 原生 App 推送注册（FCM）：登录后申请通知权限 + 注册设备 token；Web 端 no-op
 const PushRegistrar = dynamic(() => import("@/components/push-registrar"), { ssr: false })
+// 原生 App 本地通知：App 存活时把实时收到的私信/通知弹成手机系统通知（不依赖谷歌/厂商）；Web 端 no-op
+const LocalNotifier = dynamic(() => import("@/components/local-notifier"), { ssr: false })
 
 // 延迟加载包装器：等浏览器空闲后再挂载，让首屏内容优先抢占主线程。
 // requestIdleCallback 在不支持的浏览器（Safari < 18.4）上回退到 setTimeout。
@@ -75,6 +77,8 @@ export function Providers({ children }: { children: ReactNode }) {
         <AppBackground />
         {/* 原生 App 推送注册：登录后注册 FCM token、登出移除；Web 端零副作用 */}
         <PushRegistrar />
+        {/* 原生 App 本地通知：App 存活时实时私信/通知弹系统通知栏；Web 端零副作用 */}
+        <LocalNotifier />
         <BannedGate>
         <PostsProvider>
           <Script id="page-refresh-detection" strategy="beforeInteractive">

@@ -39,8 +39,8 @@ const config: CapacitorConfig = {
       allowFileAccess: true,
     },
     LocalNotifications: {
-      smallIcon: "ic_stat_icon_config_sample",
-      iconColor: "#488AFF",
+      smallIcon: "ic_stat_notify",
+      iconColor: "#A3E635",
     },
     PushNotifications: {
       presentationOptions: ["badge", "sound", "alert"],
