@@ -52,6 +52,18 @@ const CAT_LABEL: Record<Category, string> = { friend: "朋友的小站", nav: "�
 const inputCls =
   "w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/90 placeholder:text-white/30 outline-none transition focus:border-lime-400/60"
 
+// 加载占位骨架：壳层即时渲染、数据区先占位，避免整面板被 spinner 阻塞
+// （对齐管理面板既有的「非阻塞壳层 + 列表骨架」做法）。
+function SkeletonRows({ rows = 2 }: { rows?: number }) {
+  return (
+    <div className="space-y-2">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="h-14 animate-pulse rounded-xl border border-white/5 bg-white/[0.03]" />
+      ))}
+    </div>
+  )
+}
+
 async function authHeaders(): Promise<Record<string, string>> {
   const { data } = await supabase.auth.getSession()
   const token = data.session?.access_token
@@ -248,18 +260,9 @@ export default function FriendLinksPanel() {
     }
   }
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-20 text-white/50">
-        <Loader2 className="mr-2 h-5 w-5 animate-spin text-lime-400" />
-        加载中…
-      </div>
-    )
-  }
-
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-3">
+      <div className="admin-tab-enter flex items-center justify-between gap-3">
         <p className="text-sm text-white/50">审核申请、手动增删改友链，改动即时同步到 /links</p>
         <Link
           href="/links"
@@ -271,13 +274,15 @@ export default function FriendLinksPanel() {
       </div>
 
       {/* —— 待处理申请 —— */}
-      <section className="space-y-3 rounded-2xl border border-lime-500/25 bg-black/30 p-5 backdrop-blur-xl">
+      <section className="admin-tab-enter space-y-3 rounded-2xl border border-lime-500/25 bg-black/30 p-5 backdrop-blur-xl">
         <div className="flex items-center gap-2">
           <Inbox className="h-5 w-5 text-lime-400" />
           <h2 className="text-lg font-bold">待处理申请</h2>
-          <span className="rounded-full bg-lime-400/15 px-2 py-0.5 text-xs text-lime-300">{subs.length}</span>
+          <span className="rounded-full bg-lime-400/15 px-2 py-0.5 text-xs text-lime-300">{loading ? "…" : subs.length}</span>
         </div>
-        {subs.length === 0 ? (
+        {loading ? (
+          <SkeletonRows rows={1} />
+        ) : subs.length === 0 ? (
           <p className="py-4 text-center text-sm text-white/40">暂无待处理的友链申请</p>
         ) : (
           <div className="space-y-3">
@@ -327,7 +332,7 @@ export default function FriendLinksPanel() {
       </section>
 
       {/* —— 新增友链 —— */}
-      <section className="space-y-3 rounded-2xl border border-white/10 bg-black/30 p-5 backdrop-blur-xl">
+      <section className="admin-tab-enter space-y-3 rounded-2xl border border-white/10 bg-black/30 p-5 backdrop-blur-xl">
         <div className="flex items-center gap-2">
           <Plus className="h-5 w-5 text-lime-400" />
           <h2 className="text-lg font-bold">手动添加友链</h2>
@@ -363,12 +368,14 @@ export default function FriendLinksPanel() {
       {(["friend", "nav"] as const).map((cat) => {
         const items = links.filter((l) => l.category === cat).sort((a, b) => a.sort_order - b.sort_order)
         return (
-          <section key={cat} className="space-y-3">
+          <section key={cat} className="admin-tab-enter space-y-3">
             <div className="flex items-baseline gap-2">
               <h2 className="text-lg font-bold">{CAT_LABEL[cat]}</h2>
-              <span className="text-xs text-white/30">{items.length} 条</span>
+              <span className="text-xs text-white/30">{loading ? "…" : `${items.length} 条`}</span>
             </div>
-            {items.length === 0 ? (
+            {loading ? (
+              <SkeletonRows rows={2} />
+            ) : items.length === 0 ? (
               <p className="text-sm text-white/40">（空）</p>
             ) : (
               <div className="space-y-2">
