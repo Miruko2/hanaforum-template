@@ -103,24 +103,10 @@ function SharePosterModal({ open, onClose, input }: SharePosterModalProps) {
     return () => window.removeEventListener("keydown", onKey)
   }, [open, onClose])
 
-  // 锁滚动：打开即锁；解锁推迟到退场动画结束（见 AnimatePresence onExitComplete）。
-  // 安卓 WebView 上，关闭瞬间立即恢复 body.overflow 会触发整页 reflow、抢掉退场动画 → 闪屏。
-  // 恢复「之前的值」而非强制清空：本弹窗常开在帖子详情弹窗之上，后者也锁了滚动，强制清空会误把它解锁。
-  const prevOverflowRef = useRef("")
-  useEffect(() => {
-    if (!open) return
-    prevOverflowRef.current = document.body.style.overflow
-    document.body.style.overflow = "hidden"
-  }, [open])
-  const unlockScroll = useCallback(() => {
-    document.body.style.overflow = prevOverflowRef.current
-  }, [])
-  // 组件真正卸载时兜底恢复（如整页跳转），避免滚动锁泄漏。
-  useEffect(() => {
-    return () => {
-      document.body.style.overflow = prevOverflowRef.current
-    }
-  }, [])
+  // 刻意不锁 body 滚动：安卓 WebView 上切换 document.body.style.overflow 会触发整页重排 +
+  // 合成层重组（背后 3D 卡片墙 / 毛玻璃卡 / fixed 元素全被重新合成），这正是「开/关弹窗整屏闪」
+  // 的根因——对照项目抗闪标杆 image-lightbox：它 portal 全屏盖背景、自始至终不碰 body.overflow 故不闪。
+  // 遮罩已全屏遮住背景，背景即便能滚也不可见，无需锁。（之前用 onExitComplete 推迟解锁只是把闪挪后、没消除。）
 
   const handleSave = useCallback(() => {
     if (!poster) return
@@ -147,7 +133,7 @@ function SharePosterModal({ open, onClose, input }: SharePosterModalProps) {
   if (typeof window === "undefined") return null
 
   return createPortal(
-    <AnimatePresence onExitComplete={unlockScroll}>
+    <AnimatePresence>
       {open && (
         <motion.div
           className="fixed inset-0 z-[80] flex items-center justify-center p-4"
