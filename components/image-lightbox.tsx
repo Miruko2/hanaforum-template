@@ -278,14 +278,18 @@ export default function ImageLightbox({
           // 冷启动尤甚，因背后合成层刚建立、纹理未缓存；之后纹理缓存命中故不闪；详情页关再开
           // 后纹理销毁、又回到冷启动态故又闪）。瞬切后遮罩一次性建立合成层、无半透明过渡帧，
           // 背后无需逐帧重合成 → 不闪。观感：黑屏后 240ms 图片淡入（=「黑屏→图片浮现」），可接受。
-          // 关闭：遮罩 exit 带 delay 淡出，让图片先淡出销毁、遮罩后淡出，错开两层销毁。
+          // 关闭：遮罩 exit delay 0.15s（等图片先淡出销毁）后快速淡出 0.18s。
+          // 不能瞬切（duration:0）：全屏合成层瞬间销毁会让安卓合成器来不及重新合成背后
+          // 整屏内容（含详情模态之外的首页），表现为「帖子以外的地方闪一下」（第一次销毁
+          // 尤甚，因合成层刚建立；之后浏览器优化了纹理回收故不闪）。快速淡出给合成器留出
+          // 重新稳定的过渡帧，同时半透明时间短（0.18s）、背后重合成开销可控。
           // 桌面/iOS 维持原 opacity 淡入淡出（WebKit 合成器无此问题）。
           initial={isAndroidApp ? { opacity: 1 } : { opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={
             isAndroidApp
-              ? { duration: 0, exit: { delay: 0.15, duration: 0 } }
+              ? { duration: 0, exit: { delay: 0.15, duration: 0.18 } }
               : { duration: 0.22 }
           }
           style={{
