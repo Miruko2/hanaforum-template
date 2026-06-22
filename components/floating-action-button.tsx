@@ -232,7 +232,10 @@ export default function FloatingActionButton({ onPostCreated }: FloatingActionBu
                 className="pointer-events-auto absolute bottom-6 right-6 flex h-14 w-14 items-center justify-center rounded-full border border-lime-300/40 bg-gradient-to-br from-lime-400 to-lime-500 text-black shadow-lg"
                 initial={{ opacity: 0, scale: 0.6 }}
                 animate={{ opacity: 1, scale: 1, transition: { delay: 0.3, duration: 0.16 } }}
-                exit={{ opacity: 0, scale: 0.6, transition: { duration: 0.12 } }}
+                // 打开时瞬撤 FAB（不淡出）：原 0.12s 淡出会让角落这团绿与飞向中心的面板
+                // 果冻皮形成「两团绿」连闪（外加 animate-ping 退场再脉冲一圈）。瞬撤后只剩
+                // 果冻皮一团绿从角落飞入，绿色单次连续。仅影响打开方向，关闭时 FAB 仍按 animate 淡入。
+                exit={{ opacity: 0, transition: { duration: 0 } }}
                 onClick={handleButtonClick}
                 aria-label="发布新帖子"
               >
@@ -287,7 +290,14 @@ export default function FloatingActionButton({ onPostCreated }: FloatingActionBu
               >
                 <div
                   className="relative max-h-[85vh] overflow-y-auto overscroll-contain"
-                  style={{ visibility: formLit ? "visible" : "hidden" }}
+                  // 点亮毛玻璃表单用 opacity 淡入而非 visibility 瞬切：WebView 里 visibility
+                  // 瞬切会让整片含 backdrop-filter 的表单一帧硬栅格出来 = 落位那记闪屏。淡入把
+                  // 重栅格藏在 opacity≈0 首帧。关闭时(formLit=false)visibility 仍瞬隐、由回绿果冻皮盖住。
+                  style={{
+                    visibility: formLit ? "visible" : "hidden",
+                    opacity: formLit ? 1 : 0,
+                    transition: "opacity 0.2s ease-out",
+                  }}
                 >
                   <formMod.CreatePostForm onClose={close} onPostCreated={handlePostCreated} />
                 </div>
