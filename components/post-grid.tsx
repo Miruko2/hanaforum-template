@@ -125,6 +125,16 @@ export default function PostGrid() {
     }
   }, [deletePost]);
 
+  // 详情模态开/关 → 广播给全局组件（发帖 FAB 据此在详情打开时隐藏，避免常驻 z-[999] 按钮
+  // 盖在详情/灯箱之上、并随开/关的重转场与 body 滚动锁切换而抖动）。沿用本文件
+  // auth-state-changed 的全局事件模式，免把状态一路 props 透传到 page.tsx 再到 FAB。
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(
+      new CustomEvent("forum-detail-open-change", { detail: activePostId !== null }),
+    );
+  }, [activePostId]);
+
   // 处理重试加载
   const handleRetry = useCallback(() => {
     retryLoading();

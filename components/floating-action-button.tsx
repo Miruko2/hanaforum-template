@@ -51,6 +51,10 @@ export default function FloatingActionButton({ onPostCreated }: FloatingActionBu
   const [skinDissolve, setSkinDissolve] = useState(false)
   const [formLit, setFormLit] = useState(false)
   const [formMod, setFormMod] = useState<FormModule | null>(null)
+  // 详情模态（帖子详情/灯箱）打开时隐藏发帖按钮：FAB 是 z-[999] 常驻 fixed 层、盖在
+  // 详情(z-40)/灯箱(z-80)之上，详情开/关的重转场 + body 滚动锁切换会把它带得抖动；
+  // 且产品设计上看帖时发帖按钮本就该让位。由 PostGrid 在 activePostId 变化时广播。
+  const [detailOpen, setDetailOpen] = useState(false)
   const openRef = useRef(false)
   const lockedRef = useRef(false)
   const prevOverflowRef = useRef("")
@@ -62,6 +66,17 @@ export default function FloatingActionButton({ onPostCreated }: FloatingActionBu
 
   useEffect(() => {
     setMounted(true)
+  }, [])
+
+  // 监听详情模态开/关（PostGrid 广播）→ 详情打开即隐藏发帖按钮。挂载时兜底读一次
+  // sessionStorage.modalOpen，防错过首个事件（如详情已开时本组件才挂载）。
+  useEffect(() => {
+    const onChange = (e: Event) => setDetailOpen(!!(e as CustomEvent).detail)
+    window.addEventListener("forum-detail-open-change", onChange)
+    if (typeof sessionStorage !== "undefined" && sessionStorage.getItem("modalOpen") === "true") {
+      setDetailOpen(true)
+    }
+    return () => window.removeEventListener("forum-detail-open-change", onChange)
   }, [])
 
   // 空闲时预载表单代码：打开时面板与表单必须同帧挂载，FLIP 才能量到正确的目标尺寸
@@ -211,7 +226,7 @@ export default function FloatingActionButton({ onPostCreated }: FloatingActionBu
           )}
         >
           <AnimatePresence>
-            {!open && (
+            {!open && !detailOpen && (
               <motion.button
                 key="fab"
                 className="pointer-events-auto absolute bottom-6 right-6 flex h-14 w-14 items-center justify-center rounded-full border border-lime-300/40 bg-gradient-to-br from-lime-400 to-lime-500 text-black shadow-lg"
@@ -324,7 +339,7 @@ export default function FloatingActionButton({ onPostCreated }: FloatingActionBu
         )}
       >
         <AnimatePresence>
-          {!open && (
+          {!open && !detailOpen && (
             <motion.span
               key="fab-ping"
               className="absolute bottom-6 right-6 h-14 w-14 rounded-full bg-lime-400/20 animate-ping"
@@ -335,6 +350,7 @@ export default function FloatingActionButton({ onPostCreated }: FloatingActionBu
           )}
         </AnimatePresence>
 
+        {(open || !detailOpen) && (
         <motion.div
           layout
           role={open ? "dialog" : "button"}
@@ -408,10 +424,11 @@ export default function FloatingActionButton({ onPostCreated }: FloatingActionBu
             )}
           </AnimatePresence>
         </motion.div>
+        )}
 
         {/* Plus 图标钉在按钮位（不随果冻体拉伸），形变启程/归位时旋转淡出入 */}
         <AnimatePresence>
-          {!open && (
+          {!open && !detailOpen && (
             <motion.span
               key="fab-icon"
               className="pointer-events-none absolute bottom-6 right-6 flex h-14 w-14 items-center justify-center text-black"
