@@ -45,9 +45,10 @@ export type PlayMode = "list" | "one" | "once"
  *   rain        下雨 —— WebGL 液面 + 雪花飘落。
  *   center      中间涟漪 —— WebGL 液面，中心持续荡出涟漪。
  *   off         默认 —— 不挂任何背景特效，只留鼠标与水面交互。
- *   topography  地形波 —— Three.js 全屏 3D 声波地形（参考 sonic-topography 自研，AudioTopography.tsx）；
- *               仅本地上传歌有真实 FFT 才显示，在线歌自动回退默认。与液面互斥、不同时跑省性能。
- * 注：早先的条形频谱 AudioSpectrum.tsx 视觉被否、已被地形波取代（文件保留未挂载）。
+ *   topography  地形波 —— Three.js 全屏 3D 声波地形（移植 sonic-topography 的 GLSL 着色器，
+ *               AudioTopographyV2.tsx：粉白发光地形）；仅本地上传歌有真实 FFT 才显示，在线歌自动
+ *               回退默认。与液面互斥、不同时跑省性能。本地歌开始播放时会自动默认切到本模式。
+ * 注：条形频谱 AudioSpectrum.tsx、初版地形 AudioTopography.tsx 均已弃用（文件保留、未挂载）。
  */
 export type LiquidFx = "rain" | "center" | "off" | "topography"
 
@@ -558,10 +559,20 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     try {
       const v = localStorage.getItem(LIQUID_FX_KEY)
       if (v === "rain" || v === "center" || v === "off" || v === "topography") setLiquidFxState(v)
+      else if (v === "topography2") setLiquidFxState("topography") // 旧实验模式已并入 topography
     } catch {
       /* ignore */
     }
   }, [])
+
+  // 播放本地歌时默认切到「声波地形」：本地歌才有真实 FFT、最配地形可视化（用户拍板）。
+  // 仅在「进入本地播放」瞬间默认一次（上一首非本地 → 这一首本地），用户随后手动改特效不被打断。
+  const prevLocalRef = useRef(false)
+  useEffect(() => {
+    const isLocal = !!currentTrack?.local
+    if (isLocal && !prevLocalRef.current) setLiquidFx("topography")
+    prevLocalRef.current = isLocal
+  }, [currentTrack?.id, currentTrack?.local, setLiquidFx])
 
   // 液面底图来源（gradient 纯色渐变 / cover 当前封面 / background 个人首页背景）。默认渐变。
   const [liquidBg, setLiquidBgState] = useState<LiquidBg>("gradient")

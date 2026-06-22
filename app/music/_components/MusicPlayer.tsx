@@ -307,7 +307,7 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
                     : liquidFx === "center"
                       ? "特效：中间涟漪（点击切默认）"
                       : liquidFx === "off"
-                        ? "特效：默认（点击切地形波）"
+                        ? "特效：默认（点击切声波地形）"
                         : "特效：声波地形（仅本地歌；点击切雪花）"
                 }
                 className="h-8 w-8 grid place-items-center rounded-full hover:bg-white/10 transition-colors"
@@ -338,9 +338,10 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
                 )}
               </button>
             )}
-            {/* 水波底图来源切换（仅桌面/iPad，且处于液面模式 rain/center 才有意义；
-                循环 渐变 → 封面 → 首页背景）。off/topography 模式无液面、不显示。 */}
-            {!isMobile && (liquidFx === "rain" || liquidFx === "center") && (
+            {/* 水波底图来源切换（仅桌面/iPad；循环 渐变 → 封面 → 首页背景）。桌面下任意特效模式都
+                保留此按钮、避免切模式时工具栏少一个按钮跳动；底图只对水面模式(rain/center)有可见效果，
+                off/声波地形下点击只改持久化设置、切回水面才生效。 */}
+            {!isMobile && (
               <button
                 type="button"
                 aria-label="水波底图"

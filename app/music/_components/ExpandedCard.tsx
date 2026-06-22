@@ -16,7 +16,7 @@ import { TrackCover } from "./TrackCover"
 import { LyricsEcho } from "./LyricsEcho"
 import { LiquidRefraction } from "./LiquidRefraction"
 import { SnowOverlay } from "./SnowOverlay"
-import { AudioTopography } from "./AudioTopography"
+import { AudioTopographyV2 } from "./AudioTopographyV2"
 import ShareButton from "@/components/share/share-button"
 import { SITE_URL } from "@/lib/site-url"
 
@@ -252,7 +252,9 @@ function ExpandedInner({
       style={{ zIndex: overlayZ }}
       // 桌面液面模式（rain/center）：点击空白处用来跟水面交互（起涟漪），不关闭弹层——
       // 只有卡片上的 ✕（或 Esc）才关。off/topography（无水面交互）与移动端，保留点空白关闭。
-      onClick={isMobile || liquidFx === "off" || liquidFx === "topography" ? onClose : undefined}
+      onClick={
+        isMobile || liquidFx === "off" || liquidFx === "topography" ? onClose : undefined
+      }
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -283,9 +285,10 @@ function ExpandedInner({
       )}
 
       {/* 声波地形（3D，铺满全屏、卡片之下）：仅桌面/iPad + 地形模式 + 本地上传歌。
-          本地歌才有真实 FFT；在线歌在地形模式下不挂载 → 自动回退默认暗背景（用户拍板）。 */}
+          本地歌才有真实 FFT；在线歌在地形模式下不挂载 → 自动回退默认暗背景（用户拍板）。
+          用 V2（移植 sonic-topography 着色器、粉白发光）；初版 AudioTopography 已弃用。 */}
       {!isMobile && liquidFx === "topography" && shown.local && (
-        <AudioTopography getFrequencies={getAudioFrequencies} hue={hue} playing={playing} />
+        <AudioTopographyV2 getFrequencies={getAudioFrequencies} hue={hue} playing={playing} />
       )}
 
       {/* Panel */}
