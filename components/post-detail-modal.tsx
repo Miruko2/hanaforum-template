@@ -87,6 +87,9 @@ export default function PostDetailModal({
   const [imageIndex, setImageIndex] = useState(0)
   // 上一帧 lightboxOpen，用于侦测「关灯箱」这一跳变 → 触发详情图淡入遮掩重绘（见下方 effect）
   const prevLightboxOpenRef = useRef(false)
+  // 评论区容器：点顶部「评论计数」时平滑滚到这里（scrollIntoView 自动找最近的滚动祖先，
+  // 横版=右侧内容列、竖版=外层滚动容器，两种布局都对）
+  const commentsRef = useRef<HTMLDivElement>(null)
 
   // 帖子全部图片（封面在首位）。单图老帖回退 [image_url]。
   const images = postImageList(post)
@@ -98,6 +101,10 @@ export default function PostDetailModal({
 
   // 当前帖子的分类定义（中文名 + 装饰符号），脏数据找不到时徽章回退显示原始值
   const categoryDef = CATEGORIES.find((c) => c.value === post.category)
+
+  // 短帖（正文很短）：右侧内容上半部分会显空，收紧标题/作者/正文之间的间距，
+  // 让操作条与评论区上移、减少大段留白；长帖维持原本舒展的节奏。
+  const isShortPost = (post.description || post.content || "").trim().length <= 40
 
   // hero 转场（飞行克隆）：用一张独立的、全程不透明的飞行图，从点击卡片图的屏幕矩形
   // （sourceRect）飞到详情图位置（heroRef 测量），到位后交接给详情里的真实图。飞行图在
@@ -290,7 +297,7 @@ export default function PostDetailModal({
       {/* Title and category —— 内容区 stagger 整体收紧（0.08→0.32s），
           原来延迟一路排到 0.6s，打开后内容「慢半拍」才出现，不跟手 */}
       <motion.div
-        className="flex justify-between items-start gap-3 mb-5"
+        className={`flex justify-between items-start gap-3 ${isShortPost ? "mb-3" : "mb-5"}`}
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.35, delay: 0.08 }}
@@ -321,7 +328,7 @@ export default function PostDetailModal({
 
       {/* Author and date */}
       <motion.div
-        className="flex items-center justify-between mb-5 text-sm text-gray-300"
+        className={`flex items-center justify-between ${isShortPost ? "mb-3" : "mb-5"} text-sm text-gray-300`}
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.35, delay: 0.2 }}
@@ -341,7 +348,7 @@ export default function PostDetailModal({
               if (img.src.indexOf("/logo.png") === -1) img.src = "/logo.png"
             }}
           />
-          <span className="group-hover/author:text-lime-400 transition-colors">{username}</span>
+          <span className="font-medium text-gray-100 group-hover/author:text-lime-400 transition-colors">{username}</span>
         </div>
         <span className="text-xs">
           {post.created_at ? new Date(post.created_at).toLocaleString("zh-CN") : ""}
@@ -352,7 +359,7 @@ export default function PostDetailModal({
       <motion.p
         // 手机端正文从 15px 微调到 16.5px (text-[16.5px])，配合更大的 padding
         // 让正文成为视觉焦点；md+ 保持原本的 16px (text-base)
-        className="text-gray-200 text-[16.5px] md:text-base leading-relaxed mb-7 whitespace-pre-line"
+        className={`text-gray-200 text-[16.5px] md:text-base leading-relaxed ${isShortPost ? "mb-4" : "mb-7"} whitespace-pre-line`}
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.35, delay: 0.26 }}
@@ -375,10 +382,15 @@ export default function PostDetailModal({
             onClick={onLike}
             size="md"
           />
-          <div className="flex items-center space-x-1.5 px-3 py-2 rounded-full">
+          <button
+            type="button"
+            onClick={() => commentsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            className="flex items-center space-x-1.5 px-3 py-2 rounded-full text-white/80 transition-colors hover:bg-white/10 hover:text-white"
+            aria-label="跳到评论区"
+          >
             <MessageSquare className="h-5 w-5" />
             <span>{post.comments_count || 0}</span>
-          </div>
+          </button>
         </div>
         {/* 分享：生成带二维码的精美海报，保存后发微信/QQ */}
         <ShareButton
@@ -400,7 +412,8 @@ export default function PostDetailModal({
           桌面：hero 飞入到位（flyDone）再挂载，不和飞入克隆抢主线程。 */}
       {(isMobile || !heroActive || flyDone) && (
         <motion.div
-          className="mt-6"
+          ref={commentsRef}
+          className="mt-6 scroll-mt-4"
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4 }}
@@ -411,7 +424,7 @@ export default function PostDetailModal({
               <button
                 onClick={handleMmComment}
                 disabled={mmSending}
-                className="flex items-center gap-1.5 rounded-full border border-purple-400/30 bg-purple-500/10 px-3 py-1 text-xs text-purple-300 hover:bg-purple-500/20 disabled:opacity-50"
+                className="flex items-center gap-1.5 rounded-full border border-purple-400/25 bg-purple-500/10 px-3 py-1 text-[13px] font-medium text-purple-300 shadow-[0_0_14px_rgba(168,85,247,0.12),inset_0_1px_0_rgba(255,255,255,0.08)] transition-colors hover:bg-purple-500/20 disabled:opacity-50"
                 title="派萌萌子来这个帖子留言"
               >
                 <Bot className="h-3.5 w-3.5" />

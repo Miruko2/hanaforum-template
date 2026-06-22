@@ -54,8 +54,8 @@ export default function LikeButton({
   return (
     <button
       className={cn(
-        "relative flex items-center space-x-1 transition-colors duration-300 rounded-full",
-        liked ? "text-white bg-white/20" : "text-white/80 hover:bg-white/15",
+        "relative flex items-center space-x-1.5 transition-colors duration-300 rounded-full",
+        liked ? "text-white bg-white/20" : "text-white/80 hover:bg-white/10 hover:text-white",
         isLoading && "opacity-70 cursor-not-allowed",
         buttonSize[size],
         className

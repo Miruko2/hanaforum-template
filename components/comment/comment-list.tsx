@@ -84,7 +84,24 @@ export default function CommentList({
   const subscriptionRef = useRef<(() => void) | null>(null)
   const fetchIdRef = useRef(0)
   const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  
+
+  // 新评论入场判定：只让「初次加载之后」新增的评论播放淡入+高亮，首批（含缓存命中）
+  // 静态出现、不齐刷一遍动画。身份用「内容+作者+父级」而非 id —— 乐观评论换成真实评论时
+  // React key 从临时 id 变真实 id，但身份不变，于是不会被当成「又一条新评论」二次闪动。
+  const seenKeysRef = useRef<Set<string>>(new Set())
+  const initializedRef = useRef(false)
+  const lastPostIdRef = useRef(postId)
+  // 弹窗内切换帖子时（同一组件实例）即时重置，确保新帖首批仍静态出现
+  if (lastPostIdRef.current !== postId) {
+    lastPostIdRef.current = postId
+    seenKeysRef.current = new Set()
+    initializedRef.current = false
+  }
+  const commentIdentity = (c: Comment) =>
+    `${(c.content || "").trim()}|${c.user_id}|${c.parent_id || "root"}`
+  const isJustAdded = (c: Comment) =>
+    initializedRef.current && !seenKeysRef.current.has(commentIdentity(c))
+
   // 获取评论数据
   const fetchComments = useCallback(async (showLoading = true) => {
     const fetchId = ++fetchIdRef.current
@@ -228,6 +245,15 @@ export default function CommentList({
       }
     }
   }, [postId, fetchComments, setupSubscription])
+
+  // 每次提交后把当前所有评论记入「已见」，并在首次提交后置 initialized：
+  // 这样下一次有评论新增（自己发的乐观评论 / 实时收到别人的）才会被判为「新」播放入场。
+  useEffect(() => {
+    const idOf = (c: Comment) =>
+      `${(c.content || "").trim()}|${c.user_id}|${c.parent_id || "root"}`
+    ;[...optimisticComments, ...comments].forEach((c) => seenKeysRef.current.add(idOf(c)))
+    initializedRef.current = true
+  }, [optimisticComments, comments])
 
   // 生成临时ID用于乐观更新
   const generateTempId = () => `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
@@ -466,8 +492,17 @@ export default function CommentList({
             </Button>
           </div>
         ) : comments.length === 0 && optimisticComments.length === 0 ? (
-          <div className="p-6 rounded-lg bg-black/20 border border-gray-800/30 text-center">
-            <p className="text-gray-400">暂无评论，来发表第一条评论吧！</p>
+          <div className="flex flex-col items-center justify-center gap-3 py-8 px-6 rounded-xl border border-dashed border-white/10 bg-black/15 text-center">
+            <img
+              src="/logo.png"
+              alt=""
+              aria-hidden
+              className="h-12 w-12 rounded-full opacity-70 ring-1 ring-white/10"
+            />
+            <div>
+              <p className="text-sm text-gray-300">还没有人留言</p>
+              <p className="mt-1 text-xs text-gray-500">来抢个沙发，做第一个说话的人吧 ～</p>
+            </div>
           </div>
         ) : (
           <>
@@ -481,6 +516,7 @@ export default function CommentList({
                 onCommentDeleted={handleCommentDeleted}
                 isOptimistic={true}
                 isAdmin={isAdmin}
+                justAdded={isJustAdded(comment)}
               />
             ))}
             
@@ -493,6 +529,7 @@ export default function CommentList({
                 onCommentAdded={handleCommentAdded}
                 onCommentDeleted={handleCommentDeleted}
                 isAdmin={isAdmin}
+                justAdded={isJustAdded(comment)}
               />
             ))}
           </>

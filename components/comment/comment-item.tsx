@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { formatDate, cn } from "@/lib/utils"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { Reply, ThumbsUp, Trash2, ChevronDown, ChevronUp, Bot } from "lucide-react"
+import { motion } from "framer-motion"
 import type { Comment } from "@/lib/types"
 import CommentForm from "./comment-form"
 import { StickerText } from "@/components/stickers/sticker-text"
@@ -272,6 +273,8 @@ export interface CommentItemProps {
   onCommentDeleted?: (commentId: string) => void
   isOptimistic?: boolean
   isAdmin?: boolean   // 当前用户是否是管理员
+  /** 是否「初次加载之后」新增的评论：是则播放淡入+短暂高亮，首批评论静态出现 */
+  justAdded?: boolean
 }
 
 export default function CommentItem({
@@ -280,7 +283,8 @@ export default function CommentItem({
   onCommentAdded,
   onCommentDeleted,
   isOptimistic = false,
-  isAdmin = false
+  isAdmin = false,
+  justAdded = false
 }: CommentItemProps) {
   const [showReplyForm, setShowReplyForm] = useState(false)
   const [isLiked, setIsLiked] = useState(false)
@@ -445,8 +449,22 @@ export default function CommentItem({
   }
 
   return (
-    <div className="p-4 rounded-lg bg-black/20 border border-gray-800/50">
-      <div className="flex gap-3 items-start">
+    <motion.div
+      className="relative overflow-hidden p-4 rounded-lg bg-black/20 border border-gray-800/50 transition-colors duration-200 hover:bg-black/30 hover:border-white/20"
+      initial={justAdded ? { opacity: 0, y: 10 } : false}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35, ease: "easeOut" }}
+    >
+      {justAdded && (
+        <motion.span
+          aria-hidden
+          className="pointer-events-none absolute inset-0 z-0 bg-lime-400/10"
+          initial={{ opacity: 1 }}
+          animate={{ opacity: 0 }}
+          transition={{ duration: 1.4, ease: "easeOut" }}
+        />
+      )}
+      <div className="relative z-10 flex gap-3 items-start">
         <button
           type="button"
           onClick={goToProfile}
@@ -589,6 +607,6 @@ export default function CommentItem({
         loading={isDeleting}
         title={comment.content || "这条评论"}
       />
-    </div>
+    </motion.div>
   )
 }

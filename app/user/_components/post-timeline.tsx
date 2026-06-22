@@ -14,16 +14,7 @@ import { useToast } from "@/hooks/use-toast"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { likePost, unlikePost, checkUserLiked } from "@/lib/supabase"
 import { deletePostWithUIUpdate } from "@/lib/post-delete-fix"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
+import DeleteConfirmDialog from "@/components/delete-confirm-dialog"
 
 const PostDetailModal = dynamic(() => import("@/components/post-detail-modal"), { ssr: false })
 
@@ -750,6 +741,8 @@ export default function PostTimeline({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [deleting, setDeleting] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
+  // 打开确认弹窗时锁定待删数量：删除成功会清空选择，避免弹窗退场动画里数字跳成 0
+  const [pendingCount, setPendingCount] = useState(0)
 
   const toggleSelect = (id: string) =>
     setSelectedIds((prev) => {
@@ -865,7 +858,10 @@ export default function PostTimeline({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setConfirmOpen(true)}
+                    onClick={() => {
+                      setPendingCount(selectedIds.size)
+                      setConfirmOpen(true)
+                    }}
                     disabled={selectedIds.size === 0 || deleting}
                     className="inline-flex items-center gap-1.5 rounded-full bg-red-500/90 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-40"
                   >
@@ -907,29 +903,13 @@ export default function PostTimeline({
         />
       )}
 
-      <AlertDialog open={confirmOpen} onOpenChange={(o) => !deleting && setConfirmOpen(o)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>确认删除</AlertDialogTitle>
-            <AlertDialogDescription>
-              确定删除选中的 {selectedIds.size} 个帖子吗？此操作不可撤销，帖子的评论与点赞也会一并删除。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>取消</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(e) => {
-                e.preventDefault()
-                doDelete()
-              }}
-              disabled={deleting}
-              className="bg-red-500 text-white hover:bg-red-600"
-            >
-              {deleting ? "删除中…" : "确认删除"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <DeleteConfirmDialog
+        open={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        onConfirm={doDelete}
+        loading={deleting}
+        title={`${pendingCount} 个帖子`}
+      />
     </>
   )
 }

@@ -38,6 +38,7 @@ export default function CommentForm({
 }: CommentFormProps) {
   const [content, setContent] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [focused, setFocused] = useState(false)
   const { user } = useSimpleAuth()
   const { toast } = useToast()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -194,6 +195,10 @@ export default function CommentForm({
     [user, content, postId, parentId, isReply, onCommentAdded, onCancel, toast, optimized, mentionTarget],
   )
 
+  // 主评论框默认收成一行，聚焦后展开（让出垂直空间、减少短帖时的空旷感）；
+  // 回复框始终展开。一旦展开就保持，避免点表情选择器导致失焦又收起。
+  const expanded = isReply || focused || content.trim().length > 0
+
   return (
     <form onSubmit={handleSubmit} className="space-y-3">
       {isReply && replyingTo && (
@@ -206,46 +211,53 @@ export default function CommentForm({
         ref={textareaRef}
         value={content}
         onChange={(e) => setContent(e.target.value)}
+        onFocus={() => setFocused(true)}
         placeholder={isReply ? `回复 ${replyingTo || ""}...` : "写下你的评论..."}
-        className="min-h-[80px] bg-black/30 border-gray-800 focus:border-lime-500/50 text-white focus:ring-lime-500/30 resize-none"
+        className={`${expanded ? "min-h-[80px]" : "min-h-[44px]"} transition-[min-height] duration-200 bg-black/30 border-gray-800 focus:border-lime-500/50 text-white focus:ring-lime-500/30 resize-none`}
         disabled={isSubmitting}
       />
 
-      <div className="flex items-center justify-between gap-2">
-        <StickerPicker onSelect={insertSticker} disabled={isSubmitting} />
+      <div
+        className={`overflow-hidden transition-all duration-200 ${
+          expanded ? "max-h-24 opacity-100" : "-mt-3 max-h-0 opacity-0"
+        }`}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <StickerPicker onSelect={insertSticker} disabled={isSubmitting} />
 
-        <div className="flex gap-2">
-          {onCancel && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={onCancel}
-              className="border-gray-700 text-gray-300 hover:bg-gray-800 hover:text-white"
-              disabled={isSubmitting}
-            >
-              取消
-            </Button>
-          )}
-
-          <Button
-            type="submit"
-            size="sm"
-            className="bg-lime-500 hover:bg-lime-600 text-black"
-            disabled={isSubmitting || !content.trim()}
-          >
-            {isSubmitting ? (
-              <>
-                <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                {optimized ? "发布中..." : "发送中..."}
-              </>
-            ) : (
-              <>
-                <Send className="h-3.5 w-3.5 mr-1" />
-                {isReply ? "回复" : "发表评论"}
-              </>
+          <div className="flex gap-2">
+            {onCancel && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={onCancel}
+                className="border-gray-700 text-gray-300 hover:bg-gray-800 hover:text-white"
+                disabled={isSubmitting}
+              >
+                取消
+              </Button>
             )}
-          </Button>
+
+            <Button
+              type="submit"
+              size="sm"
+              className="bg-lime-500 hover:bg-lime-600 text-black"
+              disabled={isSubmitting || !content.trim()}
+            >
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                  {optimized ? "发布中..." : "发送中..."}
+                </>
+              ) : (
+                <>
+                  <Send className="h-3.5 w-3.5 mr-1" />
+                  {isReply ? "回复" : "发表评论"}
+                </>
+              )}
+            </Button>
+          </div>
         </div>
       </div>
     </form>
