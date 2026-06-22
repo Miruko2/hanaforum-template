@@ -56,6 +56,11 @@ function SharePosterModal({ open, onClose, input }: SharePosterModalProps) {
   const { toast } = useToast()
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading")
   const [poster, setPoster] = useState<string | null>(null)
+  // 安卓入场闸门：海报揭示推迟到弹窗入场淡入(0.2s)结束之后再放行。第二次点击命中图片缓存
+  // 时海报近乎瞬间就绪，若与入场 opacity 动画同帧落地，重 PNG 解码 + 面板从「加载态」撑到
+  // 「海报态」的尺寸跳变会一起撕裂合成层=闪屏（首次点击因生成走网络较慢、弹窗早已稳定故不闪）。
+  // 先让弹窗在加载态淡入稳定，再淡入海报，两次点击观感一致、均不闪。非安卓无此问题、不设闸。
+  const [entered, setEntered] = useState(!IS_ANDROID)
 
   // 通过 ref 读最新 input，使生成函数保持稳定（不随父组件每帧重渲染而变）。
   // 父组件（尤其 ExpandedCard 随播放进度每帧重渲）每次都会新建 input 对象，
@@ -92,6 +97,17 @@ function SharePosterModal({ open, onClose, input }: SharePosterModalProps) {
     return runGenerate()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, sig, runGenerate])
+
+  // 安卓入场闸门：打开后给入场淡入留出时间（略长于 0.2s）再放行海报；关闭即复位，下次重新计时
+  useEffect(() => {
+    if (!IS_ANDROID) return
+    if (!open) {
+      setEntered(false)
+      return
+    }
+    const t = window.setTimeout(() => setEntered(true), 240)
+    return () => window.clearTimeout(t)
+  }, [open])
 
   // Esc 关闭
   useEffect(() => {
@@ -203,7 +219,7 @@ function SharePosterModal({ open, onClose, input }: SharePosterModalProps) {
 
             {/* 海报预览区 */}
             <div className="flex min-h-[280px] flex-1 items-center justify-center overflow-y-auto px-5">
-              {status === "loading" && (
+              {(status === "loading" || (status === "ready" && !entered)) && (
                 <div className="flex flex-col items-center gap-3 py-16 text-white/60">
                   <Loader2 className="h-7 w-7 animate-spin text-lime-400" />
                   <span className="text-sm">正在生成精美海报…</span>
@@ -221,15 +237,20 @@ function SharePosterModal({ open, onClose, input }: SharePosterModalProps) {
                   </button>
                 </div>
               )}
-              {status === "ready" && poster && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
+              {status === "ready" && poster && entered && (
+                // 海报淡入：framer 先以 opacity:0 落地首帧→重 PNG 解码/纹理上传发生在不可见的
+                // 自有合成层（被遮掩），再淡到 1。安卓入场闸门已保证此刻弹窗已稳定，与 FAB/灯箱
+                // 同套「masking 重绘」原则。motion.img 非字面 <img>，不触发 no-img-element 规则。
+                <motion.img
                   src={poster}
                   alt="分享海报"
                   className="w-full rounded-2xl shadow-lg"
                   style={{ maxHeight: "62vh", objectFit: "contain" }}
                   draggable={false}
                   decoding="async"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 0.25, ease: "easeOut" }}
                 />
               )}
             </div>
