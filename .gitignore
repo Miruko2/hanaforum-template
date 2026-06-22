@@ -30,6 +30,8 @@ next-env.d.ts
 # ⚠️ 敏感凭证：绝对不能进仓库
 supabase_apikey.txt
 *.keystore
+# Firebase/FCM 安卓配置：含项目 API key 等，绝不进仓库（推送方案已弃用、文件仅本地保留）
+android/app/google-services.json
 
 # ⚠️ 敏感词种子 SQL：含敏感词（政治/色情/辱骂/广告/违法），生成产物，绝不进仓库
 scripts/seed-sensitive-words*.generated.sql
@@ -70,3 +72,7 @@ jest-out.log
 
 # Supabase CLI 部署副产物（存 project ref 等），不入库
 /supabase/.temp/
+
+# ⚠️ 数据库备份产物：含 auth.users（邮箱/密码哈希）、私信、聊天等敏感数据，
+#    以及 .dburl（数据库连接串，含密码）。整个目录绝对不能进 git。
+/backups/
