@@ -1368,6 +1368,19 @@ body {
   transform: translateZ(0);
 }
 
+/* 音乐分享卡「正在播放」均衡器条（瀑布流/详情音乐卡用，纯 transform 合成层动画、安卓友好） */
+@keyframes mpb-eq {
+  0%, 100% { transform: scaleY(0.32); }
+  50% { transform: scaleY(1); }
+}
+.mpb-eq-bar {
+  width: 2.5px;
+  height: 12px;
+  border-radius: 2px;
+  transform-origin: bottom;
+  animation: mpb-eq 0.9s ease-in-out infinite;
+}
+
 /* 优化的卡片动画 */
 .optimized-card {
   contain: layout style;

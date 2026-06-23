@@ -80,6 +80,12 @@ export type PlaybackState = {
   tracks: Track[]
   // actions
   play: (id: string) => void
+  /**
+   * 播放一首「外部临时曲目」——论坛音乐分享卡等递进来、但不在当前用户曲库里的歌。
+   * 它会成为 currentTrack 并经常规在线解析播放（迷你卡片 / 详情页自动复用）；
+   * 因不在 tracks 序列里，next/prev 对它天然按兵不动。仅用于可在线播放的歌。
+   */
+  playExternal: (track: Track) => void
   pause: () => void
   togglePlay: (id?: string) => void
   seek: (timeSeconds: number) => void
@@ -261,6 +267,10 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   const pendingTimerRef = useRef<number | null>(null)        // 最小间隔防抖定时器
 
   const [currentTrackId, setCurrentTrackId] = useState<string | null>(null)
+  // 外部「临时曲目」：论坛音乐分享卡等递进来播放、但不在用户曲库(tracks/local/user)里的歌。
+  // play()/currentTrack 据此识别它；不进 next/prev 序列（不在 tracks 里 → indexOfCurrent=-1 → 自动按兵不动）。
+  const [externalTrack, setExternalTrack] = useState<Track | null>(null)
+  const externalTrackRef = useRef<Track | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
@@ -394,9 +404,9 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       localTracks.find((t) => t.id === currentTrackId) ??
       userTracks.find((t) => t.id === currentTrackId) ??
       DEFAULT_TRACKS.find((t) => t.id === currentTrackId) ??
-      null
+      (externalTrack && externalTrack.id === currentTrackId ? externalTrack : null)
     )
-  }, [currentTrackId, tracks, localTracks, userTracks])
+  }, [currentTrackId, tracks, localTracks, userTracks, externalTrack])
 
   // 把 DB 行套进用户库（是否显示由 source 派生决定）。
   const applyUserTracks = useCallback((rows: UserMusicTrackRow[]) => {
@@ -899,7 +909,10 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     (id: string) => {
       const track =
         tracksRef.current.find((t) => t.id === id) ??
-        localTracksRef.current.find((t) => t.id === id)
+        localTracksRef.current.find((t) => t.id === id) ??
+        (externalTrackRef.current && externalTrackRef.current.id === id
+          ? externalTrackRef.current
+          : undefined)
       if (!track) return
 
       // ---- 本地歌：无外部源，跳过冷却/防抖；已加载则直接续播，否则解析 ----
@@ -960,7 +973,9 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         if (pendingTimerRef.current) clearTimeout(pendingTimerRef.current)
         pendingTimerRef.current = window.setTimeout(() => {
           pendingTimerRef.current = null
-          const tk = tracksRef.current.find((t) => t.id === id)
+          const tk =
+            tracksRef.current.find((t) => t.id === id) ??
+            (externalTrackRef.current?.id === id ? externalTrackRef.current : undefined)
           if (tk) doResolve(tk)
         }, MIN_GAP - sinceLast)
         return
@@ -969,6 +984,17 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       doResolve(track)
     },
     [doResolve, doResolveLocal, toast],
+  )
+
+  // 播放一首外部临时曲目（论坛音乐分享卡等，不在用户曲库里）。先登记到 ref/state，
+  // 让 play() / currentTrack 能识别它，再交给常规在线解析播放（含 meting 健康实例改写）。
+  const playExternal = useCallback(
+    (track: Track) => {
+      externalTrackRef.current = track
+      setExternalTrack(track)
+      play(track.id)
+    },
+    [play],
   )
 
   const pause = useCallback(() => {
@@ -1147,6 +1173,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       favorites,
       tracks,
       play,
+      playExternal,
       pause,
       togglePlay,
       seek,
@@ -1168,7 +1195,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       getAudioFrequencies,
       refreshTracks,
     }),
-    [currentTrack, isPlaying, isFallback, playMode, history, favorites, tracks, play, pause, togglePlay, seek, next, prev, clearHistory, isFavorite, toggleFavorite, setPlayMode, volume, setVolume, lyricsEnabled, setLyricsEnabled, liquidFx, setLiquidFx, liquidBg, setLiquidBg, getAudioIntensity, getAudioFrequencies, refreshTracks],
+    [currentTrack, isPlaying, isFallback, playMode, history, favorites, tracks, play, playExternal, pause, togglePlay, seek, next, prev, clearHistory, isFavorite, toggleFavorite, setPlayMode, volume, setVolume, lyricsEnabled, setLyricsEnabled, liquidFx, setLiquidFx, liquidBg, setLiquidBg, getAudioIntensity, getAudioFrequencies, refreshTracks],
   )
 
   const tracksCtxValue = useMemo<TrackSourceCtx>(

@@ -1,3 +1,14 @@
+// 帖子携带的「歌曲信息」（音乐分享卡）。存于 posts.music（jsonb）。
+// 在线歌/精选歌 playable=true、audio 为可播放地址；本地上传歌 playable=false、audio 为空。
+export interface SharedMusic {
+  title: string
+  artist: string
+  cover?: string          // 封面地址（在线歌外链 / 本地歌发布时托管的小图，可空）
+  audio?: string          // 播放地址（在线歌可播；本地歌为空，不可在线播放）
+  source?: string         // 来源：featured / netease / qq / link / local
+  playable?: boolean      // 能否在线播放（在线/精选 true；本地 false）
+}
+
 // 更新Post接口以匹配您的数据库结构
 export interface Post {
   id: string
@@ -10,6 +21,7 @@ export interface Post {
   image_urls?: string[] // 全部图片（按上传顺序，第一张为封面）；单图老帖可能为空，按 [image_url] 回退
   image_ratio?: number
   image_mask_url?: string // 主体遮罩图（灰度 PNG）：单图帖开「3D 视差」时生成，渲染端据此启用主体视差，见 components/subject-parallax
+  music?: SharedMusic | null // 音乐分享卡：非空时该帖渲染成音乐卡（封面/歌名/歌手 + 播放）；普通帖为空
   likes_count?: number // UI使用
   comments_count?: number // UI使用
   likes: number // 数据库中的字段
@@ -36,6 +48,7 @@ export interface PostInput {
   image_url?: string
   image_urls?: string[]
   image_ratio?: number
+  music?: SharedMusic | null
 }
 
 export interface Like {

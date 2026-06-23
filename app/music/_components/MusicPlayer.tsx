@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Pause, Play, SkipBack, SkipForward, History as HistoryIcon, Heart, Repeat, Repeat1, Square, CloudSnow, Target, Droplet, Mountain, Palette, Image as ImageIcon, Wallpaper } from "lucide-react"
+import { SkipBack, SkipForward, History as HistoryIcon, Heart, Repeat, Repeat1, Square, CloudSnow, Target, Droplet, Mountain, Palette, Image as ImageIcon, Wallpaper } from "lucide-react"
+import { MusicPlayButton } from "@/components/music-play-button"
 import { usePlayback, usePlaybackTime } from "../_context/PlaybackContext"
 import { useDominantHue } from "../_lib/useDominantHue"
 import { useIsAndroidApp } from "../_lib/useIsAndroid"
@@ -249,17 +250,15 @@ export function MusicPlayer({ onToggleHistory, onExpand }: Props) {
             >
               <SkipBack size={16} />
             </button>
-            <button
-              type="button"
-              aria-label={isPlaying ? "pause" : "play"}
-              className="h-10 w-10 grid place-items-center rounded-full bg-white text-black hover:scale-105 active:scale-95 transition-transform"
+            <MusicPlayButton
+              playing={isPlaying}
+              size={40}
+              hue={hue}
               onClick={(e) => {
                 e.stopPropagation()
                 togglePlay()
               }}
-            >
-              {isPlaying ? <Pause size={16} /> : <Play size={16} className="translate-x-[1px]" />}
-            </button>
+            />
             <button
               type="button"
               aria-label="next"

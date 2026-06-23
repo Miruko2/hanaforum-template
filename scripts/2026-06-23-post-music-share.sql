@@ -1,0 +1,21 @@
+-- 音乐分享卡：给帖子加「歌曲信息」列。
+-- 用户在音乐页把一首歌「发到论坛」时，歌曲的标题/歌手/封面/播放源等存进这一列，
+-- 帖子卡片据此渲染成「音乐卡」：
+--   · 在线歌 / 精选歌  playable=true  → 卡片就地小窗播放（复用全站播放器）；
+--   · 本地上传歌      playable=false → 只展示封面/歌名/歌手的信息卡，标注「上传者本地歌·
+--                                      暂不可在线播放」，封面是发布时托管到 post-images 的小图，
+--                                      绝不上传音频（零流量、零版权风险）。
+-- 普通帖子该列为 NULL，渲染与从前完全一致、不受任何影响。
+-- 与 image_urls / image_mask_url 同样走「列是否存在」探测（lib/post-images.ts），
+-- 迁移前/后代码都能跑（迁移前发帖照常、只是不带 music 字段）。
+--
+-- 形如：
+-- {
+--   "title": "歌名",
+--   "artist": "歌手",
+--   "cover":  "https://...",  -- 封面地址（在线歌外链 / 本地歌托管小图，可空）
+--   "audio":  "https://...",  -- 播放地址（在线歌可播；本地歌为空字符串）
+--   "source": "netease",      -- 来源：featured / netease / qq / link / local
+--   "playable": true           -- 能否在线播放
+-- }
+alter table posts add column if not exists music jsonb;

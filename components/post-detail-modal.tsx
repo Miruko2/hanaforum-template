@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button"
 import GlassMorph from "./glass-morph"
 import PostCardImage from "./post-card-image"
 import PostImageCarousel from "./post-image-carousel"
+import MusicDetailPlayer from "./music-detail-player"
 import ImageLightbox from "./image-lightbox"
 import TextualHero from "./textual-hero"
 import CommentList, { prefetchComments } from "./comment/comment-list"
@@ -612,6 +613,8 @@ export default function PostDetailModal({
                           {imageHoverOverlay}
                         </div>
                       )
+                    ) : post.music ? (
+                      <MusicDetailPlayer post={post} />
                     ) : (
                       <TextualHero post={post} />
                     )}
@@ -683,6 +686,11 @@ export default function PostDetailModal({
                           {imageHoverOverlay}
                         </div>
                       )
+                    ) : post.music ? (
+                      // 音乐帖（手机竖版）：音乐播放块。高度给足，封面 + 播放 + 进度条不挤压。
+                      <div className="min-h-[340px]">
+                        <MusicDetailPlayer post={post} />
+                      </div>
                     ) : (
                       // 无图帖子：跟 PC 端横版一样走 TextualHero，避免出现孤零零的三角占位
                       // 高度 280px：够展示标题 + 装饰，又不喧宾夺主挤压内容区

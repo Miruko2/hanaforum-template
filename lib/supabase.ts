@@ -1,7 +1,7 @@
 import { supabase } from "./supabaseClient"
-import type { Comment } from "./types"
+import type { Comment, SharedMusic } from "./types"
 import { queueNewPost, removePostFromQueue } from "./post-realtime-update"
-import { postsHaveImageUrls, postsHaveMaskColumn } from "./post-images"
+import { postsHaveImageUrls, postsHaveMaskColumn, postsHaveMusicColumn } from "./post-images"
 
 // 本地缓存点赞状态，避免频繁请求
 const likeStatusCache = new Map<string, boolean>()
@@ -79,6 +79,7 @@ export async function createPost({
   image_url,
   image_urls,
   image_ratio,
+  music,
 }: {
   title: string
   content: string
@@ -87,6 +88,7 @@ export async function createPost({
   image_url?: string
   image_urls?: string[]
   image_ratio?: number
+  music?: SharedMusic | null
 }) {
   // 增加超时时间，以适应移动网络可能的延迟
   const timeout = new Promise((_, reject) => 
@@ -170,6 +172,8 @@ export async function createPost({
     const safeImageRatio = image_ratio || 1.0;
     // 多图列是否已迁移：未迁移则插入时不带 image_urls 键，避免列不存在导致发帖失败
     const withUrls = await postsHaveImageUrls();
+    // 音乐分享卡列是否已迁移：未迁移则插入时不带 music 键（迁移前发帖照常，只是不带歌曲信息）
+    const withMusic = await postsHaveMusicColumn();
 
     // 如果有会话，尝试刷新
     if (userSession && userSession.access_token) {
@@ -191,6 +195,7 @@ export async function createPost({
           category: safeCategory,
           image_url: image_url || null,
           ...(withUrls ? { image_urls: image_urls && image_urls.length ? image_urls : null } : {}),
+          ...(withMusic ? { music: music ?? null } : {}),
           image_ratio: safeImageRatio,
           user_id: userId,
           likes: 0,

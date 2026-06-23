@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { motion, AnimatePresence } from "framer-motion"
-import { Pause, Play, SkipBack, SkipForward, X, Mic2 } from "lucide-react"
+import { SkipBack, SkipForward, X, Mic2, Share2 } from "lucide-react"
+import { MusicPlayButton } from "@/components/music-play-button"
 import { type Track } from "../_data/tracks"
 import { usePlayback, usePlaybackTime, useTracks } from "../_context/PlaybackContext"
 import { useDominantHue } from "../_lib/useDominantHue"
@@ -17,8 +18,7 @@ import { LyricsEcho } from "./LyricsEcho"
 import { LiquidRefraction } from "./LiquidRefraction"
 import { SnowOverlay } from "./SnowOverlay"
 import { AudioTopographyV2 } from "./AudioTopographyV2"
-import ShareButton from "@/components/share/share-button"
-import { SITE_URL } from "@/lib/site-url"
+import ShareDeck from "./ShareDeck"
 
 /** Screen-space rect of the card that was clicked — used as flight start. */
 export type ExpandRect = { left: number; top: number; width: number; height: number }
@@ -103,6 +103,9 @@ function ExpandedInner({
   const { currentTime, duration } = usePlaybackTime()
   const tracks = useTracks()
   const [shown, setShown] = useState<Track>(target.track)
+  // 分享卡组开关（海报 + 发到论坛 两张可切换卡片）。
+  const [deckOpen, setDeckOpen] = useState(false)
+  const closeDeck = useCallback(() => setDeckOpen(false), [])
   const isCurrent = currentTrack?.id === shown.id
   const playing = isCurrent && isPlaying
   const reducedMotion = useReducedMotion()
@@ -428,18 +431,12 @@ function ExpandedInner({
               >
                 <SkipBack size={compact ? 16 : 18} />
               </button>
-              <button
-                type="button"
+              <MusicPlayButton
+                playing={playing}
+                size={compact ? 40 : 48}
+                hue={hue}
                 onClick={() => togglePlay(shown.id)}
-                aria-label={playing ? "pause" : "play"}
-                className="grid h-10 w-10 place-items-center rounded-full bg-white text-black shadow-lg transition-transform hover:scale-105 active:scale-95 sm:h-12 sm:w-12"
-              >
-                {playing ? (
-                  <Pause size={compact ? 18 : 22} />
-                ) : (
-                  <Play size={compact ? 18 : 22} className="translate-x-[1px]" />
-                )}
-              </button>
+              />
               <button
                 type="button"
                 onClick={() => step(1)}
@@ -450,20 +447,16 @@ function ExpandedInner({
               </button>
             </div>
             <div className="flex items-center gap-1">
-              {/* 分享：生成带二维码的精美海报，保存后发微信/QQ */}
-              <ShareButton
-                variant="icon"
-                label="分享歌曲"
-                className="h-8 w-8 sm:h-9 sm:w-9"
-                input={{
-                  kind: "music",
-                  title: shown.title,
-                  artist: shown.artist,
-                  coverUrl: shown.cover ?? null,
-                  hue,
-                  url: `${SITE_URL}/music`,
-                }}
-              />
+              {/* 分享：打开卡组（前卡海报 + 身后斜着的发到论坛，hover/点切换） */}
+              <button
+                type="button"
+                aria-label="分享"
+                title="分享"
+                onClick={() => setDeckOpen(true)}
+                className="grid h-8 w-8 place-items-center rounded-full text-white/55 transition-colors hover:bg-white/10 hover:text-white sm:h-9 sm:w-9"
+              >
+                <Share2 size={compact ? 16 : 18} />
+              </button>
               <button
                 type="button"
                 aria-label="歌词"
@@ -492,6 +485,9 @@ function ExpandedInner({
           />
         )}
       </motion.div>
+
+      {/* 分享卡组（自带 portal，挂在 body；track 传 null 即关闭） */}
+      <ShareDeck track={deckOpen ? shown : null} hue={hue} onClose={closeDeck} />
     </motion.div>
   )
 }

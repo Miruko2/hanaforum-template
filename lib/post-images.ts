@@ -52,6 +52,23 @@ export function postsHaveMaskColumn(): Promise<boolean> {
   return maskColumnCheck
 }
 
+// 同理探测 posts 是否已有 music 列（音乐分享卡用，scripts/2026-06-23-post-music-share.sql）。
+// feed 的显式 select 引用不存在的列会让整表查询报错 → 帖子列表空白，故同样探测+缓存+回退。
+let musicColumnCheck: Promise<boolean> | null = null
+export function postsHaveMusicColumn(): Promise<boolean> {
+  if (!musicColumnCheck) {
+    musicColumnCheck = (async () => {
+      try {
+        const { error } = await supabase.from("posts").select("music").limit(1)
+        return !error
+      } catch {
+        return false
+      }
+    })()
+  }
+  return musicColumnCheck
+}
+
 /** 取帖子的有序图片列表（封面在首位）。无图返回 []。 */
 export function postImageList(post: PostImageSource): string[] {
   const list = Array.isArray(post.image_urls)

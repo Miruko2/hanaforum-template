@@ -3,8 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import {
-  Pause,
-  Play,
   SkipBack,
   SkipForward,
   Heart,
@@ -13,6 +11,7 @@ import {
   Square,
   Minimize2,
 } from "lucide-react"
+import { MusicPlayButton } from "@/components/music-play-button"
 import { usePathname } from "next/navigation"
 import { usePlayback, usePlaybackTime, type PlayMode } from "../_context/PlaybackContext"
 import { useDominantHue } from "../_lib/useDominantHue"
@@ -433,17 +432,15 @@ export function GlobalMiniPlayer() {
                       >
                         <SkipBack size={14} />
                       </button>
-                      <button
-                        type="button"
-                        aria-label={isPlaying ? "pause" : "play"}
-                        className="grid h-9 w-9 place-items-center rounded-full bg-white text-black transition-transform hover:scale-105 active:scale-95"
+                      <MusicPlayButton
+                        playing={isPlaying}
+                        size={36}
+                        hue={hue}
                         onClick={(e) => {
                           e.stopPropagation()
                           togglePlay()
                         }}
-                      >
-                        {isPlaying ? <Pause size={15} /> : <Play size={15} className="translate-x-[1px]" />}
-                      </button>
+                      />
                       <button
                         type="button"
                         aria-label="next"

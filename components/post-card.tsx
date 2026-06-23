@@ -13,6 +13,7 @@ import { useToast } from "@/hooks/use-toast"
 import type { Post } from "@/lib/types"
 import HoverCardEffect from "@/components/hover-card-effect"
 import PostCardImage from "@/components/post-card-image"
+import MusicPostBody from "@/components/music-post-body"
 import PostCardContent from "@/components/post-card-content"
 import PostCardActions from "@/components/post-card-actions"
 import { cn } from "@/lib/utils"
@@ -395,6 +396,9 @@ const PostCard = memo(function PostCard({
           </DropdownMenu>
         )}
 
+        {/* 音乐分享卡：封面 + 播放区（替代普通帖子的图片区，仅 post.music 存在时渲染） */}
+        {post.music && <MusicPostBody post={post} />}
+
         {/* 图片区域 - 仅在有真实图片 URL 时渲染（无图帖子跳过这一块，避免空白占位） */}
         {post.image_url && (
           <div className="image-container relative overflow-hidden">
@@ -424,8 +428,8 @@ const PostCard = memo(function PostCard({
           <div
             className={cn(
               "relative z-10 flex items-center gap-2.5 px-4 group/author",
-              // 有图片时头像上移叠在图片底边；无图片时正常留白
-              post.image_url ? "-mt-5" : "pt-3"
+              // 有图片/音乐封面时头像上移叠在底边；无图时正常留白
+              (post.image_url || post.music) ? "-mt-5" : "pt-3"
             )}
             onClick={(e) => e.stopPropagation()}
           >

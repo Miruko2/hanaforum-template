@@ -1,7 +1,8 @@
 "use client"
 
 import { forwardRef, memo, useRef } from "react"
-import { Pause, Play, Heart, SkipBack, SkipForward } from "lucide-react"
+import { Play, Heart, SkipBack, SkipForward } from "lucide-react"
+import { MusicPlayButton } from "@/components/music-play-button"
 import type { Track } from "../_data/tracks"
 import type { ExpandRect } from "./ExpandedCard"
 import { usePlaybackWall } from "../_context/PlaybackContext"
@@ -130,25 +131,34 @@ function MusicCardBase(
           >
             <SkipBack size={sideIcon} />
           </button>
-          <button
-            type="button"
-            className={`grid shrink-0 place-items-center rounded-full transition-transform active:scale-95 ${
-              isCurrent ? "bg-white text-black" : "bg-white/20 text-white hover:bg-white/30"
-            }`}
-            style={{ width: playSize, height: playSize, filter: lite ? undefined : ctrlShadow }}
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation()
-              togglePlay(track.id)
-            }}
-            aria-label={isPlaying ? "pause" : "play"}
-          >
-            {isPlaying ? (
-              <Pause size={playIcon} />
-            ) : (
+          {isCurrent ? (
+            // 选中（正在放）那颗：换成全站统一的毛玻璃描边圆钮，封面主色描边＝在放指示
+            <MusicPlayButton
+              playing={isPlaying}
+              size={playSize}
+              hue={track.hue}
+              onClick={(e) => {
+                e.stopPropagation()
+                togglePlay(track.id)
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+            />
+          ) : (
+            // 闲置态保持原样（用户认可）：半透白圆 + 白三角，不动
+            <button
+              type="button"
+              className="grid shrink-0 place-items-center rounded-full bg-white/20 text-white transition-transform hover:bg-white/30 active:scale-95"
+              style={{ width: playSize, height: playSize, filter: lite ? undefined : ctrlShadow }}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation()
+                togglePlay(track.id)
+              }}
+              aria-label="play"
+            >
               <Play size={playIcon} className="translate-x-[1px]" />
-            )}
-          </button>
+            </button>
+          )}
           <button
             type="button"
             className="shrink-0 transition-colors hover:text-white"
