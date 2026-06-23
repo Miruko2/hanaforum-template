@@ -174,20 +174,32 @@ export const DM_STICKER_INJECT_PROBABILITY = 0.55
 /* ============================================================
  * 萌萌子在大厅（chat_messages）主动插话参数
  *
- * 机制：前端订阅大厅 realtime，每来一条「非萌萌子自己发的」新消息，按
- * HALL_CHIME_IN_PROBABILITY 掷骰，命中即调 /api/hall-mengmegzi。
- * 萌萌子自己的发言不触发（防递归）。服务端叠一道时间冷却防多客户端并发刷屏。
+ * 机制（稳重陪聊档）：前端订阅大厅 realtime。为避免「用户一个意思拆成几句发、每句
+ * 都被接话」，不再每来一条就掷骰，而是等大厅停顿 HALL_CHIME_IN_DEBOUNCE_MS（确认这
+ * 一段说完）后，对整段按 HALL_CHIME_IN_PROBABILITY 掷一次骰，命中才调 /api/hall-mengmegzi。
+ * 连发的多条消息只会不断重置该定时器，故整段只触发一次。被 @ 点名（HALL_MENTION_REGEX）
+ * 绕过去抖与概率，立即必回。萌萌子自己的发言不触发（防递归）。服务端叠一道时间冷却防
+ * 多客户端并发刷屏；且单次回复在路由层截断为「一句话 + 至多一个表情」，不再连珠炮。
  * ============================================================ */
 
-/** 客户端：大厅每来一条非己新消息时，触发萌萌子主动发言的概率。0.4 ≈ 活跃插话。 */
-export const HALL_CHIME_IN_PROBABILITY = 0.4
+/** 客户端：大厅停顿后掷骰、触发萌萌子主动发言的概率。0.2 ≈ 稳重陪聊（不抢话、不刷屏）。 */
+export const HALL_CHIME_IN_PROBABILITY = 0.2
+
+/** 客户端去抖：大厅最后一条消息后，等这么久（毫秒）没再来新消息，才算「这一段说完」再掷骰。
+ *  5s：用户连发的几句话会不断重置它，停笔后才触发一次，根除「每句都被接话」。 */
+export const HALL_CHIME_IN_DEBOUNCE_MS = 5_000
 
 /** 服务端冷却：萌萌子在大厅两次发言间的最小间隔（毫秒）。防多客户端并发命中刷屏。
- *  10s：活跃但不过密。多个在线用户同时命中 40% 时，只有距上次发言满 10s 的才放行。
+ *  15s：稳重陪聊但不过分慢热。多个在线用户同时命中时，只有距上次发言满 15s 的才放行。
  *  注意：被 @ 点名（force=true）绕过此冷却，保证必回。 */
-export const HALL_CHIME_IN_COOLDOWN_MS = 10_000
+export const HALL_CHIME_IN_COOLDOWN_MS = 15_000
 
 /** 拉大厅最近多少条消息作为上下文（含触发消息）。控制单次 token 成本。 */
 export const HALL_CHIME_IN_CONTEXT_MSGS = 20
+
+/** 萌萌子单次大厅插话的上限（路由层截断）：一次最多几句文字 + 几个表情，按模型原顺序
+ *  穿插收集、各自超出即丢弃。3 句 + 2 表情：保留一点连贯表达，又不至于连珠炮刷屏。可随时调。 */
+export const HALL_REPLY_MAX_TEXTS = 3
+export const HALL_REPLY_MAX_STICKERS = 2
 
 // 白名单从数据库表 hanako_allowed_users 读取（见 app/api/ai-reply/route.ts）

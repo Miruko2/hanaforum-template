@@ -8,7 +8,7 @@ import { X, Send, Smile, Users, Hash, CalendarDays, Reply } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
 import { createNotification } from "@/lib/supabase"
 import { apiUrl } from "@/lib/api-base"
-import { MENGMEGZI_USER_ID, HANAKO_DM_USERNAME, HANAKO_AVATAR, normalizeEmotion, DM_KEEP_RECENT_MSGS, HALL_CHIME_IN_PROBABILITY, HALL_MENTION_REGEX } from "@/lib/hanako/constants"
+import { MENGMEGZI_USER_ID, HANAKO_DM_USERNAME, HANAKO_AVATAR, normalizeEmotion, DM_KEEP_RECENT_MSGS, HALL_CHIME_IN_PROBABILITY, HALL_CHIME_IN_DEBOUNCE_MS, HALL_MENTION_REGEX } from "@/lib/hanako/constants"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useChatUI } from "@/contexts/chat-ui-context"
 import { usePresence } from "@/contexts/presence-context"
@@ -342,6 +342,8 @@ export default function FloatingChat() {
   const scrollIdleRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // messages 的 ref 镜像：供 jumpToDate 等回调读当前列表，不必把 messages 进依赖反复重建。
   const messagesRef = useRef<DisplayMsg[]>([])
+  // 大厅萌萌子「等你说完再接」去抖定时器：连发消息不断重置，停顿后才掷一次骰。
+  const hallChimeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Load saved position on mount
   useEffect(() => {
@@ -626,6 +628,24 @@ export default function FloatingChat() {
         })
       })()
 
+      // 发起一次萌萌子大厅插话请求（fire-and-forget，失败静默）。
+      const fireHallChime = (force: boolean) => {
+        void (async () => {
+          try {
+            const { data: sd } = await supabase.auth.getSession()
+            const tok = sd?.session?.access_token
+            if (!tok) return
+            await fetch(apiUrl("/api/hall-mengmegzi"), {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${tok}` },
+              body: JSON.stringify({ force }),
+            })
+          } catch {
+            // 静默：触发失败不影响大厅消息显示
+          }
+        })()
+      }
+
       const msgChannel = supabase
         .channel("chat_room_messages")
         .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_messages" }, (payload) => {
@@ -649,27 +669,24 @@ export default function FloatingChat() {
             setNewWhileAway((n) => n + 1)
           }
           // 萌萌子大厅发言触发（不受是否在看历史影响，照常）：每来一条「非萌萌子自己发的」新消息——
-          // 1) 文本里 @萌萌子（HALL_MENTION_REGEX）→ 必回：force=true 直接调，绕过概率与冷却；
-          // 2) 否则按 HALL_CHIME_IN_PROBABILITY 概率掷骰插话。
-          // 萌萌子自己的发言不触发（防递归）；表情包消息无文本不检测 @。fire-and-forget，失败静默。
+          // 1) 文本里 @萌萌子（HALL_MENTION_REGEX）→ 必回：force=true 立即调，绕过去抖/概率/冷却；
+          // 2) 否则「等你说完再接」：不立即掷骰，而是重置一个去抖定时器；用户连发的多条消息会不断
+          //    重置它，直到大厅停顿 HALL_CHIME_IN_DEBOUNCE_MS 后才对整段掷一次骰，命中才插话。
+          //    这样一个意思拆成几句发也只会被接一次。萌萌子自己的发言不触发（防递归）。
           if (m.user_id !== MENGMEGZI_USER_ID && user) {
             const mentioned = m.kind === "text" && HALL_MENTION_REGEX.test(m.content)
-            const chimeIn = mentioned || Math.random() < HALL_CHIME_IN_PROBABILITY
-            if (chimeIn) {
-              void (async () => {
-                try {
-                  const { data: sd } = await supabase.auth.getSession()
-                  const tok = sd?.session?.access_token
-                  if (!tok) return
-                  await fetch(apiUrl("/api/hall-mengmegzi"), {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json", Authorization: `Bearer ${tok}` },
-                    body: JSON.stringify({ force: mentioned }),
-                  })
-                } catch {
-                  // 静默：触发失败不影响大厅消息显示
-                }
-              })()
+            if (mentioned) {
+              if (hallChimeTimerRef.current) {
+                clearTimeout(hallChimeTimerRef.current)
+                hallChimeTimerRef.current = null
+              }
+              fireHallChime(true)
+            } else {
+              if (hallChimeTimerRef.current) clearTimeout(hallChimeTimerRef.current)
+              hallChimeTimerRef.current = setTimeout(() => {
+                hallChimeTimerRef.current = null
+                if (Math.random() < HALL_CHIME_IN_PROBABILITY) fireHallChime(false)
+              }, HALL_CHIME_IN_DEBOUNCE_MS)
             }
           }
         })
@@ -685,6 +702,10 @@ export default function FloatingChat() {
 
       return () => {
         alive = false
+        if (hallChimeTimerRef.current) {
+          clearTimeout(hallChimeTimerRef.current)
+          hallChimeTimerRef.current = null
+        }
         supabase.removeChannel(msgChannel)
       }
     }

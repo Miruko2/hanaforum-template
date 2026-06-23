@@ -8,6 +8,8 @@ import {
   MAX_REPLY_TOKENS,
   HALL_CHIME_IN_COOLDOWN_MS,
   HALL_CHIME_IN_CONTEXT_MSGS,
+  HALL_REPLY_MAX_TEXTS,
+  HALL_REPLY_MAX_STICKERS,
   emotionLabel,
   normalizeEmotion,
 } from "@/lib/hanako/constants"
@@ -212,32 +214,50 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "AI 未生成有效回复" }, { status: 500 })
     }
 
-    // 7. 逐条写入 chat_messages（service role 绕 RLS）。
-    //    复用私信的 splitRepliesIntoRows：混合表情+文字拆条、未知 [s:xxx] 当文本。
-    //    username/avatar_url 写萌萌子的固定值，前端 mapHall 也会按 user_id 强制覆盖。
-    const baseTs = Date.now()
-    let written = 0
+    // 7. 稳重陪聊（放宽档）：一次最多 HALL_REPLY_MAX_TEXTS 句文字 + HALL_REPLY_MAX_STICKERS
+    //    个表情。遍历模型返回的所有回复行，按原顺序穿插收集，各自达上限即丢弃后续——保留
+    //    一点连贯表达又不连珠炮刷屏。splitRepliesIntoRows 复用私信逻辑：混合表情+文字拆条、
+    //    未知 [s:xxx] 当文本。
+    const outRows: ReturnType<typeof splitRepliesIntoRows> = []
+    let textCount = 0
+    let stickerCount = 0
     for (const reply of replies) {
       for (const row of splitRepliesIntoRows(reply)) {
-        const content = row.kind === "sticker" ? row.content : row.content.slice(0, 500)
-        if (!content) continue
-        if (written > 0) await sleep(REPLY_GAP_MS)
-        const createdAt = new Date(baseTs + written).toISOString()
-        const { error: insertError } = await dmSupabaseAdmin.from("chat_messages").insert([
-          {
-            user_id: MENGMEGZI_USER_ID,
-            username: HANAKO_DM_USERNAME,
-            avatar_url: HANAKO_AVATAR,
-            kind: row.kind,
-            content,
-            created_at: createdAt,
-          },
-        ])
-        if (insertError) {
-          console.error("[HallMengmegzi] 写入失败:", insertError)
-        } else {
-          written += 1
+        if (row.kind === "text") {
+          if (textCount < HALL_REPLY_MAX_TEXTS) {
+            outRows.push(row)
+            textCount += 1
+          }
+        } else if (stickerCount < HALL_REPLY_MAX_STICKERS) {
+          outRows.push(row)
+          stickerCount += 1
         }
+      }
+    }
+
+    // 逐条写入 chat_messages（service role 绕 RLS）。username/avatar_url 写萌萌子的固定值，
+    // 前端 mapHall 也会按 user_id 强制覆盖。
+    const baseTs = Date.now()
+    let written = 0
+    for (const row of outRows) {
+      const content = row.kind === "sticker" ? row.content : row.content.slice(0, 500)
+      if (!content) continue
+      if (written > 0) await sleep(REPLY_GAP_MS)
+      const createdAt = new Date(baseTs + written).toISOString()
+      const { error: insertError } = await dmSupabaseAdmin.from("chat_messages").insert([
+        {
+          user_id: MENGMEGZI_USER_ID,
+          username: HANAKO_DM_USERNAME,
+          avatar_url: HANAKO_AVATAR,
+          kind: row.kind,
+          content,
+          created_at: createdAt,
+        },
+      ])
+      if (insertError) {
+        console.error("[HallMengmegzi] 写入失败:", insertError)
+      } else {
+        written += 1
       }
     }
     if (written === 0) {
