@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { motion, AnimatePresence, type MotionProps } from "framer-motion"
 import dynamic from "next/dynamic"
-import { ThumbsUp, MessageSquare, Check, Trash2 } from "lucide-react"
+import { ThumbsUp, MessageSquare, Check, Trash2, Music2 } from "lucide-react"
 import type { Post } from "@/lib/types"
 import { CATEGORY_LABELS } from "@/lib/categories"
 import { postThumbUrl } from "@/lib/post-image-thumb"
@@ -155,8 +155,12 @@ export function TimelineCard({
   const title = post.title || "无标题"
   // 方格封面用 640px 缩略图（lib/post-image-thumb 约定）省 egress；
   // 老帖没回填缩略图时 onError 回退主图
+  const hasImg = !!post.image_url
   const cover = cdnUrl(post.image_url)
   const coverThumb = cdnUrl(postThumbUrl(post.image_url))
+  // 音乐分享帖没有 image_url，用歌曲封面当方格封面（至少显示封面、不再是无图占位）
+  const musicCover = post.music?.cover ? cdnUrl(post.music.cover) : ""
+  const coverSrc = hasImg ? coverThumb || cover : musicCover
   return (
     <div className={className}>
       <motion.button
@@ -166,22 +170,28 @@ export function TimelineCard({
         {...enter}
       >
         <div className="relative aspect-square w-full overflow-hidden rounded-[1.15rem] bg-black/30">
-          {cover ? (
+          {coverSrc ? (
             <img
-              src={coverThumb || cover}
+              src={coverSrc}
               alt={title}
               loading="lazy"
               decoding="async"
               className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
               onError={(e) => {
                 const img = e.currentTarget
-                if (coverThumb && img.src !== cover) img.src = cover
+                if (hasImg && coverThumb && img.src !== cover) img.src = cover
               }}
             />
           ) : (
             <div className="grid h-full w-full place-items-center bg-gradient-to-br from-lime-900/30 via-emerald-900/20 to-black/30 text-5xl text-white/20">
               {post.imageContent || "🌱"}
             </div>
+          )}
+          {/* 音乐分享帖：右上角小音符标，一眼认出是音乐卡 */}
+          {post.music && (
+            <span className="absolute right-2.5 top-2.5 grid h-6 w-6 place-items-center rounded-full bg-black/45 text-white/90 shadow-[0_2px_8px_rgba(0,0,0,0.4)]">
+              <Music2 className="h-3.5 w-3.5" />
+            </span>
           )}
           {/* 日期 + 分类移到图片内左上角（半透明底，无毛玻璃省安卓开销） */}
           <div className="absolute left-2.5 top-2.5 rounded-full bg-black/45 px-2.5 py-1 text-[11px] tracking-wide text-white/90 shadow-[0_2px_8px_rgba(0,0,0,0.4)]">
