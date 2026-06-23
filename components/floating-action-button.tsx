@@ -54,7 +54,11 @@ export default function FloatingActionButton({ onPostCreated }: FloatingActionBu
   // 详情模态（帖子详情/灯箱）打开时隐藏发帖按钮：FAB 是 z-[999] 常驻 fixed 层、盖在
   // 详情(z-40)/灯箱(z-80)之上，详情开/关的重转场 + body 滚动锁切换会把它带得抖动；
   // 且产品设计上看帖时发帖按钮本就该让位。由 PostGrid 在 activePostId 变化时广播。
-  const [detailOpen, setDetailOpen] = useState(false)
+  // 帖子详情与音乐展开卡是两个独立来源，各自维护、任一打开都让位（避免关掉一个时
+  // 误清另一个仍开着的状态）。
+  const [forumDetailOpen, setForumDetailOpen] = useState(false)
+  const [musicDetailOpen, setMusicDetailOpen] = useState(false)
+  const detailOpen = forumDetailOpen || musicDetailOpen
   const openRef = useRef(false)
   const lockedRef = useRef(false)
   const prevOverflowRef = useRef("")
@@ -68,15 +72,21 @@ export default function FloatingActionButton({ onPostCreated }: FloatingActionBu
     setMounted(true)
   }, [])
 
-  // 监听详情模态开/关（PostGrid 广播）→ 详情打开即隐藏发帖按钮。挂载时兜底读一次
-  // sessionStorage.modalOpen，防错过首个事件（如详情已开时本组件才挂载）。
+  // 监听详情模态开/关（帖子详情由 PostGrid 广播，音乐展开卡由 GlobalMiniPlayer 广播）→
+  // 任一详情打开即隐藏发帖按钮。挂载时兜底读一次 sessionStorage.modalOpen，防错过首个
+  // 帖子详情事件（如详情已开时本组件才挂载）。
   useEffect(() => {
-    const onChange = (e: Event) => setDetailOpen(!!(e as CustomEvent).detail)
-    window.addEventListener("forum-detail-open-change", onChange)
+    const onForum = (e: Event) => setForumDetailOpen(!!(e as CustomEvent).detail)
+    const onMusic = (e: Event) => setMusicDetailOpen(!!(e as CustomEvent).detail)
+    window.addEventListener("forum-detail-open-change", onForum)
+    window.addEventListener("music-detail-open-change", onMusic)
     if (typeof sessionStorage !== "undefined" && sessionStorage.getItem("modalOpen") === "true") {
-      setDetailOpen(true)
+      setForumDetailOpen(true)
     }
-    return () => window.removeEventListener("forum-detail-open-change", onChange)
+    return () => {
+      window.removeEventListener("forum-detail-open-change", onForum)
+      window.removeEventListener("music-detail-open-change", onMusic)
+    }
   }, [])
 
   // 空闲时预载表单代码：打开时面板与表单必须同帧挂载，FLIP 才能量到正确的目标尺寸

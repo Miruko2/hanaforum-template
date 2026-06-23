@@ -261,6 +261,15 @@ export function GlobalMiniPlayer() {
     if (!currentTrack) setExpand(null)
   }, [currentTrack])
 
+  // 展开详情页开/关 → 广播给发帖按钮让位（与帖子详情同套机制）。音乐详情是覆盖层，
+  // 而发帖按钮是更高层级的常驻按钮，会盖在详情之上露出来，故详情打开时通知它隐藏。
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    window.dispatchEvent(
+      new CustomEvent("music-detail-open-change", { detail: expand !== null }),
+    )
+  }, [expand])
+
   const cycleMode = useCallback(() => {
     const i = MODE_ORDER.indexOf(playMode)
     setPlayMode(MODE_ORDER[(i + 1) % MODE_ORDER.length])
