@@ -179,7 +179,7 @@ export function TimelineCard({
               className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
               onError={(e) => {
                 const img = e.currentTarget
-                if (hasImg && coverThumb && img.src !== cover) img.src = cover
+                if (hasImg && coverThumb && cover && img.src !== cover) img.src = cover
               }}
             />
           ) : (
