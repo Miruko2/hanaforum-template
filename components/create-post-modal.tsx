@@ -603,8 +603,9 @@ export function CreatePostForm({
               </div>
             )}
 
-            {/* 3D 视差（实验）：仅单张新图、桌面端、且环境支持时显示 */}
-            {images.length === 1 && !!images[0]?.file && !isMobile && isMatteSupported() && (
+            {/* 3D 视差（实验）：仅单张新图、环境支持(Worker+WASM)时显示。移动端也放开
+                （用户要求）：抠像在 Worker 后台跑、非阻断，手机较慢但可用，文案里有提示。 */}
+            {images.length === 1 && !!images[0]?.file && isMatteSupported() && (
               <div className="rounded-lg border border-lime-400/20 bg-lime-400/[0.06] p-3">
                 <label className="flex items-center gap-2 cursor-pointer select-none">
                   <input
@@ -617,8 +618,9 @@ export function CreatePostForm({
                   <span className="text-sm font-medium text-white/90">✨ 3D 视差效果（实验）</span>
                 </label>
                 <p className="mt-1 pl-6 text-xs text-white/45">
-                  发布时在你的浏览器抠出主体，详情页里图片会随鼠标/拖动产生景深视差。
-                  首次会下载抠像模型（约 176MB，之后缓存），发布会多花几秒到几十秒。
+                  发布时在你的浏览器抠出主体，图片点开放大后会随鼠标移动 / 手指拖动产生景深视差。
+                  首次会下载抠像模型（约 176MB，之后缓存）
+                  {isMobile ? "；手机上更慢、更吃内存，建议在 WiFi 下使用" : "，发布会多花几秒到几十秒"}。
                 </p>
                 {matteStatus && <p className="mt-1 pl-6 text-xs text-lime-400">{matteStatus}</p>}
               </div>
