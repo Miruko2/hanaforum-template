@@ -1,7 +1,8 @@
 // 动漫主体抠像（生成「深度遮罩」），供发帖时在浏览器现抠。
 // 模型 isnet-anime（skytnt/anime-seg）经 onnxruntime-web 在 Web Worker 里跑（CPU/wasm）。
-// 引擎与 wasm 同源放在 /ort/（见 public/ort/，由 npmmirror 下载）；模型从 HuggingFace 拉
-// （约 176MB，首次后浏览器缓存）。整套都在 worker 后台线程，主线程不卡。
+// 引擎与 wasm 同源放在 /ort/（见 public/ort/，由 npmmirror 下载）；模型（约 176MB）优先从
+// 自托管 CDN（CF R2，国内可直连、出口免费）下，失败回退 HuggingFace 原站（需代理）。
+// 首次下载后用 Cache Storage 永久缓存，每台设备只下一次。整套都在 worker 后台线程，主线程不卡。
 //
 // 为什么这么绕（不直接 importScripts CDN）：实测该环境下 worker 里跨域 importScripts、
 // 以及 npmmirror 的 MIME 都不被接受 → 改为主线程 fetch 同源 /ort/，再把引擎代码内联进
@@ -10,7 +11,14 @@
 const ORT_JS = "/ort/ort.webgpu.min.js"
 const ORT_WASM = "/ort/ort-wasm-simd-threaded.jsep.wasm"
 const ORT_BASE = "/ort/"
-const MODEL_URL = "https://huggingface.co/skytnt/anime-seg/resolve/main/isnetis.onnx"
+// 抠像模型源：按顺序尝试。第一个是自托管（CF R2 自定义域名，国内可直连、出口免费），
+// 失败再回退 HuggingFace 原站（被墙、需代理）。搭好 R2 前，回退保证旧行为不变。
+const MODEL_SOURCES = [
+  "https://models.hanakos.cc/isnetis.onnx",
+  "https://huggingface.co/skytnt/anime-seg/resolve/main/isnetis.onnx",
+]
+const MODEL_CACHE = "matte-model-v1" // Cache Storage 库名：一次下载、永久本地缓存
+const MODEL_CACHE_KEY = "https://models.hanakos.cc/isnetis.onnx" // 固定缓存键（与实际下载源无关）
 const MASK_MAX_EDGE = 1024 // 遮罩是平滑深度图，封到 1024 足够、PNG 体积小
 
 export type MattePhase = "engine" | "wasm" | "model" | "init" | "infer"
@@ -86,13 +94,47 @@ function call(msg: any, transfer?: Transferable[]): Promise<any> {
   })
 }
 
+// 取抠像模型：先查本地缓存（命中=每台设备只下一次），未命中按 MODEL_SOURCES 依次下载并缓存。
+async function loadModel(onP?: MatteProgress): Promise<Uint8Array> {
+  let cache: Cache | null = null
+  try {
+    cache = await caches.open(MODEL_CACHE)
+  } catch {
+    cache = null // 无 Cache Storage（如非安全上下文）时退化为每次下载
+  }
+  if (cache) {
+    try {
+      const hit = await cache.match(MODEL_CACHE_KEY)
+      if (hit) return new Uint8Array(await hit.arrayBuffer())
+    } catch {}
+  }
+  let lastErr: any = null
+  for (const url of MODEL_SOURCES) {
+    try {
+      const buf = await fetchBuf(url, (l, t) => onP && onP("model", l, t))
+      if (cache) {
+        try {
+          await cache.put(
+            MODEL_CACHE_KEY,
+            new Response(buf, { headers: { "content-type": "application/octet-stream" } }),
+          )
+        } catch {}
+      }
+      return buf
+    } catch (e) {
+      lastErr = e // 这个源挂了（被墙/未搭好/超时）→ 试下一个
+    }
+  }
+  throw lastErr || new Error("model fetch failed")
+}
+
 async function ensureSession(onP?: MatteProgress) {
   if (segReady) return
   const origin = typeof location !== "undefined" ? location.origin : ""
   onP && onP("engine", 0, 0)
   const ortCode = await fetchText(ORT_JS)
   const wasm = await fetchBuf(ORT_WASM, (l, t) => onP && onP("wasm", l, t))
-  const model = await fetchBuf(MODEL_URL, (l, t) => onP && onP("model", l, t))
+  const model = await loadModel(onP)
   ensureWorker(ortCode)
   onP && onP("init", 0, 0)
   await call({ type: "init", model: model.buffer, wasm: wasm.buffer, ortBase: origin + ORT_BASE }, [
