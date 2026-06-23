@@ -26,6 +26,7 @@ import { StickerPicker } from "@/components/stickers/sticker-picker"
 import { makeStickerToken } from "@/lib/stickers"
 import { generateMatte, matteToWebpBlob, isMatteSupported } from "@/lib/anime-matte"
 import { postMaskName, postImageObjectName } from "@/lib/post-image-mask"
+import MatteProgress from "@/components/matte-progress"
 import { useIsMobile } from "@/hooks/use-mobile"
 
 interface CreatePostModalProps {
@@ -91,9 +92,10 @@ export function CreatePostForm({
   const { user } = useSimpleAuth()
   const { toast } = useToast()
   const isMobile = useIsMobile()
-  // 「3D 视差」开关（实验）：仅单张新图、桌面端显示；提交时本机抠主体遮罩
+  // 「3D 视差」开关（实验）：单张新图、环境支持时显示（含移动端）；提交时本机抠主体遮罩
   const [genParallax, setGenParallax] = useState(false)
-  const [matteStatus, setMatteStatus] = useState("")
+  // 抠像进度（绝区零风进度条）：phase=阶段键，pct=0~100 有进度 / null 不定态；整体 null=未在抠像
+  const [matteProg, setMatteProg] = useState<{ phase: string; pct: number | null } | null>(null)
   const [imageRatio, setImageRatio] = useState<number>(editPost?.image_ratio || 0.75)
   // 点击预览图后，原图在屏幕中心聚焦放大（复用帖子详情页的灯箱）；记录看哪一张
   const [lightboxOpen, setLightboxOpen] = useState(false)
@@ -363,14 +365,13 @@ export function CreatePostForm({
       if (genParallax && images.length === 1 && images[0]?.file && cover) {
         try {
           const srcImg = await loadHtmlImage(images[0].preview)
-          const matte = await generateMatte(srcImg, (phase) => {
-            setMatteStatus(
-              phase === "model"
-                ? "首次需下载抠像模型(约 176MB，之后缓存)…"
-                : phase === "infer"
-                  ? "正在抠出主体…"
-                  : "准备抠像引擎…",
-            )
+          const matte = await generateMatte(srcImg, (phase, loaded, total) => {
+            // wasm/model 下载有字节进度 → 实时百分比；其余阶段(引擎/初始化/推理)不定态扫掠
+            const pct =
+              (phase === "wasm" || phase === "model") && total > 0
+                ? Math.min(100, Math.round((loaded / total) * 100))
+                : null
+            setMatteProg({ phase, pct })
           })
           const blob = await matteToWebpBlob(matte)
           const coverName = postImageObjectName(cover)
@@ -388,7 +389,7 @@ export function CreatePostForm({
         } catch (mErr) {
           console.warn("视差遮罩生成失败（不影响发帖）:", mErr)
         } finally {
-          setMatteStatus("")
+          setMatteProg(null)
         }
       }
 
@@ -622,7 +623,7 @@ export function CreatePostForm({
                   首次会下载抠像模型（约 176MB，之后缓存）
                   {isMobile ? "；手机上更慢、更吃内存，建议在 WiFi 下使用" : "，发布会多花几秒到几十秒"}。
                 </p>
-                {matteStatus && <p className="mt-1 pl-6 text-xs text-lime-400">{matteStatus}</p>}
+                {matteProg && <MatteProgress phase={matteProg.phase} pct={matteProg.pct} />}
               </div>
             )}
 

@@ -4699,3 +4699,62 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
     animation: none;
   }
 }
+
+/* ───────────────────────────────────────────────────────────────────────────
+   绝区零风「抠像进度条」(components/matte-progress.tsx 专用)
+   黑底荧光绿 + 斜向危险条纹滚动(transform 走合成线程，不用 background-position 重绘)
+   + 不定态(无字节进度阶段)荧光段扫掠。
+   ─────────────────────────────────────────────────────────────────────────── */
+/* 斜向危险条纹层：比父级各宽 24px，靠 transform 平移一个条纹周期(17px≈12px×√2)无缝循环 */
+.zzz-stripes-layer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -24px;
+  right: -24px;
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgba(0, 0, 0, 0.32) 0 6px,
+    transparent 6px 12px
+  );
+  animation: zzz-stripes 0.6s linear infinite;
+  will-change: transform;
+}
+@keyframes zzz-stripes {
+  to {
+    transform: translateX(17px);
+  }
+}
+/* 不定态：一段荧光绿在轨道里来回扫掠 */
+.zzz-sweep {
+  animation: zzz-sweep 1.15s cubic-bezier(0.5, 0, 0.5, 1) infinite;
+  will-change: transform;
+}
+@keyframes zzz-sweep {
+  0% {
+    transform: translateX(-130%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
+/* 不定态百分比处的省略号呼吸 */
+.zzz-dots {
+  animation: zzz-pulse 0.9s ease-in-out infinite;
+}
+@keyframes zzz-pulse {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .zzz-stripes-layer,
+  .zzz-sweep,
+  .zzz-dots {
+    animation: none;
+  }
+}
