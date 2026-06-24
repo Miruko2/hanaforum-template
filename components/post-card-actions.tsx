@@ -68,20 +68,23 @@ const PostCardActions = memo(function PostCardActions({
   }, [onCollect, isCollecting])
 
   return (
-    <div className="flex items-center gap-2 ml-2">
+    // 手机端卡片只有 ~160px 宽，三颗胶囊按钮 + 间距原本超宽 → 因整行靠右对齐，溢出从「左」边
+    // 被卡片 overflow:hidden 裁掉，点赞按钮整个被吃掉。这里在手机收紧间距/内边距、去掉多余左外边距，
+    // sm 及以上（平板/PC，卡片更宽）恢复原始留白，桌面观感不变。
+    <div className="flex items-center gap-1 sm:gap-2">
       <LikeButton
         liked={liked}
         count={likeCount}
         isLoading={isLiking}
         onClick={handleLikeClick}
         size="sm"
-        className="py-1 px-2"
+        className="py-1 px-1.5 sm:px-2"
       />
 
       {/* 无底无框，仅 hover 时浮现淡背景；图标尺寸/内边距与 LikeButton(sm) 一致，
           保证点赞图标、点赞数、评论图标、评论数同一水平线 */}
       <button
-        className="flex items-center gap-1 px-2 py-1.5 rounded-full text-xs text-white/80 hover:bg-white/15 transition-colors"
+        className="flex items-center gap-1 px-1.5 sm:px-2 py-1.5 rounded-full text-xs text-white/80 hover:bg-white/15 transition-colors"
         onClick={handleCommentClick}
         aria-label="查看评论"
       >
@@ -95,7 +98,7 @@ const PostCardActions = memo(function PostCardActions({
         isLoading={isCollecting}
         onClick={handleCollectClick}
         size="sm"
-        className="py-1 px-2"
+        className="py-1 px-1.5 sm:px-2"
       />
     </div>
   )

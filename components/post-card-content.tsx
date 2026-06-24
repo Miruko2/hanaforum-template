@@ -47,14 +47,14 @@ export default function PostCardContent({
   }, [post.created_at])
 
   return (
-    <div className="p-3 pl-2 pt-2 pb-2">
+    <div className="p-3 pl-2 pr-1.5 pt-2 pb-2 sm:pr-3">
       <h3 className="text-base font-medium text-white mb-1.5 line-clamp-1" title={post.title}>
         {post.title}
       </h3>
 
       {/* 分类标签不在列表卡片显示（只在详情页展示），互动数靠右 */}
       <div className="flex justify-end items-center mb-2">
-        <div className="mr-1">
+        <div className="sm:mr-1">
           <PostCardActions
             liked={liked}
             likeCount={likeCount}
