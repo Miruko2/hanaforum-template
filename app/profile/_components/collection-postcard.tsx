@@ -136,7 +136,7 @@ export default function CollectionPostcard({
     : { opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }
 
   return (
-    <div className="relative z-10 max-h-[92vh] w-[min(640px,94vw)] touch-pan-y overflow-y-auto overflow-x-hidden">
+    <div className="relative z-10 max-h-[92vh] w-[min(720px,96vw)] touch-pan-y overflow-y-auto overflow-x-hidden">
       <motion.div initial={initial} animate={animate} transition={{ duration: 0.34, ease: [0.16, 1, 0.3, 1] }}>
         {/* ───────── 票券 ───────── */}
         <div className="relative flex">

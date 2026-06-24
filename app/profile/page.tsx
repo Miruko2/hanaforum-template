@@ -117,17 +117,27 @@ export default function ProfilePage() {
     }
   }, [user])
 
-  // 拉取「我的收藏」（私密；getMyCollections 顺带把收藏单点 store 也灌满）
+  // 拉取「我的收藏」（私密；getMyCollections 顺带把收藏单点 store 也灌满）。
+  // ⚠️ 依赖稳定的 user.id 而非 user 对象：切走再切回标签页时 Supabase 刷新会话会 emit
+  // onAuthStateChange、auth-context 重建 user 对象引用，若依赖 user 则本 effect 重跑、
+  // 把已显示的集邮册闪回「加载中」。再用 ref 保底——已成功加载过就不再显示加载态
+  // （后台刷新不盖掉已显示内容）。
+  const collectionsLoadedRef = useRef(false)
+  const collectionsUid = user?.id
   useEffect(() => {
-    if (!user) {
+    if (!collectionsUid) {
       setCollectionsLoading(false)
+      collectionsLoadedRef.current = false
       return
     }
     let alive = true
-    setCollectionsLoading(true)
-    getMyCollections(user.id)
+    if (!collectionsLoadedRef.current) setCollectionsLoading(true)
+    getMyCollections(collectionsUid)
       .then((ps) => {
-        if (alive) setCollections(ps)
+        if (alive) {
+          setCollections(ps)
+          collectionsLoadedRef.current = true
+        }
       })
       .finally(() => {
         if (alive) setCollectionsLoading(false)
@@ -135,7 +145,7 @@ export default function ProfilePage() {
     return () => {
       alive = false
     }
-  }, [user])
+  }, [collectionsUid])
 
   // ───────── 头像上传 ─────────
   const handleAvatarClick = () => avatarInputRef.current?.click()

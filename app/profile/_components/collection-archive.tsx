@@ -37,10 +37,10 @@ const SPREAD_GAP = 94
 // 滚到末尾后继续推够这么多，第一张回收、收藏夹合上（移植自 demo 的关闭手势）
 const CLOSE_PUSH = 230
 
-// 集邮册设计宽度（固定 540，整体等比缩放以适应弹窗宽度）。
-// 展示台高度按设备取值（见组件内 stageH）：文件夹在台内垂直居中，
-// 原 530 在手机/平板窄屏上下留白太多、邮票显小，故窄屏收紧。
+// 集邮册设计尺寸（固定 540×530）。在弹窗里按可用「宽 + 高」等比缩放：
+// 去掉原「不超过 1 倍」上限以便放大填满更大的弹窗，受可视高度约束、上限 1.4。
 const STAGE_W = 540
+const STAGE_H = 530
 
 // 预览态前 3 张的扇位（升起 + 旋转）
 const FAN = [
@@ -133,8 +133,6 @@ export default function CollectionArchive({
   const [isCollecting, setIsCollecting] = useState(false)
 
   const N = items.length
-  // 展示台高度：手机/平板窄屏收紧竖向留白（原 530 在窄屏上空太多、邮票显小），桌面也略收
-  const stageH = isMobile ? 360 : 420
   const lastEx = N >= 2 ? SPREAD_START + (N - 2) * SPREAD_GAP : 0
   const MIN_SCROLL = N >= 2 ? -Math.max(0, lastEx - 146) : 0
 
@@ -178,20 +176,29 @@ export default function CollectionArchive({
     if (scrollRef.current < MIN_SCROLL) setScroll(MIN_SCROLL)
   }, [MIN_SCROLL, setScroll])
 
-  // 自适应缩放：测量弹窗内集邮册容器宽，把 540px 设计缩到刚好塞进去（缩放保留所有内部数值）。
-  // 依赖 archiveOpen：弹窗打开、集邮册挂载后才测得到。
+  // 自适应缩放：按弹窗内可用「宽 + 高」等比缩放 540×530 设计（保留所有内部数值）。
+  //   · 去掉原 min(1) 上限 → 大弹窗里可放大>1 倍填满；
+  //   · 受可视高度约束(留 170px 给头部/提示/边距)，避免竖向超出视口；
+  //   · 上限 1.4，下限 0.5。
+  // 依赖 archiveOpen：弹窗打开、集邮册挂载后才测得到；窗口尺寸/旋转变化也重算。
   useIsoLayoutEffect(() => {
     const el = stageRef.current
     if (!el) return
     const update = () => {
-      const s = Math.min(1, el.clientWidth / STAGE_W)
+      const widthScale = el.clientWidth / STAGE_W
+      const heightScale = (window.innerHeight - 170) / STAGE_H
+      const s = Math.max(0.5, Math.min(1.4, widthScale, heightScale))
       scaleRef.current = s
       setScale(s)
     }
     update()
     const ro = new ResizeObserver(update)
     ro.observe(el)
-    return () => ro.disconnect()
+    window.addEventListener("resize", update)
+    return () => {
+      ro.disconnect()
+      window.removeEventListener("resize", update)
+    }
   }, [archiveOpen, loading, postcardOpen])
 
   // 读取/记忆配色（本地，无需后端）
@@ -486,7 +493,7 @@ export default function CollectionArchive({
           archiveOpen 为真才 createPortal（SSR 时为假、不访问 document）。 */}
       {archiveOpen &&
         createPortal(
-          <div className="fixed inset-0 z-40 flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-40 flex items-center justify-center p-2 sm:p-4">
             {/* 半透明遮罩：作为面板的兄弟(非祖先)，其 opacity 入场不会破坏面板毛玻璃的背景采样 */}
             <motion.div
               className="absolute inset-0 bg-black/50"
@@ -507,7 +514,7 @@ export default function CollectionArchive({
               />
             ) : (
             <motion.div
-              className="relative z-10 w-[min(600px,95vw)] rounded-3xl border border-white/15 bg-[#0c0d12]/50 p-4 shadow-[0_30px_80px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.14)] backdrop-blur-2xl backdrop-saturate-150 sm:p-5"
+              className="relative z-10 w-[min(820px,96vw)] rounded-3xl border border-white/15 bg-[#0c0d12]/50 p-3 shadow-[0_30px_80px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.14)] backdrop-blur-2xl backdrop-saturate-150 sm:p-5"
               initial={{ opacity: 0, scale: 0.94, y: 14 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               transition={{ type: "spring", stiffness: 320, damping: 28 }}
@@ -535,10 +542,10 @@ export default function CollectionArchive({
                   </div>
                 ) : (
                   <div ref={stageRef} className="stamp-archive" onPointerDown={onStagePointerDown}>
-                    <div className="sa-scale" style={{ height: stageH * scale }}>
+                    <div className="sa-scale" style={{ height: STAGE_H * scale }}>
                       <div
                         className="sa-stage"
-                        style={{ height: stageH, transform: `translateX(-50%) scale(${scale})` }}
+                        style={{ transform: `translateX(-50%) scale(${scale})` }}
                       >
                         <div className="scene">
                           <div

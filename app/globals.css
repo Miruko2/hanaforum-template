@@ -4770,12 +4770,12 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
    ============================================================ */
 .stamp-archive { position: relative; }
 
-/* 自适应列宽：.sa-scale 占满列宽并按缩放预留高度；.sa-stage 固定宽 540、高由 JS 按设备内联给定
-   （手机/平板收紧竖向留白，见组件 stageH；此处 height 仅作回退）、居中后整体等比缩放塞进去
+/* 自适应列宽：.sa-scale 占满列宽并按缩放预留高度；.sa-stage 固定 540×530、居中后整体等比缩放
+   （可放大>1 倍填满更大弹窗、受可视高度约束、上限 1.4，见组件 update()）塞进去
    （完全展开时＝横向滚动视口，overflow 裁掉溢出的邮票） */
 .stamp-archive .sa-scale { position: relative; width: 100%; }
 .stamp-archive .sa-stage {
-  position: absolute; left: 50%; top: 0; width: 540px; height: 420px; border-radius: 24px;
+  position: absolute; left: 50%; top: 0; width: 540px; height: 530px; border-radius: 24px;
   transform-origin: top center;
   background: radial-gradient(120% 90% at 50% 26%, #fafafb 0%, #ececed 56%, #e2e2e6 100%);
   box-shadow: inset 0 1px 0 rgba(255,255,255,.9), inset 0 0 60px rgba(0,0,0,.05),
