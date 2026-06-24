@@ -44,12 +44,6 @@ import UserHoverCard from "@/components/user-hover-card"
 // SSR 无 DOM，退回 useEffect 以消除 React 告警。
 const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect
 
-// iOS（含 iPadOS 桌面化 UA：MacIntel + 多点触控）。只在客户端 effect 里使用，SSR 安全。
-const IS_IOS =
-  typeof navigator !== "undefined" &&
-  (/iP(hone|od|ad)/.test(navigator.userAgent) ||
-    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1))
-
 interface PostCardProps {
   post: Post
   isActive?: boolean
@@ -161,35 +155,9 @@ const PostCard = memo(function PostCard({
     }
   }, [isActive, sourceSrc])
 
-  // 模态框打开时禁用页面滚动。
-  // ⚠️ position:fixed 锁滚动只给 iOS：iOS Safari 的 overflow:hidden 锁不住触摸滚动，
-  // 必须 fixed + top:-scrollY。但这套 hack 会把整个文档塌缩成视口高（巨型 reflow），
-  // 关闭时「清样式（页面瞬间回到顶部）→ scrollTo 跳回原位」之间一旦被绘制一帧，
-  // 用户就看到整页跳顶再跳回 —— 安卓开/关帖子「概率性闪动」的根因之一。
-  // 安卓/桌面只用 overflow:hidden：移动端 overlay 滚动条不占布局宽度，
-  // 切换 ≈ 零 reflow、零滚动位移，闪动根除。
-  useEffect(() => {
-    if (!isActive) return;
-    const scrollY = window.scrollY || document.documentElement.scrollTop || 0;
-    const body = document.body.style;
-    const fixedLock = isMobile && IS_IOS;
-    body.overflow = 'hidden';
-    if (fixedLock) {
-      body.position = 'fixed';
-      body.width = '100%';
-      body.top = `-${scrollY}px`;
-    }
-    return () => {
-      // 先还原样式再 scrollTo（旧实现顺序相反，靠 cleanup/effect 的执行间隙才碰巧work）
-      body.overflow = '';
-      if (fixedLock) {
-        body.position = '';
-        body.width = '';
-        body.top = '';
-        window.scrollTo({ top: scrollY, behavior: 'auto' });
-      }
-    };
-  }, [isActive, isMobile]);
+  // 打开详情时禁用页面滚动的逻辑已统一搬进 PostDetailModal（按 isOpen 锁，覆盖全部入口：
+  // 信息流卡片 / 个人主页 / 影院 / 通知 / 公告 / 集邮册）。这里不再各自维护，避免与弹窗
+  // 内部的锁重复设置 html/body 样式。
 
   // 处理点赞 - 乐观更新 + 静态导出优化
   const handleLike = useCallback(async (e: React.MouseEvent) => {

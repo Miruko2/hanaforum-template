@@ -30,6 +30,12 @@ import { SITE_URL } from "@/lib/site-url"
 // 必须模块级同步取值（不能用 effect 异步置位的 hook）：驱动 framer-motion
 // initial/样式分支的平台判定若首帧后才翻转，会造成初始状态错位（music 覆盖层踩过）。
 const IS_ANDROID = typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent)
+// iOS（含 iPadOS 桌面化 UA：MacIntel + 多点触控）：overflow:hidden 锁不住触摸滚动，
+// 锁滚动时需额外用 position:fixed 把文档塌缩（见下方滚动锁 effect）。
+const IS_IOS =
+  typeof navigator !== "undefined" &&
+  (/iP(hone|od|ad)/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1))
 
 interface PostDetailModalProps {
   post: Post
@@ -279,6 +285,48 @@ export default function PostDetailModal({
       if (img) img.src = ""
     }
   }, [isOpen, post.image_url])
+
+  // 打开详情时锁住背景滚动 —— 统一在弹窗本体处理，覆盖所有入口（信息流卡片 / 个人主页时间线 /
+  // 影院模式 / 通知 / 公告 / 集邮册），免去每个入口各自维护、各自漏掉（漏掉就是「打开详情后
+  // 上下滚动整页跟着滚」那个 bug）。
+  // ⚠️ 必须同时锁 <html> 和 <body>：本站 body 设了 overflow-x:hidden，垂直滚动条因此落到
+  // documentElement(<html>) 上，只锁 body 拦不住 —— 弹窗内滚轮会带动背后整页一起滚。
+  // iOS Safari 的 overflow:hidden 锁不住触摸滚动，额外用 position:fixed + top:-scrollY 把文档塌缩、
+  // 关闭再 scrollTo 回原位；这套 fixed hack 只给 iOS，安卓/桌面纯 overflow:hidden（避免整页 reflow
+  // 触发开/关帖闪动）。
+  // 保存并还原「打开前的原值」而非硬清空：集邮册弹窗会在自己已锁页面时再开本详情弹窗，嵌套关闭
+  // 内层必须还原成外层的锁定值、而非直接解锁，否则内层一关、外层背景就又能滚了。
+  React.useEffect(() => {
+    if (!isOpen) return
+    const scrollY = window.scrollY || document.documentElement.scrollTop || 0
+    const html = document.documentElement.style
+    const body = document.body.style
+    const fixedLock = isMobile && IS_IOS
+    const prev = {
+      htmlOverflow: html.overflow,
+      bodyOverflow: body.overflow,
+      bodyPosition: body.position,
+      bodyWidth: body.width,
+      bodyTop: body.top,
+    }
+    html.overflow = "hidden"
+    body.overflow = "hidden"
+    if (fixedLock) {
+      body.position = "fixed"
+      body.width = "100%"
+      body.top = `-${scrollY}px`
+    }
+    return () => {
+      html.overflow = prev.htmlOverflow
+      body.overflow = prev.bodyOverflow
+      if (fixedLock) {
+        body.position = prev.bodyPosition
+        body.width = prev.bodyWidth
+        body.top = prev.bodyTop
+        window.scrollTo({ top: scrollY, behavior: "auto" })
+      }
+    }
+  }, [isOpen, isMobile])
 
   if (typeof window === "undefined") return null
 
