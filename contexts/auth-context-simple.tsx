@@ -4,6 +4,7 @@ import React, { createContext, useContext, useState, useEffect } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import type { User } from "@supabase/supabase-js"
 import { useToast } from "@/hooks/use-toast"
+import { resetCollectionsStore } from "@/lib/collections"
 
 interface SimpleAuthContextType {
   user: User | null
@@ -159,8 +160,10 @@ export const SimpleAuthProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           setUser(session.user)
         } else {
           setUser(null)
+          // 登出/会话失效：清空收藏单点 store，避免残留上个账号的收藏标记
+          resetCollectionsStore()
         }
-        
+
         // 确保loading状态在状态变化时被清除
         setLoading(false)
       }

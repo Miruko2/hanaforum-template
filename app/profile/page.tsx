@@ -24,7 +24,9 @@ import ProfileHeader from "./_components/profile-header"
 import { toDisplayName } from "@/lib/display-name"
 import FollowStats from "./_components/follow-stats"
 import MyPosts from "./_components/my-posts"
+import CollectionArchive from "./_components/collection-archive"
 import { getUserPosts } from "@/lib/supabase-optimized"
+import { getMyCollections } from "@/lib/collections"
 import type { Post } from "@/lib/types"
 import { emitHomeBackgroundChanged } from "@/hooks/use-my-background"
 
@@ -46,6 +48,10 @@ export default function ProfilePage() {
   // 「我的帖子」
   const [posts, setPosts] = useState<Post[]>([])
   const [postsLoading, setPostsLoading] = useState(true)
+
+  // 「我的收藏」（私密，仅本人可见）
+  const [collections, setCollections] = useState<Post[]>([])
+  const [collectionsLoading, setCollectionsLoading] = useState(true)
 
   // 上传态
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
@@ -105,6 +111,26 @@ export default function ProfilePage() {
       })
       .finally(() => {
         if (alive) setPostsLoading(false)
+      })
+    return () => {
+      alive = false
+    }
+  }, [user])
+
+  // 拉取「我的收藏」（私密；getMyCollections 顺带把收藏单点 store 也灌满）
+  useEffect(() => {
+    if (!user) {
+      setCollectionsLoading(false)
+      return
+    }
+    let alive = true
+    setCollectionsLoading(true)
+    getMyCollections(user.id)
+      .then((ps) => {
+        if (alive) setCollections(ps)
+      })
+      .finally(() => {
+        if (alive) setCollectionsLoading(false)
       })
     return () => {
       alive = false
@@ -395,12 +421,15 @@ export default function ProfilePage() {
               独立隐藏 input + 独立上传/还原，与 banner 互不影响）。点击上传 → uploadHomeBackground
               压缩(2560/webp/0.85) → 由 AppBackground 渲染为首页/全站底图（切换有高斯模糊渐入）。右侧「还原默认」仅在
               已设时出现。 */}
-          <div className="flex items-center gap-2">
+          {/* 背景按钮整宽（与「我的收藏」按钮、上方资料卡等宽对齐）；
+              「还原默认」改为浮在按钮右端的轻量图标，不再占用按钮宽度，
+              故有无自定义背景时按钮宽度都一致、右边缘始终对齐 */}
+          <div className="relative">
             <button
               type="button"
               onClick={handleHomeBgClick}
               disabled={uploadingHomeBackground || removingHomeBackground}
-              className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-medium text-white/85 backdrop-blur-xl transition-colors hover:bg-white/20 hover:text-white disabled:opacity-50"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-medium text-white/85 backdrop-blur-xl transition-colors hover:bg-white/20 hover:text-white disabled:opacity-50"
             >
               {uploadingHomeBackground ? (
                 <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
@@ -416,7 +445,7 @@ export default function ProfilePage() {
                 disabled={removingHomeBackground || uploadingHomeBackground}
                 aria-label="还原默认首页背景"
                 title="还原默认首页背景"
-                className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-3.5 py-3 text-white/60 backdrop-blur-xl transition-colors hover:bg-white/10 hover:text-white/85 disabled:opacity-50"
+                className="absolute right-2 top-1/2 z-10 inline-flex -translate-y-1/2 items-center justify-center rounded-xl p-2.5 text-white/55 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-50"
               >
                 {removingHomeBackground ? (
                   <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/60 border-t-transparent" />
@@ -426,6 +455,9 @@ export default function ProfilePage() {
               </button>
             )}
           </div>
+
+          {/* 我的收藏（集邮册，私密）——放在「更换首页背景」按钮正下方 */}
+          {user && <CollectionArchive posts={collections} loading={collectionsLoading} />}
 
           {user && <FollowStats userId={user.id} />}
           </div>

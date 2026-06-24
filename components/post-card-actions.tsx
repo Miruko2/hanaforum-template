@@ -4,14 +4,18 @@ import { useCallback, memo } from "react"
 import { MessageSquare } from "lucide-react"
 import { cn } from "@/lib/utils"
 import LikeButton from "./ui/like-button"
+import CollectButton from "./ui/collect-button"
 
 interface PostCardActionsProps {
   liked: boolean
   likeCount: number
   commentsCount: number
   isLiking: boolean
+  collected: boolean
+  isCollecting: boolean
   onLike: (e: React.MouseEvent) => void
   onComment: (e: React.MouseEvent) => void
+  onCollect: (e: React.MouseEvent) => void
 }
 
 // 使用memo包装组件减少不必要的重渲染
@@ -20,8 +24,11 @@ const PostCardActions = memo(function PostCardActions({
   likeCount,
   commentsCount,
   isLiking,
+  collected,
+  isCollecting,
   onLike,
-  onComment
+  onComment,
+  onCollect
 }: PostCardActionsProps) {
   // 优化点击处理函数，使用passive触摸事件
   const handleLikeClick = useCallback((e: React.MouseEvent) => {
@@ -47,6 +54,19 @@ const PostCardActions = memo(function PostCardActions({
     onComment(e)
   }, [onComment])
 
+  const handleCollectClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (isCollecting) return
+    if (window.navigator && 'vibrate' in window.navigator) {
+      try {
+        navigator.vibrate(10)
+      } catch (e) {
+        // 忽略错误
+      }
+    }
+    onCollect(e)
+  }, [onCollect, isCollecting])
+
   return (
     <div className="flex items-center gap-2 ml-2">
       <LikeButton
@@ -68,6 +88,15 @@ const PostCardActions = memo(function PostCardActions({
         <MessageSquare className="h-4 w-4" />
         <span>{commentsCount}</span>
       </button>
+
+      {/* 收藏：私密开关，不带数字；与点赞/评论同一水平线 */}
+      <CollectButton
+        collected={collected}
+        isLoading={isCollecting}
+        onClick={handleCollectClick}
+        size="sm"
+        className="py-1 px-2"
+      />
     </div>
   )
 })

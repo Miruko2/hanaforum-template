@@ -7,6 +7,13 @@ import { MoreVertical, MessageSquare, ThumbsUp, Trash2, X, AlertCircle, Pin } fr
 import { Button } from "@/components/ui/button"
 import { createPortal } from "react-dom"
 import { likePost, unlikePost } from "@/lib/supabase"
+import {
+  isPostCollected,
+  subscribeCollections,
+  loadMyCollections,
+  collectPost,
+  uncollectPost,
+} from "@/lib/collections"
 import { deletePostWithUIUpdate } from "@/lib/post-delete-fix"
 import { useSimpleAuth } from "@/contexts/auth-context-simple"
 import { useToast } from "@/hooks/use-toast"
@@ -72,6 +79,9 @@ const PostCard = memo(function PostCard({
   const [likeCount, setLikeCount] = useState(post.likes_count || 0)
   const [isMounted, setIsMounted] = useState(false)
   const [isLiking, setIsLiking] = useState(false)
+  // 收藏：初值取自模块级单点 store，订阅其变化（虚拟列表卸载/重挂后状态不丢）
+  const [collected, setCollected] = useState(() => isPostCollected(post.id))
+  const [isCollecting, setIsCollecting] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [showDeleteAlert, setShowDeleteAlert] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
@@ -105,6 +115,15 @@ const PostCard = memo(function PostCard({
   useEffect(() => {
     setLiked(userLiked || false)
   }, [userLiked])
+
+  // 收藏：订阅单点 store，并在登录后一次性加载「我的收藏」（store 内部幂等，全列表只查一次）
+  useEffect(() => {
+    const sync = () => setCollected(isPostCollected(post.id))
+    const unsub = subscribeCollections(sync)
+    sync()
+    if (user) loadMyCollections(user.id)
+    return unsub
+  }, [user, post.id])
 
   // 客户端挂载检查
   useEffect(() => {
@@ -246,6 +265,50 @@ const PostCard = memo(function PostCard({
       onClick()
     }
   }, [isActive, onClick])
+
+  // 处理收藏 - 乐观更新由 store 内部完成（emit 后本卡经订阅即时刷新）
+  const handleCollect = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation()
+
+    if (!user) {
+      toast({
+        title: "请先登录",
+        description: "收藏前请先登录账号",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (isCollecting) return
+
+    try {
+      setIsCollecting(true)
+      if (isPostCollected(post.id)) {
+        await uncollectPost(post.id, user.id)
+      } else {
+        await collectPost(post.id, user.id)
+      }
+    } catch (error: any) {
+      if (!mountedRef.current) return
+      let errorMessage = "收藏操作失败，请稍后重试"
+      if (error?.message?.includes("JWT")) {
+        errorMessage = "登录状态已过期，请重新登录"
+      } else if (error?.message?.includes("RLS")) {
+        errorMessage = "数据访问权限不足"
+      } else if (error?.message?.includes("network") || error?.message?.includes("fetch")) {
+        errorMessage = "网络连接失败，请检查网络后重试"
+      }
+      toast({
+        title: "操作失败",
+        description: errorMessage,
+        variant: "destructive",
+      })
+    } finally {
+      if (mountedRef.current) {
+        setIsCollecting(false)
+      }
+    }
+  }, [user, isCollecting, post.id, toast])
 
   // 处理卡片点击
   const handleCardClick = useCallback((e: React.MouseEvent) => {
@@ -468,8 +531,11 @@ const PostCard = memo(function PostCard({
             liked={liked}
             likeCount={likeCount}
             isLiking={isLiking}
+            collected={collected}
+            isCollecting={isCollecting}
             onLike={handleLike}
             onComment={handleComment}
+            onCollect={handleCollect}
           />
         </div>
       </div>
@@ -490,6 +556,9 @@ const PostCard = memo(function PostCard({
         liked={liked}
         likeCount={likeCount}
         isLiking={isLiking}
+        collected={collected}
+        isCollecting={isCollecting}
+        onCollect={handleCollect}
         username={username}
         avatarUrl={avatarUrl}
         isMobile={isMobile}

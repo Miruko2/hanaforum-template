@@ -16,8 +16,11 @@ interface PostCardContentProps {
   liked: boolean
   likeCount: number
   isLiking: boolean
+  collected: boolean
+  isCollecting: boolean
   onLike: (e: React.MouseEvent) => void
   onComment: (e: React.MouseEvent) => void
+  onCollect: (e: React.MouseEvent) => void
 }
 
 export default function PostCardContent({
@@ -28,8 +31,11 @@ export default function PostCardContent({
   liked,
   likeCount,
   isLiking,
+  collected,
+  isCollecting,
   onLike,
-  onComment
+  onComment,
+  onCollect
 }: PostCardContentProps) {
   const router = useRouter()
 
@@ -54,8 +60,11 @@ export default function PostCardContent({
             likeCount={likeCount}
             commentsCount={post.comments_count || 0}
             isLiking={isLiking}
+            collected={collected}
+            isCollecting={isCollecting}
             onLike={onLike}
             onComment={onComment}
+            onCollect={onCollect}
           />
         </div>
       </div>

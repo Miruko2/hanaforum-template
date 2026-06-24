@@ -17,6 +17,7 @@ import TextualHero from "./textual-hero"
 import CommentList, { prefetchComments } from "./comment/comment-list"
 import { StickerText } from "@/components/stickers/sticker-text"
 import LikeButton from "./ui/like-button"
+import CollectButton from "./ui/collect-button"
 import { CATEGORIES } from "@/lib/categories"
 import { postImageList } from "@/lib/post-images"
 import { useMengmegziCommand } from "@/hooks/use-mengmegzi-command"
@@ -39,6 +40,10 @@ interface PostDetailModalProps {
   liked: boolean
   likeCount: number
   isLiking: boolean
+  /** 收藏（可选）：从信息流卡片打开时传入；其它入口（通知/公告）未传则不显示收藏按钮 */
+  collected?: boolean
+  isCollecting?: boolean
+  onCollect?: (e: React.MouseEvent) => void
   username: string
   avatarUrl?: string | null
   isMobile: boolean
@@ -61,6 +66,9 @@ export default function PostDetailModal({
   liked,
   likeCount,
   isLiking,
+  collected = false,
+  isCollecting = false,
+  onCollect,
   username,
   avatarUrl,
   isMobile,
@@ -392,6 +400,15 @@ export default function PostDetailModal({
             <MessageSquare className="h-5 w-5" />
             <span>{post.comments_count || 0}</span>
           </button>
+          {/* 收藏：仅从信息流卡片打开详情时显示（onCollect 存在）；私密开关、不带数字 */}
+          {onCollect && (
+            <CollectButton
+              collected={collected}
+              isLoading={isCollecting}
+              onClick={onCollect}
+              size="md"
+            />
+          )}
         </div>
         {/* 分享：生成带二维码的精美海报，保存后发微信/QQ */}
         <ShareButton

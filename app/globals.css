@@ -4758,3 +4758,197 @@ html[data-pt="prev"]::view-transition-new(root) { animation-name: pt-cube-in-pre
     animation: none;
   }
 }
+
+/* ============================================================
+   收藏夹 · 集邮册（个人主页「我的收藏」）
+   移植自 public/stamp-archive-demo.html。作用域全部收敛在 .stamp-archive 下，
+   通用类名（.folder/.back/.stamp 等）不会污染全局。邮票由真实收藏帖动态生成，
+   数量任意 —— 每张邮票的位置改用内联 CSS 变量驱动：
+     --pvx/--pvy/--pvr  预览态扇位（仅前 3 张加 .fan）
+     --ex               展开态铺排列位（除第一张 .pinned 外）
+     --fx               焦点态位移（落到收藏夹右侧、不被前脸遮挡）
+   ============================================================ */
+.stamp-archive { position: relative; }
+
+/* 自适应列宽：.sa-scale 占满列宽并按缩放预留高度；.sa-stage 固定宽 540、高由 JS 按设备内联给定
+   （手机/平板收紧竖向留白，见组件 stageH；此处 height 仅作回退）、居中后整体等比缩放塞进去
+   （完全展开时＝横向滚动视口，overflow 裁掉溢出的邮票） */
+.stamp-archive .sa-scale { position: relative; width: 100%; }
+.stamp-archive .sa-stage {
+  position: absolute; left: 50%; top: 0; width: 540px; height: 420px; border-radius: 24px;
+  transform-origin: top center;
+  background: radial-gradient(120% 90% at 50% 26%, #fafafb 0%, #ececed 56%, #e2e2e6 100%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.9), inset 0 0 60px rgba(0,0,0,.05),
+              0 30px 60px -30px rgba(0,0,0,.6);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  overflow: hidden; user-select: none;
+  /* pan-y：允许页面竖向滚动穿过展示台（横向浏览靠拖动手势自己接管） */
+  touch-action: pan-y;
+}
+
+.stamp-archive .scene { perspective: 1100px; margin-bottom: 40px; margin-top: 10px; }
+
+.stamp-archive .folder {
+  position: relative; width: 184px; height: 150px; cursor: pointer; perspective: 900px;
+  transition: transform .6s cubic-bezier(.22,1,.36,1);
+}
+@keyframes sa-bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
+.stamp-archive .folder.open { animation: none; transform: translateY(-6px) scale(1.02); }
+.stamp-archive .folder.expanded { transform: translateX(-150px) translateY(-6px) scale(1.02); }
+/* hover：缓慢柔和地漂浮上去（不再瞬间抬升）。慢且 gentle 的缓动只用于 hover 进入态 */
+.stamp-archive .folder:not(.open):hover { transition: transform 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94); transform: translateY(-12px); }
+
+.stamp-archive .sa-shadow {
+  position: absolute; left: 50%; bottom: -30px; width: 180px; height: 34px;
+  transform: translateX(-50%); border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(0,0,0,.30), rgba(0,0,0,0));
+  transition: .6s cubic-bezier(.22,1,.36,1); filter: blur(2px);
+}
+.stamp-archive .folder.open ~ .sa-shadow { width: 240px; bottom: -34px; opacity: .85; }
+.stamp-archive .folder.expanded ~ .sa-shadow { opacity: 0; }
+
+/* 文件夹后背（macOS Finder 风）：实色折叠体 + 左上翘起的小标签页 */
+.stamp-archive .back {
+  position: absolute; left: 0; right: 0; top: 12px; bottom: 0; border-radius: 13px;
+  background: linear-gradient(168deg, var(--face), var(--dark));
+  box-shadow: inset 0 2px 8px rgba(255,255,255,.16), inset 0 -12px 22px rgba(0,0,0,.12);
+  transition: transform .6s cubic-bezier(.22,1,.36,1), opacity .45s ease;
+}
+.stamp-archive .back::before {
+  content: ''; position: absolute; left: 7px; top: -15px; width: 72px; height: 19px;
+  background: linear-gradient(168deg, var(--face), var(--dark));
+  border-radius: 8px 8px 0 0; box-shadow: inset 0 2px 4px rgba(255,255,255,.18);
+}
+
+/* 裁切层：仅完全展开时把滚到收藏夹左缘以左的邮票裁掉＝缩回口袋；预览态不裁（让邮票往上扇出顶部） */
+.stamp-archive .tray-clip { position: absolute; inset: 0; z-index: 3; clip-path: inset(-600px -2000px -200px -2000px); }
+.stamp-archive .folder.expanded .tray-clip { clip-path: inset(-600px -2000px -200px 0); }
+.stamp-archive .tray {
+  position: absolute; inset: 0;
+  /* 关闭手势期间（--closeP 0→1）整排往文件夹方向带 90px 并下沉 10px＝橡皮筋反馈，
+     像整排被吸回口袋；让「推着关」的过程边推边动、不再发空（到底滚不动只剩第一张缩回的死感） */
+  transform: translate(calc(var(--scroll, 0px) - 90px * var(--closeP, 0)), calc(10px * var(--closeP, 0)));
+  transition: transform .42s cubic-bezier(.18,.7,.22,1);
+}
+
+.stamp-archive .stamp-wrap {
+  position: absolute; left: 32px; top: 6px; width: 120px; height: 150px;
+  transition: transform .62s cubic-bezier(.34,1.4,.5,1), opacity .4s ease, filter .28s ease;
+  filter: drop-shadow(0 7px 12px rgba(0,0,0,.24));
+  transform: translate(0, 16px) rotate(2deg);
+  opacity: 0; /* 默认（静止/未进预览）藏在文件夹里 */
+}
+/* 预览态：前 3 张（.fan）升起扇开，位置由内联 --pvx/--pvy/--pvr 给定；其余保持隐藏 */
+.stamp-archive .folder.open:not(.expanded) .stamp-wrap.fan {
+  opacity: 1;
+  transform: translate(var(--pvx, 0px), var(--pvy, -52px)) rotate(var(--pvr, 0deg));
+}
+.stamp-archive .folder.open:not(.expanded) .stamp-wrap.fan.d1 { transition-delay: .05s; }
+.stamp-archive .folder.open:not(.expanded) .stamp-wrap.fan.d2 { transition-delay: .1s; }
+
+/* 完全展开：第一张（.pinned）留在文件夹里露出前脸；其余按 --ex 铺成一排、可滚动 */
+.stamp-archive .folder.expanded .stamp-wrap { opacity: 1; }
+/* 第一张钉在文件夹里；随关闭手势 --closeP 0→1 往左回收（推到底＝合上收藏夹） */
+.stamp-archive .folder.expanded .stamp-wrap.pinned {
+  transform: translate(calc(72px * (1 - var(--closeP, 0))), -8px) rotate(calc(3deg * (1 - var(--closeP, 0))));
+}
+.stamp-archive .folder.expanded .stamp-wrap:not(.pinned) { transform: translate(var(--ex, 0px), -12px) rotate(2deg); }
+
+/* 展开态 hover 选中：内层放大、阴影加深、浮到最上 */
+.stamp-archive .folder.expanded .stamp-wrap:hover { z-index: 50 !important; filter: drop-shadow(0 16px 28px rgba(0,0,0,.38)); }
+.stamp-archive .folder.expanded .stamp-wrap:hover .stamp { transform: scale(1.16) translateY(-8px); }
+.stamp-archive .folder.expanded .stamp { transition: transform .28s cubic-bezier(.34,1.4,.5,1); }
+
+/* 焦点态：点邮票 → 移到收藏夹右侧 + 放大 1.5；其余淡出收回 */
+.stamp-archive .folder.expanded .stamp-wrap.focused {
+  z-index: 60 !important;
+  transform: translate(calc(0px - var(--fx, 0px)), -32px) rotate(0deg) !important;
+  filter: drop-shadow(0 24px 40px rgba(0,0,0,.45));
+}
+.stamp-archive .folder.expanded .stamp-wrap.focused .stamp { transform: scale(1.5); }
+.stamp-archive .folder.expanded .stamp-wrap.dimmed {
+  opacity: 0; pointer-events: none;
+  transform: translate(46px, -12px) scale(.82) rotate(-5deg);
+  transition: transform .5s cubic-bezier(.4,0,.2,1), opacity .42s ease;
+}
+
+/* 邮票本体：白底 + 四边齿孔（CSS mask） */
+.stamp-archive .stamp {
+  width: 100%; height: 100%; padding: 9px; background: #fdfdfb; display: flex; border-radius: 8px;
+  -webkit-mask:
+    radial-gradient(6px at 50% 0,    #0000 99%, #000) 50% 0    / 17px 100% repeat-x,
+    radial-gradient(6px at 50% 100%, #0000 99%, #000) 50% 100% / 17px 100% repeat-x,
+    radial-gradient(6px at 0 50%,    #0000 99%, #000) 0 50%    / 100% 17px repeat-y,
+    radial-gradient(6px at 100% 50%, #0000 99%, #000) 100% 50% / 100% 17px repeat-y;
+  -webkit-mask-composite: source-in;
+          mask:
+    radial-gradient(6px at 50% 0,    #0000 99%, #000) 50% 0    / 17px 100% repeat-x,
+    radial-gradient(6px at 50% 100%, #0000 99%, #000) 50% 100% / 17px 100% repeat-x,
+    radial-gradient(6px at 0 50%,    #0000 99%, #000) 0 50%    / 100% 17px repeat-y,
+    radial-gradient(6px at 100% 50%, #0000 99%, #000) 100% 50% / 100% 17px repeat-y;
+          mask-composite: intersect;
+}
+.stamp-archive .art { flex: 1; display: flex; flex-direction: column; border-radius: 4px; overflow: hidden; }
+.stamp-archive .pic {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  font-size: 36px; position: relative; overflow: hidden;
+}
+.stamp-archive .pic img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.stamp-archive .meta { background: #fff; padding: 4px 6px 5px; }
+.stamp-archive .meta .t {
+  font-size: 10.5px; font-weight: 800; color: #222; letter-spacing: .01em; line-height: 1.2;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.stamp-archive .meta .n {
+  font-size: 8px; font-weight: 700; color: #b6b6b6; letter-spacing: .12em; margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 文件夹前脸＝半透明磨砂玻璃，比后背矮一截，邮票从它上沿探出；固定不动（不翻页） */
+.stamp-archive .front {
+  position: absolute; left: 0; right: 0; top: 50px; bottom: 0; border-radius: 13px; z-index: 10;
+  background: linear-gradient(160deg, rgba(255,255,255,.30), rgba(255,255,255,0) 52%), var(--glass);
+  -webkit-backdrop-filter: blur(12px) saturate(135%);
+          backdrop-filter: blur(12px) saturate(135%);
+  border: 1px solid rgba(255,255,255,.26);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.42), inset 0 -12px 22px rgba(0,0,0,.10),
+              0 8px 18px -8px rgba(0,0,0,.30);
+  padding: 10px 13px; display: flex; flex-direction: column; justify-content: flex-end;
+}
+.stamp-archive .front .jp { font-size: 8px; font-weight: 800; letter-spacing: .4em; color: var(--ink2); margin-bottom: 5px; }
+.stamp-archive .front .label { font-size: 15px; font-weight: 900; color: var(--label); letter-spacing: .04em; }
+.stamp-archive .front .sub { font-size: 7.5px; font-weight: 700; letter-spacing: .3em; color: var(--ink2); margin-top: 3px; }
+.stamp-archive .front .lines { margin-top: 8px; display: flex; flex-direction: column; gap: 5px; }
+.stamp-archive .front .lines i { display: block; height: 1.5px; border-radius: 2px; background: var(--ink1); }
+.stamp-archive .front .lines i:nth-child(2) { width: 78%; }
+.stamp-archive .front .lines i:nth-child(3) { width: 54%; }
+.stamp-archive .front .seal {
+  position: absolute; top: 9px; right: 11px; width: 26px; height: 26px; border-radius: 50%;
+  border: 1.5px dashed var(--ink2); display: flex; align-items: center; justify-content: center;
+  font-size: 6px; font-weight: 900; letter-spacing: .05em; color: var(--ink2); text-align: center; line-height: 1.1;
+}
+
+/* 四种配色 */
+.stamp-archive .folder.c-amber { --face: #f5c33b; --dark: #edb733; --glass: rgba(245,195,59,.44); --label: #5a3d00; --ink1: rgba(70,46,0,.30); --ink2: rgba(70,46,0,.55); }
+.stamp-archive .folder.c-pink  { --face: #ffa6cf; --dark: #f48cbe; --glass: rgba(255,166,207,.46); --label: #8a1f52; --ink1: rgba(138,31,82,.30); --ink2: rgba(138,31,82,.56); }
+.stamp-archive .folder.c-ink   { --face: #4485f0; --dark: #2f6fdb; --glass: rgba(68,133,240,.42); --label: #ffffff; --ink1: rgba(255,255,255,.38); --ink2: rgba(255,255,255,.74); }
+.stamp-archive .folder.c-lime  { --face: #a3e635; --dark: #84cc16; --glass: rgba(163,230,53,.44); --label: #1f3d00; --ink1: rgba(30,56,0,.32); --ink2: rgba(30,56,0,.58); }
+
+/* 调色盘 */
+.stamp-archive .swatches { position: absolute; bottom: 22px; left: 0; right: 0; display: flex; gap: 18px; justify-content: center; z-index: 8; }
+.stamp-archive .sw {
+  width: 28px; height: 28px; border-radius: 50%; cursor: pointer; border: 2px solid rgba(0,0,0,.12);
+  box-shadow: 0 2px 6px rgba(0,0,0,.18); transition: transform .2s ease; position: relative; padding: 0;
+}
+.stamp-archive .sw:hover { transform: scale(1.12); }
+.stamp-archive .sw.sw-amber { background: #f5c33b; }
+.stamp-archive .sw.sw-pink  { background: #ffa6cf; }
+.stamp-archive .sw.sw-ink   { background: #4485f0; }
+.stamp-archive .sw.sw-lime  { background: #a3e635; box-shadow: 0 2px 6px rgba(0,0,0,.18), 0 0 10px rgba(163,230,53,.55); }
+.stamp-archive .sw.on { box-shadow: 0 0 0 3px #fff, 0 0 0 5px rgba(0,0,0,.28), 0 2px 6px rgba(0,0,0,.2); }
+
+/* 空态提示 */
+.stamp-archive .sa-empty {
+  position: absolute; left: 0; right: 0; bottom: 64px; text-align: center;
+  font-size: 12px; color: rgba(40,40,40,.5); letter-spacing: .02em;
+}
