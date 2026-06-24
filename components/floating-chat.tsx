@@ -280,8 +280,9 @@ export default function FloatingChat() {
   // 长按打开菜单后抑制紧随的一次点击（避免长按表情包又弹出灯箱）
   const suppressClickRef = useRef(false)
 
-  // 头像点击 → 弹出精简社交卡片（背景图/头像/签名 + 私聊/进入主页）
-  const [avatarMenu, setAvatarMenu] = useState<{ x: number; y: number; partner: Partner } | null>(null)
+  // 头像点击 → 弹出精简社交卡片（背景图/头像/签名 + 主按钮/进入主页）。
+  // mode 决定主按钮：大厅点别人头像=「私信」(发起私聊)；私聊页点对方头像=「关注」(已在私聊、私信冗余)。
+  const [avatarMenu, setAvatarMenu] = useState<{ partner: Partner; mode: "dm" | "follow" } | null>(null)
 
   // Drag position state - persisted in localStorage
   const [position, setPosition] = useState<PanelPosition | null>(null)
@@ -1717,11 +1718,10 @@ export default function FloatingChat() {
                     key={u.id}
                     className={styles.onlineAvatarBtn}
                     onPointerEnter={() => void fetchUserCardData(u.id)}
-                    onClick={(e) =>
+                    onClick={() =>
                       setAvatarMenu({
-                        x: e.clientX,
-                        y: e.clientY,
                         partner: { id: u.id, username: uname, avatar_url: av },
+                        mode: "dm",
                       })
                     }
                     title={uname}
@@ -1744,25 +1744,21 @@ export default function FloatingChat() {
                   const mine = m.fromId === user.id
                   return (
                     <div key={m.id} data-day={cnDate(m.created_at)} data-mid={m.id} className={`${styles.row} ${mine ? styles.rowMine : styles.rowOther} ${m.isNew ? styles.rowNew : ""}`}>
-                      {!mine &&
-                        (active.kind === "hall" ? (
-                          <button
-                            className={styles.avatarBtn}
-                            onPointerEnter={() => void fetchUserCardData(m.fromId)}
-                            onClick={(e) =>
-                              setAvatarMenu({
-                                x: e.clientX,
-                                y: e.clientY,
-                                partner: { id: m.fromId, username: m.username, avatar_url: m.avatar_url },
-                              })
-                            }
-                            title={m.username}
-                          >
-                            <UserAvatar username={m.username} avatarUrl={m.avatar_url} size={28} />
-                          </button>
-                        ) : (
+                      {!mine && (
+                        <button
+                          className={styles.avatarBtn}
+                          onPointerEnter={() => void fetchUserCardData(m.fromId)}
+                          onClick={() =>
+                            setAvatarMenu({
+                              partner: { id: m.fromId, username: m.username, avatar_url: m.avatar_url },
+                              mode: active.kind === "hall" ? "dm" : "follow",
+                            })
+                          }
+                          title={m.username}
+                        >
                           <UserAvatar username={m.username} avatarUrl={m.avatar_url} size={28} />
-                        ))}
+                        </button>
+                      )}
                       <div
                         className={styles.msgCol}
                         onContextMenu={(e) => {
@@ -2042,6 +2038,7 @@ export default function FloatingChat() {
     {avatarMenu && (
       <ChatUserCard
         target={avatarMenu.partner}
+        mode={avatarMenu.mode}
         onClose={() => setAvatarMenu(null)}
         onDm={() => {
           startDm(avatarMenu.partner)
