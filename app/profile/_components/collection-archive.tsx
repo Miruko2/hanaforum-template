@@ -251,6 +251,8 @@ export default function CollectionArchive({
   }, [setScroll, archiveOpen, closeFolder, loading, postcardOpen])
 
   // 拖动横向浏览（鼠标 / 触屏；touch-action:pan-y 让竖向滚动照常穿过）。dx 按缩放校正回内部坐标。
+  // 触屏关闭手势：拖过末尾→钉住 + 累积关闭意图（驱动第一张回收/橡皮筋反馈 --closeP），
+  // 拖过阈值一半再松手即合上收藏夹（桌面靠滚轮、触屏靠这里，两条路都能触发，与 demo 对齐）。
   useEffect(() => {
     const move = (e: PointerEvent) => {
       const d = dragRef.current
@@ -260,12 +262,34 @@ export default function CollectionArchive({
         d.moved = true
         if (focusRef.current) setFocusId(null) // 拖动浏览时把放大的邮票收回序列
       }
-      setScroll(d.base + dx)
+      const min = minScrollRef.current
+      const target = d.base + dx
+      if (target < min) {
+        // 拖过末尾：钉在末尾 + 累积关闭意图（over=超出量）
+        const over = min - target
+        setScroll(min)
+        overEndRef.current = over
+        setCloseP(Math.max(0, Math.min(1, over / CLOSE_PUSH)))
+      } else {
+        // 正常滚动；若之前有关闭意图先消解（第一张重新探出）
+        if (overEndRef.current > 0) {
+          overEndRef.current = 0
+          setCloseP(0)
+        }
+        setScroll(target)
+      }
     }
     const up = () => {
       const d = dragRef.current
       if (d.drag && d.moved) suppressRef.current = true
       d.drag = false
+      // 拖过末尾够远（超阈值一半）再松手 → 回收邮票 + 合上；不够则弹回复原
+      if (overEndRef.current >= CLOSE_PUSH * 0.5) {
+        closeFolder()
+      } else if (overEndRef.current > 0) {
+        overEndRef.current = 0
+        setCloseP(0)
+      }
     }
     window.addEventListener("pointermove", move)
     window.addEventListener("pointerup", up)
@@ -273,7 +297,7 @@ export default function CollectionArchive({
       window.removeEventListener("pointermove", move)
       window.removeEventListener("pointerup", up)
     }
-  }, [setScroll])
+  }, [setScroll, closeFolder])
 
   // 收藏夹弹窗开关：关闭时把集邮册重置回闭合态（下次打开从头开始）+ 收起明信片/评论弹窗
   const openArchive = useCallback(() => setArchiveOpen(true), [])
