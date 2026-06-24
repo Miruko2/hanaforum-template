@@ -3602,6 +3602,82 @@ body.modal-open {
   75% { transform: translateX(1px); }
 }
 
+/* ── hanako 心情脸（整条颜文字点阵）──
+   主播画面底部状态区三态之一：思考=乱码气泡、回复=文字气泡、其余=这整条颜文字点阵。
+   珠子点亮成当前情绪色（--mood-color 由组件按 EMOTION_COLORS 注入），灭珠用固定极淡
+   白做「未点亮 LED」衬底（不依赖 color-mix，老 WebView 也稳）。各条颜文字宽度不同，
+   灯珠尺寸由组件按容器宽度内联算出，保证整条都显示。原文恒在左侧弹幕流，故气泡说完
+   可以安心淡回这条颜文字。 */
+.live-host-mood-wrap {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  flex-shrink: 0;
+  z-index: 3;
+}
+.live-host-mood {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px 2px;
+  width: 100%;
+}
+/* 测量容器：组件读它的宽度来定灯珠尺寸 */
+.live-host-mood-fit {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+.live-host-mood-grid {
+  display: grid;
+  gap: 1px;
+  /* 整条颜文字轻轻上下浮动（稍微动起来） */
+  animation: liveMoodBob 3.8s ease-in-out infinite;
+}
+.live-host-mood-dot {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.05);
+}
+.live-host-mood-dot.on {
+  background: var(--mood-color, #f5a6d1);
+  box-shadow:
+    0 0 3px var(--mood-color, #f5a6d1),
+    0 0 6px var(--mood-color, #f5a6d1);
+}
+/* 稀疏灯珠忽明忽暗：被挑中的亮珠周期性短暂熄灭再亮，延迟/时长由组件错开（坏灯/呼吸感） */
+.live-host-mood-dot.flick.on {
+  animation-name: liveMoodFlick;
+  animation-iteration-count: infinite;
+  animation-timing-function: ease-in-out;
+}
+@keyframes liveMoodFlick {
+  0%, 38%, 62%, 100% { opacity: 1; }
+  46%, 54% { opacity: 0.1; }
+}
+@keyframes liveMoodBob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2.5px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .live-host-mood-grid,
+  .live-host-mood-dot.flick.on { animation: none; }
+}
+.live-host-mood-label {
+  font-family: "Share Tech Mono", ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.42em;
+  text-indent: 0.42em;
+  color: var(--mood-color, #f5a6d1);
+  opacity: 0.55;
+  text-shadow: 0 0 7px var(--mood-color, #f5a6d1);
+}
+/* 手机收起主播画面时不显示 */
+.live-stage-collapsed .live-host-mood-wrap { display: none; }
+
 /* 移动端：放大主播 + 精简弹幕 */
 @media (max-width: 768px) {
   .live-wall-body {
@@ -3657,6 +3733,15 @@ body.modal-open {
     width: calc(100% - 16px);
     align-self: center;
     padding: 8px 12px;
+  }
+
+  /* 手机端主播区定高、视频是主角，心情脸少占高度（灯珠尺寸已按容器宽度自适应） */
+  .live-host-mood {
+    gap: 6px;
+    padding: 4px 4px 0;
+  }
+  .live-host-mood-label {
+    font-size: 8px;
   }
 
   /* 精简弹幕：隐藏前缀 */
