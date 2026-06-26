@@ -262,6 +262,13 @@ function ShareDeck({
   const cardFrame = (side: DeckSide, body: React.ReactNode, title: string, icon: React.ReactNode) => {
     const isFront = front === side
     const pose = isFront ? FRONT_POSE : BACK_POSE
+    // 安卓 WebView：切换卡片时，缩放(后卡 0.9↔前卡 1)会逐帧重光栅化大圆角+大阴影、透明度(0.82↔1)会
+    // 撕裂合成层显存缓冲（本项目反复踩的安卓老坑），两者叠加 = 「切换卡片闪屏」。
+    // 故安卓前后卡的缩放/透明度恒为 1，纯靠位移(x/y)+倾斜(rotate)+层级遮挡区分前后，
+    // 切换动画只剩 transform 位移/旋转 = 合成器友好、不重栅格、不撕裂。桌面/iOS 维持显小+变暗的精致效果。
+    const usePose = isAndroid
+      ? { x: pose.x, y: pose.y, rotate: pose.rotate, scale: 1, opacity: 1 }
+      : pose
     return (
       <motion.div
         className="flex flex-col overflow-hidden rounded-[26px] border border-white/12"
@@ -276,11 +283,14 @@ function ShareDeck({
           boxShadow: panelShadow,
           cursor: isFront ? "default" : "pointer",
         }}
-        initial={{ ...pose, opacity: 0, scale: pose.scale * 0.96 }}
-        animate={pose}
+        // 安卓：卡片不自己做透明度/缩放入场动画，交给最外层那层统一的 opacity 淡入（避免多个合成层并发创建撕裂）。
+        initial={isAndroid ? usePose : { ...pose, opacity: 0, scale: pose.scale * 0.96 }}
+        animate={usePose}
         // 鼠标悬停：当前指着的卡片放大一档；后卡顺带提亮到不透明（"选中"反馈）。松开回弹。
-        whileHover={{ scale: pose.scale * 1.05, opacity: 1, transition: { duration: 0.2, ease: "easeOut" } }}
-        exit={{ opacity: 0, transition: { duration: 0.16 } }}
+        // 安卓禁用：触屏点击会误触发 whileHover 的缩放动画，又是一次重栅格闪。
+        whileHover={isAndroid ? undefined : { scale: pose.scale * 1.05, opacity: 1, transition: { duration: 0.2, ease: "easeOut" } }}
+        // 安卓退场同样交给最外层 opacity，卡片自己不再做透明度退场（避撕裂）。
+        exit={isAndroid ? undefined : { opacity: 0, transition: { duration: 0.16 } }}
         transition={{ duration: 0.4, ease: [0.2, 0.85, 0.25, 1] }}
         onClick={(e) => {
           e.stopPropagation()
