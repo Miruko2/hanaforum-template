@@ -30,6 +30,7 @@ export interface Post {
   username?: string // 用于显示，从关联查询中获取
   imageContent?: string // 用于UI显示，当没有图片时
   users?: UserRecord; // 添加 users 属性，匹配 join 返回的结构
+  is_nsfw?: boolean // 管理员标记的敏感内容：首页封面隐藏为模糊警告占位（见 components/post-card-image），详情页仍显示原图
 }
 
 // 用户记录接口
@@ -49,6 +50,7 @@ export interface PostInput {
   image_urls?: string[]
   image_ratio?: number
   music?: SharedMusic | null
+  is_nsfw?: boolean
 }
 
 export interface Like {

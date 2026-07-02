@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from "react"
 import { cn } from "@/lib/utils"
 import type { Post } from "@/lib/types"
-import { ImageOff, Copy, Box } from "lucide-react"
+import { ImageOff, Copy, Box, EyeOff } from "lucide-react"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { postThumbUrl } from "@/lib/post-image-thumb"
 import { postImageList } from "@/lib/post-images"
@@ -182,6 +182,54 @@ export default function PostCardImage({
         <div className="flex flex-col items-center text-gray-400">
           <ImageOff className="h-6 w-6 mb-2" />
           <span className="text-sm">图片加载失败</span>
+        </div>
+      </div>
+    )
+  }
+
+  // 防重口模式：被管理员标记为敏感(is_nsfw)的帖子，在「首页列表卡片」上对封面施加
+  // 高斯模糊(filter: blur)并叠警告覆盖层，避免一眼看到不适内容。详情页(inDetailView)
+  // 仍正常显示原图。关键：仍渲染真实 <img>(保持尺寸/瀑布流不变)，只模糊它；
+  // 覆盖层 pointer-events-none 不拦截点击，卡片整体仍可点进详情页看原图。
+  if (post.is_nsfw && !inDetailView) {
+    const { heightClass: imageHeight, aspectStyle } = getImageSizing();
+    const imageObjectFit = 'object-cover';
+    const roundingClass = fillParent
+      ? 'md:rounded-l-[24px] md:rounded-tr-none rounded-t-md'
+      : 'rounded-t-md';
+    return (
+      <div
+        className={cn(
+          "image-glow",
+          "card-view-image",
+          roundingClass,
+          "overflow-hidden relative",
+          "contain-content gpu-accelerated",
+          imageHeight
+        )}
+        style={aspectStyle}
+      >
+        {/* 真实封面图，但高斯模糊到看不清细节。blur 量级取大(2.2rem)确保重口内容不可辨；
+            scale(1.1) 略放大抵消 blur 边缘透出容器外的透明带(否则四边会露出原图锐边)。 */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={displaySrc}
+          alt={post.title || "帖子图片"}
+          className={cn(
+            "absolute inset-0 w-full h-full m-0",
+            imageObjectFit,
+            "animation-optimized"
+          )}
+          style={{ filter: "blur(1.1rem)", transform: "scale(1.1)" }}
+          loading="lazy"
+          decoding="async"
+          draggable={false}
+        />
+        {/* 警告覆盖层：仅居中图标。pointer-events-none 不拦截点击。 */}
+        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black/40 backdrop-blur-[2px]">
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-amber-500/20 ring-1 ring-amber-400/50 backdrop-blur-sm">
+            <EyeOff className="h-6 w-6 text-amber-300" />
+          </div>
         </div>
       </div>
     )

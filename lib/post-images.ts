@@ -69,6 +69,23 @@ export function postsHaveMusicColumn(): Promise<boolean> {
   return musicColumnCheck
 }
 
+// 同理探测 posts 是否已有 is_nsfw 列（管理员敏感标记，scripts/2026-07-02-post-nsfw.sql）。
+// feed 的显式 select 引用不存在的列会让整表查询报错 → 帖子列表空白，故同样探测+缓存+回退。
+let nsfwColumnCheck: Promise<boolean> | null = null
+export function postsHaveNsfwColumn(): Promise<boolean> {
+  if (!nsfwColumnCheck) {
+    nsfwColumnCheck = (async () => {
+      try {
+        const { error } = await supabase.from("posts").select("is_nsfw").limit(1)
+        return !error
+      } catch {
+        return false
+      }
+    })()
+  }
+  return nsfwColumnCheck
+}
+
 /** 取帖子的有序图片列表（封面在首位）。无图返回 []。 */
 export function postImageList(post: PostImageSource): string[] {
   const list = Array.isArray(post.image_urls)

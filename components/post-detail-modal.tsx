@@ -3,7 +3,7 @@
 import React, { useState, useCallback, useLayoutEffect, useRef } from "react"
 import { cdnUrl } from "@/lib/cdn-url"
 import { motion, AnimatePresence, useMotionValue, useTransform, animate } from "framer-motion"
-import { X, MessageSquare, Maximize2, Bot } from "lucide-react"
+import { X, MessageSquare, Maximize2, Bot, EyeOff, Eye } from "lucide-react"
 import { createPortal } from "react-dom"
 import { useRouter } from "next/navigation"
 import type { Post } from "@/lib/types"
@@ -24,6 +24,8 @@ import { useMengmegziCommand } from "@/hooks/use-mengmegzi-command"
 import { useToast } from "@/hooks/use-toast"
 import ShareButton from "@/components/share/share-button"
 import { SITE_URL } from "@/lib/site-url"
+import { supabase } from "@/lib/supabaseClient"
+import { apiUrl } from "@/lib/api-base"
 
 // 安卓（含 Capacitor WebView）：合成器对 backdrop-filter 的逐帧重采样远弱于
 // iOS/桌面，开/关帖动画期间的玻璃面板与渐进模糊带在安卓上降级（实底/纯渐变）。
@@ -95,6 +97,42 @@ export default function PostDetailModal({
   const handleMmComment = async () => {
     const r = await mmSend({ action: "comment_now", post_id: post.id })
     toast({ title: r.ok ? "已派萌萌子" : "失败", description: r.message })
+  }
+
+  // 管理员一键标记/取消「敏感内容」(is_nsfw)：被标记的帖子在首页封面会隐藏为模糊警告占位。
+  // 详情页仍显示原图（用户点进来就是想看），这里只是切换标记并同步回首页列表(updatePost)。
+  const [nsfwToggling, setNsfwToggling] = useState(false)
+  const handleToggleNsfw = async () => {
+    if (nsfwToggling) return
+    setNsfwToggling(true)
+    try {
+      const { data: sessionData } = await supabase.auth.getSession()
+      const token = sessionData?.session?.access_token
+      if (!token) {
+        toast({ title: "未登录", description: "请重新登录后再试", variant: "destructive" })
+        return
+      }
+      const next = !post.is_nsfw
+      const res = await fetch(apiUrl("/api/admin/post-nsfw"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ postId: post.id, isNsfw: next }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toast({ title: "操作失败", description: data?.error || `HTTP ${res.status}`, variant: "destructive" })
+        return
+      }
+      onPostUpdated?.(post.id, { is_nsfw: next })
+      toast({
+        title: next ? "已标记为敏感" : "已取消敏感标记",
+        description: next ? "首页封面已隐藏为模糊警告" : "首页封面已恢复显示",
+      })
+    } catch (err: any) {
+      toast({ title: "操作失败", description: err?.message || "网络错误", variant: "destructive" })
+    } finally {
+      setNsfwToggling(false)
+    }
   }
 
   const [lightboxOpen, setLightboxOpen] = useState(false)
@@ -484,9 +522,9 @@ export default function PostDetailModal({
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4 }}
         >
-          {/* 管理员一键派萌萌子来本帖留言 */}
+          {/* 管理员操作：派萌萌子留言 / 标记(取消)敏感内容 */}
           {isAdmin && (
-            <div className="mb-3 flex justify-end">
+            <div className="mb-3 flex flex-wrap justify-end gap-2">
               <button
                 onClick={handleMmComment}
                 disabled={mmSending}
@@ -495,6 +533,20 @@ export default function PostDetailModal({
               >
                 <Bot className="h-3.5 w-3.5" />
                 {mmSending ? "派发中..." : "萌萌子留言"}
+              </button>
+              <button
+                onClick={handleToggleNsfw}
+                disabled={nsfwToggling}
+                className={
+                  "flex items-center gap-1.5 rounded-full border px-3 py-1 text-[13px] font-medium shadow-[0_0_14px_rgba(245,158,11,0.12),inset_0_1px_0_rgba(255,255,255,0.08)] transition-colors disabled:opacity-50 " +
+                  (post.is_nsfw
+                    ? "border-amber-400/30 bg-amber-500/15 text-amber-300 hover:bg-amber-500/25"
+                    : "border-amber-400/25 bg-amber-500/10 text-amber-200/90 hover:bg-amber-500/20")
+                }
+                title={post.is_nsfw ? "取消敏感标记，首页封面恢复显示" : "标记为敏感，首页封面隐藏为模糊警告"}
+              >
+                {post.is_nsfw ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+                {nsfwToggling ? "处理中..." : post.is_nsfw ? "取消敏感标记" : "标记为敏感"}
               </button>
             </div>
           )}
