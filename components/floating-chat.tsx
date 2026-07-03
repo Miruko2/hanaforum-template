@@ -4,7 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { cdnUrl } from "@/lib/cdn-url"
 import { createPortal } from "react-dom"
 import { motion, AnimatePresence } from "framer-motion"
-import { X, Send, Smile, Users, Hash, CalendarDays, Reply } from "lucide-react"
+import { X, Send, Smile, Users, Hash, CalendarDays, Reply, Loader2, AlertCircle } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
 import { createNotification } from "@/lib/supabase"
 import { apiUrl } from "@/lib/api-base"
@@ -339,6 +339,10 @@ export default function FloatingChat() {
   const [activeDate, setActiveDate] = useState<string | null>(null)
   // 刻度轨是否展开：默认收起，点 header 的按钮才出现（私聊+大厅都有）。
   const [railOpen, setRailOpen] = useState(false)
+  // 日期索引 RPC 的进行中/失败态：失败时不再静默 return，给 loading 占位 + 内联重试，避免「点了没反应」。
+  const [datesLoading, setDatesLoading] = useState(false)
+  const [datesError, setDatesError] = useState(false)
+  const loadingDatesRef = useRef(false) // 防重入：快速连点/重试不重复发 RPC
   // 滚动空闲去抖：算 activeDate 是一次性 O(n) DOM 读，挪到停滚后再做。
   const scrollIdleRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // messages 的 ref 镜像：供 jumpToDate 等回调读当前列表，不必把 messages 进依赖反复重建。
@@ -608,6 +612,10 @@ export default function FloatingChat() {
     setActiveDate(null)
     setRailOpen(false) // 切会话先收起刻度轨，由用户在新会话里再点开（懒拉对应日期）
     setActiveDates(activeDatesRef.current.get(key) ?? [])
+    // 新会话的日期索引尚未拉取：清掉上个会话残留的 loading/error 态，免得占位/重试错位。
+    setDatesLoading(false)
+    setDatesError(false)
+    loadingDatesRef.current = false
 
     if (active.kind === "hall") {
       ;(async () => {
@@ -1000,26 +1008,42 @@ export default function FloatingChat() {
 
   // 拉取某会话的「日期索引」进缓存 + 设为当前刻度轨数据（已缓存则直接用）。
   // key="hall" → 查大厅 hall_active_dates()；否则 key 即 pairKey → dm_active_dates(pk)。
+  // 失败不再静默 return：设 datesError + toast，渲染层给内联重试，避免「点了没反应」。
   const ensureActiveDates = useCallback(
     async (key: string) => {
       const cached = activeDatesRef.current.get(key)
       if (cached) {
         setActiveDates(cached)
+        setDatesError(false)
+        setDatesLoading(false)
         return
       }
-      const { data, error } =
-        key === "hall"
-          ? await supabase.rpc("hall_active_dates")
-          : await supabase.rpc("dm_active_dates", { pk: key })
-      if (error || !data) return
-      const buckets = (data as { d: string; cnt: number }[]).map((r) => ({ d: r.d, cnt: r.cnt }))
-      activeDatesRef.current.set(key, buckets)
-      // 落库前再确认仍是当前会话，避免把 A 的日期塞给 B
-      const a = activeRef.current
-      const curKey = a.kind === "hall" ? "hall" : pairKey(myId ?? "", a.id)
-      if (curKey === key) setActiveDates(buckets)
+      if (loadingDatesRef.current) return // 防重入：快速连点/重试不重复发 RPC
+      loadingDatesRef.current = true
+      setDatesLoading(true)
+      setDatesError(false)
+      try {
+        const { data, error } =
+          key === "hall"
+            ? await supabase.rpc("hall_active_dates")
+            : await supabase.rpc("dm_active_dates", { pk: key })
+        if (error || !data) {
+          setDatesError(true)
+          toast({ title: "时间线加载失败", description: "网络开小差了，点右侧重试", variant: "destructive" })
+          return
+        }
+        const buckets = (data as { d: string; cnt: number }[]).map((r) => ({ d: r.d, cnt: r.cnt }))
+        activeDatesRef.current.set(key, buckets)
+        // 落库前再确认仍是当前会话，避免把 A 的日期塞给 B
+        const a = activeRef.current
+        const curKey = a.kind === "hall" ? "hall" : pairKey(myId ?? "", a.id)
+        if (curKey === key) setActiveDates(buckets)
+      } finally {
+        setDatesLoading(false)
+        loadingDatesRef.current = false
+      }
     },
-    [myId],
+    [myId, toast],
   )
 
   // 新消息的日期并入刻度轨索引：已有当日则 cnt+1，新日期则前插（新→旧序）。
@@ -1841,9 +1865,32 @@ export default function FloatingChat() {
               )}
             </div>
 
-              {/* 日期刻度轨（点 header 按钮才展开；私聊+大厅通用；少于2个日期时组件内部自不渲染） */}
+              {/* 日期刻度轨（点 header 按钮才展开；私聊+大厅通用；少于2个日期时组件内部自不渲染）。
+                  拉取中 → 转圈占位；失败 → 内联重试（railOpen 不回滚，无竞态）；正常 → 刻度轨。 */}
               {railOpen && (
-                <ChatDateRail dates={activeDates} activeDate={activeDate} onJump={jumpToDate} />
+                datesLoading ? (
+                  <div className="pointer-events-none absolute right-2 top-4 z-20 flex flex-col items-center gap-1 text-white/40">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span className="text-[10px]">加载中</span>
+                  </div>
+                ) : datesError ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const a = activeRef.current
+                      const key = a.kind === "hall" ? "hall" : pairKey(myId ?? "", a.id)
+                      void ensureActiveDates(key)
+                    }}
+                    className="absolute right-2 top-4 z-20 flex flex-col items-center gap-1 text-white/50 transition-colors hover:text-white"
+                    aria-label="重试加载时间线"
+                    title="重试"
+                  >
+                    <AlertCircle className="h-4 w-4" />
+                    <span className="text-[10px]">点此重试</span>
+                  </button>
+                ) : activeDates.length >= 2 ? (
+                  <ChatDateRail dates={activeDates} activeDate={activeDate} onJump={jumpToDate} />
+                ) : null
               )}
 
               {/* 窗口模式（看历史时）：右下角「回到最新」；期间来了新消息则提示条数 */}
