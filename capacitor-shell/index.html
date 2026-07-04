@@ -7,7 +7,7 @@
   <style>
     /*
      * 这个文件实际**不会**被用户看到——capacitor.config.ts 的 server.url 会让 WebView
-     * 直接加载线上 https://forum.hanakos.cc。只有在极端情况（server.url 配置错 /
+     * 直接加载线上域名（见 capacitor.config.ts 的 server.url 配置）。只有在极端情况（server.url 配置错 /
      * 网络极差时连首字节都没拿到 / 用户清除 WebView 数据）才会显示这个占位。
      *
      * 设计目标：单文件、零依赖、最小可读性，让用户知道"正在加载"而不是"app 坏了"
@@ -77,9 +77,10 @@
     // 终极兜底：如果由于某种原因 capacitor.config.ts 的 server.url 没生效，
     // 1.5 秒后手动跳到线上域名。注：这条几乎永远不会跑——server.url 在 native 层
     // 就接管了 WebView 的初始 URL，比这条 JS 早得多
+    // ⚠️ 改成你自己的线上域名
     setTimeout(function () {
       if (location.protocol === 'file:' || /^(localhost|127\.0\.0\.1)$/i.test(location.hostname)) {
-        location.replace('https://forum.hanakos.cc')
+        location.replace('https://your-domain.com')
       }
     }, 1500)
   </script>

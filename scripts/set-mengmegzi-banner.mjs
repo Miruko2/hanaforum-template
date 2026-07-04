@@ -27,7 +27,8 @@ if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
 }
 
 // 萌萌子固定 user id（= lib/hanako/constants.ts 的 MENGMEGZI_USER_ID）
-const MENGMEGZI_USER_ID = "78257113-e5da-4bcb-bb7a-9b1824439cd1"
+// ⚠️ 通过环境变量 MENGMEGZI_USER_ID 传入（建号见 scripts/create-mengmegzi-account.mjs）
+const MENGMEGZI_USER_ID = process.env.MENGMEGZI_USER_ID || ""
 const BUCKET = "avatars" // 头像/banner/首页背景同桶，用文件名前缀区分
 
 const CONTENT_TYPES = {

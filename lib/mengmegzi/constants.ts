@@ -2,8 +2,9 @@
 //
 // 萌萌子 Agent 常量。与 lib/hanako/constants.ts 的 MENGMEGZI_USER_ID 保持一致。
 
-/** 萌萌子的固定用户 ID（与 lib/hanako/constants.ts 的 MENGMEGZI_USER_ID 一致） */
-export const MENGMEGZI_USER_ID = "78257113-e5da-4bcb-bb7a-9b1824439cd1"
+/** 萌萌子的固定用户 ID（与 lib/hanako/constants.ts 的 MENGMEGZI_USER_ID 一致）。
+ *  通过环境变量 MENGMEGZI_USER_ID 配置。 */
+export const MENGMEGZI_USER_ID = process.env.MENGMEGZI_USER_ID || ""
 
 /** 所有合法分类（与 lib/categories.ts 的 CATEGORIES value 对齐） */
 export const ALL_CATEGORIES = ["general", "nsfw", "game", "code", "life", "help"] as const

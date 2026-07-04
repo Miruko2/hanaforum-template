@@ -2,7 +2,7 @@
 // 验证「SMTP 凭据 + 发件域名验证」是否真能发出。与生产 lib/mailer.ts 走同一套发送逻辑。
 //
 // 用法(PowerShell)：
-//   $env:EMAIL_SMTP_FALLBACKS='[{"host":"smtp-relay.brevo.com","port":587,"user":"...","pass":"...","from":"Hanakos <noreply@mail.hanakos.cc>","name":"brevo"}]'
+//   $env:EMAIL_SMTP_FALLBACKS='[{"host":"smtp-relay.brevo.com","port":587,"user":"...","pass":"...","from":"YourSite <noreply@your-domain.com>","name":"brevo"}]'
 //   node scripts/test-brevo-smtp.mjs 收件邮箱@example.com
 import nodemailer from "nodemailer"
 
@@ -62,7 +62,7 @@ try {
   } else if (/535|auth|credential|invalid login/i.test(msg)) {
     console.error("   → 认证失败：SMTP 用户名/密码(key)不对，去 Brevo 重新生成 SMTP key。")
   } else if (/from|sender|domain|not.*verif/i.test(msg)) {
-    console.error("   → 发件人/域名问题：确认 mail.hanakos.cc 在 Brevo 已验证、from 用该域名地址。")
+    console.error("   → 发件人/域名问题：确认你的发件域名在 Brevo 已验证、from 用该域名地址。")
   }
   process.exit(1)
 }

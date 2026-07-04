@@ -12,7 +12,7 @@
 --
 -- ── 为什么删它是安全的（已核对）──
 --  1. 前端全局无任何 .list() 调用（不依赖「列出桶内文件」这个能力）。
---  2. 头像、帖子图、APK 全部走 getPublicUrl / cdnUrl / img.hanakos.cc 的
+--  2. 头像、帖子图、APK 全部走 getPublicUrl / cdnUrl / 你的图片 CDN 域名的
 --     public URL 直连（/object/public/...），该路径【绕过 RLS】，不读这条 SELECT 策略。
 --     例：app/download/page.tsx 注释明写「getPublicUrl 纯字符串拼接、不发请求」。
 --  3. 上传走 INSERT 策略、owner 读自己的 post-images 走那条 ALL 策略，均不受影响。

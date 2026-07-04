@@ -11,14 +11,16 @@
 const ORT_JS = "/ort/ort.webgpu.min.js"
 const ORT_WASM = "/ort/ort-wasm-simd-threaded.jsep.wasm"
 const ORT_BASE = "/ort/"
-// 抠像模型源：按顺序尝试。第一个是自托管（CF R2 自定义域名，国内可直连、出口免费），
-// 失败再回退 HuggingFace 原站（被墙、需代理）。搭好 R2 前，回退保证旧行为不变。
+// 抠像模型源：按顺序尝试。第一个是自托管（可通过 NEXT_PUBLIC_MATTE_MODEL_CDN 配置，
+// 如 CF R2 自定义域名，国内可直连、出口免费），失败再回退 HuggingFace 原站（被墙、需代理）。
+// 未配置 NEXT_PUBLIC_MATTE_MODEL_CDN 时直接用 HuggingFace 回退。
+const MATTE_CDN = process.env.NEXT_PUBLIC_MATTE_MODEL_CDN?.replace(/\/+$/, "") || ""
 const MODEL_SOURCES = [
-  "https://models.hanakos.cc/isnetis.onnx",
+  ...(MATTE_CDN ? [`${MATTE_CDN}/isnetis.onnx`] : []),
   "https://huggingface.co/skytnt/anime-seg/resolve/main/isnetis.onnx",
 ]
 const MODEL_CACHE = "matte-model-v1" // Cache Storage 库名：一次下载、永久本地缓存
-const MODEL_CACHE_KEY = "https://models.hanakos.cc/isnetis.onnx" // 固定缓存键（与实际下载源无关）
+const MODEL_CACHE_KEY = (MATTE_CDN ? `${MATTE_CDN}/isnetis.onnx` : "https://huggingface.co/skytnt/anime-seg/resolve/main/isnetis.onnx") // 固定缓存键（与实际下载源无关）
 const MASK_MAX_EDGE = 1024 // 遮罩是平滑深度图，封到 1024 足够、PNG 体积小
 
 export type MattePhase = "engine" | "wasm" | "model" | "init" | "infer"

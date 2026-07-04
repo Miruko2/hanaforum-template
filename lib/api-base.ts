@@ -5,7 +5,7 @@
  * 1. Web（Vercel + 自己的域名）—— fetch 走相对路径就行，浏览器自然落到同源
  * 2. Capacitor Android APK —— WebView 里相对路径会解析成 `https://localhost/...`,
  *    打不到线上服务。构建 APK 时通过 NEXT_PUBLIC_API_BASE_URL 注入线上 origin
- *    （形如 "https://forum.hanakos.cc"），让 fetch 走绝对路径
+ *    （形如 "https://your-domain.com"），让 fetch 走绝对路径
  *
  * 用法：
  *   import { apiUrl } from "@/lib/api-base"

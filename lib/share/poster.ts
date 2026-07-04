@@ -15,7 +15,7 @@
 
 import { cdnUrl } from "@/lib/cdn-url"
 import { apiUrl } from "@/lib/api-base"
-import { SITE_NAME } from "@/lib/site-url"
+import { SITE_URL, SITE_NAME } from "@/lib/site-url"
 import { neteaseDirectCover } from "@/app/music/_lib/neteasePic"
 
 export interface SharePostInput {
@@ -404,7 +404,7 @@ async function drawQRBlock(
   ctx.fillText(sub, tx, y + 90)
   ctx.fillStyle = "rgba(163,230,53,0.95)"
   ctx.font = font(600, 22)
-  ctx.fillText("forum.hanakos.cc", tx, y + 126)
+  ctx.fillText(SITE_URL.replace(/^https?:\/\//, ""), tx, y + 126)
 }
 
 // ============================ 帖子海报 ============================

@@ -13,7 +13,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-HOST="db.uvkupdbfbnodeybulczd.supabase.co"
+# ⚠️ 改成你自己的 Supabase 项目 ref（在 Supabase Dashboard 首页可见）
+HOST="db.YOUR_PROJECT_REF.supabase.co"
 PASS_FILE="backups/.dbpass"
 
 if [ ! -f "$PASS_FILE" ]; then

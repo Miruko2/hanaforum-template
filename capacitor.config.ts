@@ -9,7 +9,8 @@ const config: CapacitorConfig = {
   server: {
     // 让 APK 永远跟 Web 同步：改前端不用重打 APK，用户刷新就拿到最新版
     // 代价：断网 → 显示 capacitor-shell 的"正在连接"占位
-    url: 'https://forum.hanakos.cc',
+    // ⚠️ 改成你自己的线上域名后再构建 APK
+    url: 'https://your-domain.com',
     androidScheme: 'https',
     cleartext: true, // 允许HTTP明文通信，便于调试
     allowNavigation: ['*'],

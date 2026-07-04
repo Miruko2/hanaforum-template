@@ -2,7 +2,8 @@
 // 发出完全一致的邮件。两类码（邮箱验证 / 重置密码）共用同一套绝区零深色版式，仅文案不同。
 
 // 邮件正文内图片/链接需用绝对地址（邮件客户端无法解析相对路径）
-const SITE_URL = "https://forum.hanakos.cc"
+// 通过环境变量 SITE_URL 配置（见 lib/site-url.ts）
+import { SITE_URL } from "@/lib/site-url"
 
 // 单类码的文案差异点（版式完全一致，只换这几处）。
 type CodeCopy = {
@@ -45,13 +46,14 @@ const RESET: CodeCopy = {
 
 // 纯文本兜底（多部分邮件的 text/plain 版，利于送达率与无图客户端）
 function renderText(c: CodeCopy, code: string): string {
+  const host = SITE_URL.replace(/^https?:\/\//, "")
   return [
     `萤火虫之国 · ${c.textLead}：${code}`,
     "",
     "验证码 10 分钟内有效，请勿向任何人泄露。",
     c.textHint,
     "",
-    "forum.hanakos.cc · 此邮件由系统自动发送，请勿回复",
+    `${host} · 此邮件由系统自动发送，请勿回复`,
   ].join("\n")
 }
 
@@ -98,7 +100,7 @@ function renderHtml(c: CodeCopy, code: string): string {
   </td></tr>
   <tr><td style="padding:14px 28px 24px;border-top:1px solid #232730">
     <div style="font-family:'SFMono-Regular',Consolas,'Courier New',monospace;color:#5b636d;font-size:11px;letter-spacing:1px;line-height:1.6">
-      <span style="color:#2ee36b">forum.hanakos.cc</span> &nbsp;·&nbsp; 此邮件由系统自动发送，请勿回复
+      <span style="color:#2ee36b">${SITE_URL.replace(/^https?:\/\//, "")}</span> &nbsp;·&nbsp; 此邮件由系统自动发送，请勿回复
     </div>
   </td></tr>
 </table>

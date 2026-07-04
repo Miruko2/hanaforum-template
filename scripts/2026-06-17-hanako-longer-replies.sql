@@ -37,11 +37,11 @@ ALTER TABLE public.live_comments
     char_length(content) > 0
     AND char_length(content) <= (
       CASE
-        WHEN user_id = 'a3015a8e-9f17-4716-bac2-b8cfeb636a23'::uuid THEN 500
+        WHEN user_id = 'HANAKO_USER_ID'::uuid THEN 500
         ELSE 60
       END
     )
   );
 
 COMMENT ON CONSTRAINT live_comments_content_len ON public.live_comments
-  IS 'hanako(固定UUID)最多500字，其余用户最多60字';
+  IS 'hanako(固定UUID，⚠️改成你的 HANAKO_USER_ID)最多500字，其余用户最多60字';

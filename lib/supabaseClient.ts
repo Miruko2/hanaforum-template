@@ -141,8 +141,13 @@ export async function checkIsAdmin(userId: string): Promise<boolean> {
   if (!userId) return false
 
   try {
-    // 硬编码管理员ID，确保管理员功能正常工作
-    if (userId === "4345c6d0-05eb-4bc3-ba50-1cfa1dee2c41") {
+    // 管理员 ID 列表：通过环境变量 ADMIN_USER_IDS 配置（逗号分隔，支持多个管理员）。
+    // 兜底空数组——未配置时无人匹配，全部走 admin_users 表的数据库校验。
+    const adminIds = (process.env.NEXT_PUBLIC_ADMIN_USER_IDS || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+    if (adminIds.includes(userId)) {
       return true
     }
 

@@ -24,8 +24,9 @@ CREATE POLICY "Allow insert for authenticated" ON hanako_allowed_users
 CREATE POLICY "Allow delete for authenticated" ON hanako_allowed_users
   FOR DELETE USING (auth.role() = 'authenticated');
 
--- 插入现有白名单用户
-INSERT INTO hanako_allowed_users (user_id) VALUES
-  ('4345c6d0-05eb-4bc3-ba50-1cfa1dee2c41'), -- miruko2
-  ('e4f655b1-d2f7-43fa-ad17-8627296c148c')  -- 闲猫
-ON CONFLICT (user_id) DO NOTHING;
+-- 插入白名单用户（⚠️ 改成你自己的用户 UUID，可在 Supabase Dashboard → Auth → Users 查看）
+-- 示例（占位，不可直接使用）：
+-- INSERT INTO hanako_allowed_users (user_id) VALUES
+--   ('YOUR-ADMIN-USER-UUID'),
+--   ('ANOTHER-USER-UUID')
+-- ON CONFLICT (user_id) DO NOTHING;

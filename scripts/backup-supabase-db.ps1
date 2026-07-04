@@ -25,7 +25,7 @@
   连接串从 Dashboard 获取：
     Project Settings → Database → Connection string → 选 "Session pooler"（端口 5432）
   形如：
-    postgresql://postgres.uvkupdbfbnodeybulczd:[密码]@aws-0-<region>.pooler.supabase.com:5432/postgres
+    postgresql://postgres.YOUR_PROJECT_REF:[密码]@aws-0-<region>.pooler.supabase.com:5432/postgres
   把 [密码] 换成真实数据库密码。若密码含 @ : / # ? 等特殊字符，需 percent-encode，
   或先在 Dashboard 把数据库密码临时重置为纯字母数字，避免连接串被解析错。
 

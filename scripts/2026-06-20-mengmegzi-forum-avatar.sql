@@ -27,12 +27,13 @@
 -- ⚠️ 若将来在管理端给萌萌子单独上传了别的头像，请勿重跑本脚本（会覆盖回 /hanako/avatar.png）。
 -- ============================================================
 
+-- ⚠️ 把下面的 MENGMEGZI_USER_ID 改成你的萌萌子账号 UUID（建号见 scripts/create-mengmegzi-account.mjs）
 UPDATE public.profiles
 SET avatar_url = '/hanako/avatar.png'
-WHERE id = '78257113-e5da-4bcb-bb7a-9b1824439cd1';
+WHERE id = 'MENGMEGZI_USER_ID';
 
 -- 验证：应返回 1 行，avatar_url = /hanako/avatar.png。
 -- 若返回 0 行 → 萌萌子的 profiles 行不存在（异常，需先排查账号/触发器，再处理）。
 SELECT id, username, avatar_url
 FROM public.profiles
-WHERE id = '78257113-e5da-4bcb-bb7a-9b1824439cd1';
+WHERE id = 'MENGMEGZI_USER_ID';

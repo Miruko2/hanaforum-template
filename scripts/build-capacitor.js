@@ -4,7 +4,7 @@
  * Capacitor 远程加载模式同步脚本：
  *
  * APK 通过 capacitor.config.ts 里配置的 server.url 直接加载线上
- * https://forum.hanakos.cc —— 所以：
+ * 域名（见 capacitor.config.ts 的 server.url）—— 所以：
  * - 不需要 next build（不跑 Next.js 静态导出）
  * - 不需要挪走 app/api（API 路由完全不参与 APK 构建）
  * - 不需要管 React 多实例 / 类型检查 / Suspense 等"静态导出生态"问题

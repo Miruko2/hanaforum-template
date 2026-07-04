@@ -72,16 +72,18 @@ export function emotionLabel(id: string): string {
   return EMOTION_LABELS[normalizeEmotion(id)] || "表情"
 }
 
-/** Hanako 的固定用户 ID（对应 auth.users 和 public.users 中的记录） */
-export const HANAKO_USER_ID = "a3015a8e-9f17-4716-bac2-b8cfeb636a23"
+/** Hanako 的固定用户 ID（对应 auth.users 和 public.users 中的记录）。
+ *  通过环境变量 HANAKO_USER_ID 配置（见 scripts/create-mengmegzi-account.mjs 的建号流程）。 */
+export const HANAKO_USER_ID = process.env.HANAKO_USER_ID || ""
 
 /** Hanako 的用户名（弹幕墙场景用，保持 hanako 不变） */
 export const HANAKO_USERNAME = "hanako"
 
 /** 私信 AI「萌萌子」的固定用户 ID（独立第二个 auth 账号，与 hanako 彻底分离）。
  *  账号由 scripts/create-mengmegzi-account.mjs 创建（email: mengmegzi@ai.local）。
- *  萌萌子只服务私信；弹幕墙仍由 hanako 独占。两者各自独立会话历史/人格记忆。 */
-export const MENGMEGZI_USER_ID = "78257113-e5da-4bcb-bb7a-9b1824439cd1"
+ *  萌萌子只服务私信；弹幕墙仍由 hanako 独占。两者各自独立会话历史/人格记忆。
+ *  通过环境变量 MENGMEGZI_USER_ID 配置。 */
+export const MENGMEGZI_USER_ID = process.env.MENGMEGZI_USER_ID || ""
 
 /** 私信 AI（萌萌子）的展示名。私信/弹窗/主页等「私聊面向」一律用此名。 */
 export const HANAKO_DM_USERNAME = "萌萌子"

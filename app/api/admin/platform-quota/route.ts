@@ -169,7 +169,8 @@ async function supabaseCard(): Promise<QuotaCard> {
     name: "Supabase 库/存储",
     unit: "MB",
     period: "total",
-    dashboardUrl: "https://supabase.com/dashboard/project/uvkupdbfbnodeybulczd/settings/billing",
+    // ⚠️ 改成你自己的 Supabase project ref（在 Supabase Dashboard 首页可看到）
+    dashboardUrl: `https://supabase.com/dashboard/project/${process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/^https:\/\/([^.]+)\..*$/, "$1") || "YOUR_PROJECT_REF"}/settings/billing`,
   }
   try {
     const { data, error } = await supabaseAdmin.rpc("admin_platform_storage_stats")

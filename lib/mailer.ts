@@ -4,7 +4,7 @@
 // 加邮箱不用改代码，只在 Vercel 配环境变量：
 //   EMAIL_SMTP_FALLBACKS = JSON 数组，元素 { host, port, user, pass, from, secure?, name? }
 //   例：[{"host":"smtp-relay.brevo.com","port":587,"user":"xxx","pass":"yyy",
-//        "from":"萤火虫之国 <noreply@mail.hanakos.cc>","name":"brevo"}]
+//        "from":"萤火虫之国 <noreply@your-domain.com>","name":"brevo"}]
 //
 // 失败分级（保留「乱填邮箱→发失败→自动过」的防绕过）：
 //   sent    = 成功

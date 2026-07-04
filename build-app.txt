@@ -1,12 +1,12 @@
 # Capacitor Android 构建命令
 # 项目: 萤火虫之国
-# Vercel 域名: https://forum.hanakos.cc
+# Vercel 域名: https://your-domain.com
 
 # 1. 临时移开 API 目录（静态导出不支持 API 路由）
 mv app/api app/_api_backup
 
 # 2. 构建静态文件（带 Vercel API 地址）
-NEXT_PUBLIC_API_BASE_URL=https://forum.hanakos.cc CAPACITOR_BUILD=true npm run build
+NEXT_PUBLIC_API_BASE_URL=https://your-domain.com CAPACITOR_BUILD=true npm run build
 
 # 3. 恢复 API 目录
 mv app/_api_backup app/api

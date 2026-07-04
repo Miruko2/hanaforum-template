@@ -32,9 +32,11 @@ const SimpleAuthContext = createContext<SimpleAuthContextType>({
 export const useSimpleAuth = () => useContext(SimpleAuthContext)
 
 // 管理员ID列表 - 与数据库 admin_users 表保持一致
-const ADMIN_IDS = [
-  "4345c6d0-05eb-4bc3-ba50-1cfa1dee2c41"
-]
+// 通过环境变量 NEXT_PUBLIC_ADMIN_USER_IDS 配置（逗号分隔，支持多个管理员）
+const ADMIN_IDS = (process.env.NEXT_PUBLIC_ADMIN_USER_IDS || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean)
 
 export const SimpleAuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null)

@@ -2,7 +2,7 @@
 
 // 全站在线状态（基于 Cloudflare Durable Object + WebSocket Hibernation）。
 //
-// 架构：客户端登录后连接 wss://presence.hanakos.cc/ws?token=<supabase-access-token>，
+// 架构：客户端登录后连接 wss://<你的 presence worker 域名>/ws?token=<supabase-access-token>，
 // CF Worker 校验 JWT 拿到 userId，路由到全局唯一 PresenceRoom DO。
 // DO 用 Hibernation API 接管 WS（空闲不计 CPU 时间），内存维护 userId →
 // Set<WebSocket>。客户端不发心跳——连接断开 = 离线。

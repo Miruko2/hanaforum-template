@@ -18,7 +18,8 @@
 // 免费额度：Workers 10 万请求/天；边缘缓存命中同样消耗请求数但不耗流量配额。
 // ============================================================
 
-const ORIGIN = "https://uvkupdbfbnodeybulczd.supabase.co";
+// ⚠️ 改成你自己的 Supabase 项目 URL
+const ORIGIN = "https://YOUR_PROJECT_REF.supabase.co";
 
 // 只代理公开桶的只读对象，防止被当成任意目标的开放代理
 const ALLOWED_PREFIX = "/storage/v1/object/public/";

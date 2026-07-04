@@ -204,7 +204,7 @@ function buildEmailText(d: Fields): string {
     `联系方式：${d.contact}`,
     "",
     `来源 IP：${d.ip}`,
-    "—— 到 forum.hanakos.cc/links 或代码里的 FRIEND_SITES 数组决定是否收录。",
+    "—— 到你的站点 /links 页或代码里的 FRIEND_SITES 数组决定是否收录。",
   ]
     .filter(Boolean)
     .join("\n")
@@ -234,7 +234,7 @@ function buildEmailHtml(d: Fields): string {
       ${row("来源 IP", d.ip)}
     </table>
     <div style="padding:12px 20px;color:#6b7280;font-size:12px;border-top:1px solid rgba(255,255,255,.06)">
-      到 forum.hanakos.cc/links 或代码里的 FRIEND_SITES 数组决定是否收录。
+      到你的站点 /links 页或代码里的 FRIEND_SITES 数组决定是否收录。
     </div>
   </div>
 </div>`
